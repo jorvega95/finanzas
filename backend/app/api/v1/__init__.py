@@ -5,6 +5,7 @@ from app.api.v1 import (
     cards,
     catalogs,
     dashboard,
+    imports,
     installments,
     investments,
     recurring,
@@ -22,3 +23,4 @@ api_router.include_router(installments.router)
 api_router.include_router(investments.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(budgets.router)
+api_router.include_router(imports.router)

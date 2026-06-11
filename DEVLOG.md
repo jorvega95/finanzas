@@ -426,3 +426,97 @@ Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
   sobre `space_members`.
 
 ---
+
+## Iteración 6 — Fase 6: Importación CSV, export y pulido (2026-06-11)
+
+**Objetivo (PLAN §6 Fase 6):** importar estados de cuenta sin capturar a
+mano, exportar todo, PWA básica.
+
+### Backend
+
+- **`ImportBatch`** (migración `0007`, con RLS) + `services/imports.py`:
+  - **IMP-01**: `POST /imports/preview` parsea y valida SIN insertar
+    (mapeo de columnas por nombre, formato de fecha, separador decimal,
+    convención de signo); `POST /imports/confirm` inserta solo las filas
+    seleccionadas en un batch.
+  - **IMP-02**: dedupe contra transacciones existentes por
+    (fecha, monto, moneda, descripción normalizada trim/lower/colapsar);
+    colisiones marcadas "posible duplicado" y des-seleccionadas — el
+    usuario decide.
+  - **IMP-03**: filas sin categoría van a la seed oculta "Sin categoría"
+    (`is_system`, invisible en formularios) y a la bandeja de revisión.
+  - **IMP-04**: `POST /imports/{id}/rollback` revierte el batch completo
+    excluyendo las editadas a mano (`updated_by != NULL`) y lo informa;
+    estados confirmed → rolled_back / partially_rolled_back.
+  - **IMP-05**: cargos importados a métodos TDC se asignan a su ciclo
+    automáticamente (reusa TDC-05); convertir a MSI ya existía (MSI-01).
+  - **IMP-06**: tope 5,000 filas, errores por fila legibles, separador
+    decimal coma/punto, formatos de fecha configurables.
+  - **IMP-07**: `GET /exports/transactions.csv` (mismo esquema conceptual
+    que el import) y `GET /exports/full.json` (mitigación ESP-06).
+- El borrado de transacciones del rollback reusa `delete_transaction`
+  (tombstones de recurrentes y recálculo de statements incluidos).
+
+### Frontend
+
+- **Ajustes → Importar**: wizard completo — elegir archivo, mapear columnas
+  (selects desde el header real), formato de fecha y separador decimal,
+  método destino, vista previa con checkboxes (duplicados en ámbar
+  des-seleccionados, errores deshabilitados), confirmación con contador,
+  historial de batches con "Revertir", y botones de export CSV/JSON con
+  descarga autenticada.
+- **PWA básica**: `manifest.webmanifest` + icono SVG + theme-color
+  (instalable; el service worker para offline/push queda como siguiente
+  paso del backlog).
+
+### Tests (86/86 ✅ — Fases 0..6 completas)
+
+| Regla | Test |
+|---|---|
+| IMP-01 | preview no persiste; confirm inserta; tipos por signo; %d/%m/%Y |
+| IMP-02 | re-import marca 3 duplicados des-seleccionados; forzar 1 importa 1 |
+| IMP-03 | "Sin categoría" oculta del catálogo; todo a bandeja de revisión |
+| IMP-04 | rollback: 2 borradas, 1 editada conservada e informada; doble rollback 409 |
+| IMP-05 | cargos a método TDC quedan en su ciclo (deuda 240.40) |
+| IMP-06 | columna inexistente 422; coma decimal "1.234,56"; >5,000 filas 422 |
+| IMP-07 | CSV con header y filas; JSON completo con todas las secciones |
+
+Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
+
+### Backlog que queda (post-v1)
+
+- Categorización automática por keywords (IMP-03 sugerencias).
+- INV-03b backfill de históricos crypto.
+- Service worker (offline + push para REM-04).
+- Login por teléfono (requiere Twilio) y envío real de emails (Resend).
+- Saldos de cuentas de efectivo/débito como activos (candidato R16, PAT-02).
+
+---
+
+## 🏁 Estado final del bucle (2026-06-11)
+
+Las 7 fases del PLAN §6 están implementadas y commiteadas una a una:
+
+| Fase | Commit | Tests acumulados |
+|---|---|---|
+| 0 Fundación | `feat(fase-0)` | 8 |
+| 1 Transacciones/catálogos/recurrentes/FX | `feat(fase-1)` | 30 |
+| 2 TDC/MSI/recordatorios | `feat(fase-2)` | 58 |
+| 3 Dashboard/presupuestos | `feat(fase-3)` | 67 |
+| 4 Inversiones/patrimonio | `feat(fase-4)` | 73 |
+| 5 Espacios compartidos | `feat(fase-5)` | 79 |
+| 6 Import/export/PWA | `feat(fase-6)` | **86** |
+
+Los **8 casos de prueba obligatorios** de REGLAS_NEGOCIO.md están cubiertos
+(1 y 2 en `test_billing_cycles`, 3 en `test_msi_split` property-based, 4 en
+`test_msi`+`test_dashboard`, 5 en `test_recurring`, 6 en `test_transactions`,
+7 en `test_cards`, 8 en `test_spaces`/`test_catalogs`).
+
+**Para usar la app:** crear el proyecto Supabase, llenar `backend/.env`
+(`DATABASE_URL` al Postgres de Supabase, `SUPABASE_JWT_SECRET`) y
+`frontend/.env` (URL + anon key + habilitar Google OAuth), correr
+`uv run alembic upgrade head` y levantar ambos servidores
+(`uv run uvicorn app.main:app --reload` y `npm run dev`). Activar jobs con
+`SCHEDULER_ENABLED=true`.
+
+---

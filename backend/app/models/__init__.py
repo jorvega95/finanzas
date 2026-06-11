@@ -11,6 +11,7 @@ from app.models.catalogs import (
     PaymentMethodType,
 )
 from app.models.fx import ExchangeRate
+from app.models.imports import ImportBatch, ImportStatus
 from app.models.investments import (
     AccountKind,
     AssetPrice,
@@ -34,6 +35,8 @@ __all__ = [
     "Budget",
     "CardStatement",
     "Holding",
+    "ImportBatch",
+    "ImportStatus",
     "InvestmentAccount",
     "InvestmentMovement",
     "MovementType",
