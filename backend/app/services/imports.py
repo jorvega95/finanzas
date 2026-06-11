@@ -375,11 +375,7 @@ async def export_full_json(session: AsyncSession, space: Space) -> str:
         ("installment_plans", InstallmentPlan),
     ):
         items = (
-            (
-                await session.execute(select(model).where(model.space_id == space.id))
-            )
-            .scalars()
-            .all()
+            (await session.execute(select(model).where(model.space_id == space.id))).scalars().all()
         )
         payload[key] = [serialize(item) for item in items]
     return json.dumps(payload, ensure_ascii=False, indent=2)
