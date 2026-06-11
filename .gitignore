@@ -1,6 +1,7 @@
 # --- Documentos de planeación (locales, no se versionan) ---
 PLAN.md
 REGLAS_NEGOCIO.md
+GUIA_INICIO.md
 
 # --- Secretos y entorno ---
 .env

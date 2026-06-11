@@ -10,7 +10,9 @@ class Settings(BaseSettings):
     # Jobs (REC-02, FX-02): enable once the DB is configured.
     scheduler_enabled: bool = False
 
-    # Supabase Auth (verificación de JWT, ver app/core/security.py)
+    # Supabase Auth (verificación de JWT, ver app/core/security.py).
+    # Proyectos nuevos (JWT Signing Keys asimétricas): solo SUPABASE_URL.
+    # Proyectos legacy (HS256): además SUPABASE_JWT_SECRET.
     supabase_url: str = ""
     supabase_jwt_secret: str = ""
 
