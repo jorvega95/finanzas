@@ -367,3 +367,62 @@ Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
   modelo ya trae `source=backfill` reservado.
 
 ---
+
+## Iteración 5 — Fase 5: Espacios compartidos (2026-06-11)
+
+**Objetivo (PLAN §6 Fase 5):** invitaciones, roles, switcher de espacio y RLS.
+(El modelo multi-tenant existe desde Fase 0; aquí se expone.)
+
+### Backend
+
+- **`SpaceInvite`** (ESP-04): token urlsafe de un solo uso, expiración 7
+  días, re-invitar al mismo email reemplaza la pendiente. **Claim** por dos
+  vías: automático al registrarse (en el provisioning ESP-01, por email) y
+  endpoint `POST /invites/claim` con verificación de email (fallos siempre
+  404, sin filtrar — GLO-05).
+- **Miembros**: `GET /spaces/{id}/members`, `PATCH .../members/{uid}` (rol),
+  `DELETE .../members/{uid}` (remover/salirse). ESP-05: el último owner no
+  puede degradarse ni salir — primero transfiere. ESP-07: las transacciones
+  del removido permanecen con su `created_by`.
+- **ESP-06**: `DELETE /spaces/{id}` exige el nombre exacto, borra en cascada
+  y deja notificación in-app a cada miembro (en su espacio personal, que
+  sobrevive al cascade); `default_space_id` de los afectados regresa a su
+  personal (fallback ESP-01). El espacio personal jamás se elimina.
+- **Migración `0006`**: tabla `space_invites` + **RLS** para Postgres/
+  Supabase: función `is_space_member(uuid)` (SECURITY DEFINER sobre
+  `auth.uid()`) y políticas por `space_id` en las 13 tablas de dominio, más
+  políticas especiales (profiles=self, installments vía plan, holdings vía
+  cuenta). En SQLite (tests) la sección RLS se omite — FastAPI filtra primero.
+
+### Frontend
+
+- **Switcher de espacio** en el header (👥 marca los compartidos); al cambiar
+  se invalida TODO el caché de queries (otro tenant).
+- **Ajustes → Espacio**: miembros con rol editable (owner), invitar por email
+  con rol, lista de invitaciones pendientes con "copiar token", reclamar
+  token, crear espacio compartido, salir del espacio y eliminar espacio con
+  confirmación de nombre exacto.
+
+### Tests (79/79 ✅ — Fases 0..5)
+
+| Regla | Test |
+|---|---|
+| ESP-04 | re-invitar reemplaza; token viejo 404; email ajeno 404; claim ok con rol; 2.º claim 404 |
+| ESP-04 | invitación expirada 404; auto-claim al registrarse |
+| ESP-03 | editor no invita/lista/cambia roles (403); no-miembro 404 |
+| ESP-05 | único owner no se degrada ni sale (422); transferir y luego sí |
+| ESP-07 | transacciones del removido persisten con created_by; removido ve 404; salirse OK |
+| ESP-06 | personal nunca; nombre incorrecto 422; cascada + 2 notificaciones |
+
+Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
+
+### Decisiones / notas
+
+- El email de la invitación se envía en Fase 6 (Resend); mientras, el owner
+  comparte el token (visible solo para owners).
+- La notificación de ESP-06 se guarda en el espacio **personal** de cada
+  miembro porque las del espacio borrado morirían con el cascade.
+- RLS usa una función `SECURITY DEFINER` para evitar recursión de políticas
+  sobre `space_members`.
+
+---

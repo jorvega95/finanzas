@@ -17,7 +17,7 @@ const NAV = [
 export default function AppLayout() {
   const { signOut } = useAuth();
   const { theme, toggle } = useTheme();
-  const { me, activeSpace } = useSpace();
+  const { me, activeSpace, setActiveSpace } = useSpace();
 
   return (
     <div className="flex min-h-screen">
@@ -49,9 +49,22 @@ export default function AppLayout() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-line bg-card px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-sm">
-            <span className="text-ink-muted dark:text-slate-400">Espacio: </span>
-            <span className="font-medium">{activeSpace.name}</span>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-ink-muted dark:text-slate-400">Espacio:</span>
+            {/* ESP-03/R8: switcher de espacio */}
+            <select
+              className="input w-auto py-1"
+              value={activeSpace.id}
+              onChange={(e) => setActiveSpace(e.target.value)}
+              aria-label="Cambiar de espacio"
+            >
+              {me.spaces.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                  {s.type === "shared" ? " 👥" : ""}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={toggle} className="btn-secondary" aria-label="Cambiar tema">

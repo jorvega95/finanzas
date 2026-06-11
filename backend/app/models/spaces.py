@@ -58,6 +58,26 @@ class Space(Base, TimestampMixin):
     )
 
 
+class SpaceInvite(Base, TimestampMixin):
+    """ESP-04: email-only invites, single-use token, 7-day expiry. A pending
+    invite to the same email replaces the previous one."""
+
+    __tablename__ = "space_invites"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    space_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[SpaceRole] = mapped_column(
+        Enum(SpaceRole, name="space_role", native_enum=False, length=10), nullable=False
+    )
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("profiles.id"), nullable=False)
+
+
 class SpaceMember(Base):
     __tablename__ = "space_members"
 

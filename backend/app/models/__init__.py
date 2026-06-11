@@ -24,7 +24,7 @@ from app.models.investments import (
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus, PlanStatus
 from app.models.recurring import RecurringFrequency, RecurringRule, RecurringTombstone
 from app.models.reminders import Reminder, ReminderChannel, ReminderKind, ReminderStatus
-from app.models.spaces import Profile, Space, SpaceMember, SpaceRole, SpaceType
+from app.models.spaces import Profile, Space, SpaceInvite, SpaceMember, SpaceRole, SpaceType
 from app.models.transactions import Transaction, TransactionType
 
 __all__ = [
@@ -60,6 +60,7 @@ __all__ = [
     "ReminderKind",
     "ReminderStatus",
     "Space",
+    "SpaceInvite",
     "SpaceMember",
     "SpaceRole",
     "SpaceType",
