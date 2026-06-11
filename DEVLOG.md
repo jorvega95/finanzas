@@ -305,3 +305,65 @@ Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
   ROUND_HALF_EVEN (GLO-01) tras el producto monto×tasa.
 
 ---
+
+## Iteración 4 — Fase 4: Inversiones + patrimonio neto (2026-06-11)
+
+**Objetivo (PLAN §6 Fase 4):** portafolio completo (crypto + no-crypto) y
+patrimonio neto con historia.
+
+### Backend
+
+- **Modelos** (`models/investments.py`): `InvestmentAccount` (kinds crypto/
+  stocks/fixed_income/other — R15 sin tablas extra), `Holding` con
+  `NUMERIC(28,10)` para cantidades (INV-01) y `realized_pnl` acumulado,
+  `InvestmentMovement` (INV-02: nunca edición directa), `AssetPrice` (caché +
+  manuales), `PortfolioSnapshot` y `NetWorthSnapshot` (únicos por
+  espacio+día). Migración `0005`.
+- **`services/prices.py`**: interfaz `PriceProvider` con `CoinGeckoProvider`
+  default (1 batch `/simple/price` por refresh — crédito plano) y
+  `CoinMarketCapProvider` alterno. Caché server-side TTL 10 min en
+  `asset_prices`; si el proveedor falla se sirve el último precio con su
+  `fetched_at` visible (INV-03). Precios manuales `source=manual` que el
+  refresh nunca pisa (INV-04). API key solo backend.
+- **`services/investments.py`**: movimientos INV-02 (buy: promedio
+  ponderado; sell: qty baja, avg intacto, P&L realizado registrado; deposit
+  con precio re-pondera, withdraw solo resta; venta > posición ⇒ 422).
+  Valuación INV-06/FX-04 con tasa DEL DÍA (mark-to-market) separando P&L
+  realizado/no realizado. Snapshots INV-05 idempotentes por día — el
+  histórico jamás se reconstruye con precios actuales. PAT-01: patrimonio =
+  snapshot de portafolio − Σ deuda TDC (TDC-09 a+b+c), job tras INV-05.
+- **API**: `/investments/accounts(+movements)`, `/portfolio`, `/prices`
+  (manual), `/snapshot(s)`, `/net-worth(+snapshot)`. Job diario 23:50 MX.
+
+### Frontend
+
+- **Inversiones** (`features/investments/`): tarjetas de totales (valor,
+  P&L no realizado/realizado, patrimonio), alta de cuentas y movimientos,
+  tabla de holdings con precio (✎ si es manual), formulario de precio manual,
+  gráficas de evolución del portafolio y patrimonio neto, y la nota PAT-02
+  ("patrimonio = inversiones − deuda TDC") visible.
+
+### Tests (73/73 ✅ — Fases 0..4)
+
+| Regla | Test |
+|---|---|
+| INV-02 | avg ponderado (100+200⇒150); sell: qty↓, avg intacto, P&L=15; venta>posición 422; deposit/withdraw |
+| INV-01 | cantidad con 10 decimales intacta |
+| INV-03 | TTL: 2.ª consulta sin llamadas; proveedor caído ⇒ caché con fetched_at |
+| INV-04 | precio manual CETES en MXN, `source=manual` |
+| INV-06/FX-04 | valuación con tasa de HOY (20), no la histórica (17) |
+| INV-05 | snapshot idempotente; histórico congelado aunque el precio cambie |
+| PAT-01 | patrimonio = 300 activos − 700 deuda TDC = −400; idempotente |
+
+Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
+
+### Decisiones / notas
+
+- Crypto usa el **id de CoinGecko** como `asset_symbol` (bitcoin, ethereum) —
+  documentado en el placeholder de la UI.
+- La caché de precios commitea dentro de `get_prices` para sobrevivir a
+  requests de solo lectura.
+- INV-03b (backfill histórico) es opcional ("PUEDE") y queda en backlog; el
+  modelo ya trae `source=backfill` reservado.
+
+---

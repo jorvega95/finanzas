@@ -2,10 +2,10 @@
 import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import AppLayout from "../components/AppLayout";
-import Placeholder from "../components/Placeholder";
 import LoginPage from "../features/auth/LoginPage";
 import CardsPage from "../features/cards/CardsPage";
 import DashboardPage from "../features/dashboard/DashboardPage";
+import InvestmentsPage from "../features/investments/InvestmentsPage";
 import MsiPage from "../features/msi/MsiPage";
 import SettingsPage from "../features/settings/SettingsPage";
 import { SpaceProvider } from "../features/spaces/SpaceProvider";
@@ -40,7 +40,7 @@ export const router = createBrowserRouter([
           { path: "/transacciones", element: <TransactionsPage /> },
           { path: "/tarjetas", element: <CardsPage /> },
           { path: "/msi", element: <MsiPage /> },
-          { path: "/inversiones", element: <Placeholder title="Inversiones" /> },
+          { path: "/inversiones", element: <InvestmentsPage /> },
           { path: "/ajustes", element: <SettingsPage /> },
         ],
       },

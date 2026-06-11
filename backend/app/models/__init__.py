@@ -11,6 +11,16 @@ from app.models.catalogs import (
     PaymentMethodType,
 )
 from app.models.fx import ExchangeRate
+from app.models.investments import (
+    AccountKind,
+    AssetPrice,
+    Holding,
+    InvestmentAccount,
+    InvestmentMovement,
+    MovementType,
+    NetWorthSnapshot,
+    PortfolioSnapshot,
+)
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus, PlanStatus
 from app.models.recurring import RecurringFrequency, RecurringRule, RecurringTombstone
 from app.models.reminders import Reminder, ReminderChannel, ReminderKind, ReminderStatus
@@ -18,9 +28,17 @@ from app.models.spaces import Profile, Space, SpaceMember, SpaceRole, SpaceType
 from app.models.transactions import Transaction, TransactionType
 
 __all__ = [
+    "AccountKind",
+    "AssetPrice",
     "Base",
     "Budget",
     "CardStatement",
+    "Holding",
+    "InvestmentAccount",
+    "InvestmentMovement",
+    "MovementType",
+    "NetWorthSnapshot",
+    "PortfolioSnapshot",
     "Category",
     "CategoryKind",
     "CreditCard",

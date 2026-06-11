@@ -56,6 +56,21 @@ async def run_card_close_job() -> None:
                 logger.exception("card close job failed for space %s", space.id)
 
 
+async def run_snapshot_job() -> None:
+    """INV-05 + PAT-01: snapshot diario de portafolio y luego patrimonio neto.
+    Idempotente por (espacio, día)."""
+    from app.services.investments import snapshot_net_worth, snapshot_portfolio
+
+    async with SessionLocal() as session:
+        spaces = (await session.execute(select(Space))).scalars().all()
+        for space in spaces:
+            try:
+                await snapshot_portfolio(session, space)
+                await snapshot_net_worth(session, space)  # PAT-01: después de INV-05
+            except Exception:
+                logger.exception("snapshot job failed for space %s", space.id)
+
+
 async def run_fx_job() -> None:
     """FX-02: persist today's USD/MXN FIX (carry-forward on holidays)."""
     async with SessionLocal() as session:
@@ -70,4 +85,6 @@ def build_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(run_recurring_job, "cron", minute=35, id="recurring")
     scheduler.add_job(run_card_close_job, "cron", minute=50, id="card_close")
     scheduler.add_job(run_fx_job, "cron", hour=18, minute=10, id="fx")  # ~12:10 MX
+    # INV-05: 23:50 hora MX ≈ 05:50 UTC.
+    scheduler.add_job(run_snapshot_job, "cron", hour=5, minute=50, id="snapshots")
     return scheduler
