@@ -39,6 +39,7 @@ async def run_card_close_job() -> None:
     """TDC-07 + REM-01: close due statements and fire due reminders. Hourly
     and idempotent, so every space closes shortly after its local midnight."""
     from app.core.dates import today_in_tz
+    from app.services.budgets import check_budget_alerts
     from app.services.cards import close_due_statements
     from app.services.reminders import fire_due_reminders
 
@@ -47,7 +48,10 @@ async def run_card_close_job() -> None:
         for space in spaces:
             try:
                 await close_due_statements(session, space)
-                await fire_due_reminders(session, today_in_tz(space.timezone))
+                today = today_in_tz(space.timezone)
+                # PRE-03: evaluate current-month budget alerts (idempotent).
+                await check_budget_alerts(session, space, today.replace(day=1))
+                await fire_due_reminders(session, today)
             except Exception:
                 logger.exception("card close job failed for space %s", space.id)
 

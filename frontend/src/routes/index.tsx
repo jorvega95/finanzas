@@ -5,6 +5,7 @@ import AppLayout from "../components/AppLayout";
 import Placeholder from "../components/Placeholder";
 import LoginPage from "../features/auth/LoginPage";
 import CardsPage from "../features/cards/CardsPage";
+import DashboardPage from "../features/dashboard/DashboardPage";
 import MsiPage from "../features/msi/MsiPage";
 import SettingsPage from "../features/settings/SettingsPage";
 import { SpaceProvider } from "../features/spaces/SpaceProvider";
@@ -35,7 +36,7 @@ export const router = createBrowserRouter([
       {
         element: <AppLayout />,
         children: [
-          { path: "/", element: <Placeholder title="Dashboard" /> },
+          { path: "/", element: <DashboardPage /> },
           { path: "/transacciones", element: <TransactionsPage /> },
           { path: "/tarjetas", element: <CardsPage /> },
           { path: "/msi", element: <MsiPage /> },

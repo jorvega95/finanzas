@@ -242,3 +242,66 @@ Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
   valida el alta de tarjeta reutilizando el motor de ciclos.
 
 ---
+
+## Iteración 3 — Fase 3: Dashboard y presupuestos (2026-06-11)
+
+**Objetivo (PLAN §6 Fase 3):** la vista que abres cada mañana, con control
+activo del gasto.
+
+### Backend
+
+- **`services/dashboard.py`** — EL único dueño de los predicados de
+  gasto/ingreso (DSH-03): `expense_predicates` excluye transfers (TXN-02),
+  madres MSI (MSI-03) y fechas futuras (TXN-03); cuotas MSI cargadas entran
+  con categoría/naturaleza/tasa de la compra original. Conversión a base en
+  SQL con tasa congelada (`amount × COALESCE(fx_rate_to_base, 1)`, FX-05) y
+  cuantización ROUND_HALF_EVEN (GLO-01).
+  - DSH-02: ingresos/gastos/neto del mes.
+  - DSH-04 doble vista: devengado vs flujo (gastos sin TDC + pagos de
+    tarjeta detectados como transfers a métodos credit_card).
+  - DSH-03: por categoría raíz (roll-up CAT-06), por naturaleza
+    (COALESCE(override, categoría), CAT-03), tendencia 6 meses con los mismos
+    predicados.
+  - DSH-05: próximos compromisos (statements por vencer con flag overdue,
+    cuotas MSI ≤45 días, próxima ocurrencia de cada recurrente) ordenados.
+- **`services/budgets.py`** (PRE-01..04): presupuesto único por categoría
+  raíz+mes, consumo reutilizando los predicados de dashboard restringidos a
+  la categoría y sus hijas, copia en bloque del mes anterior, alertas únicas
+  por nivel (umbral y 100%) vía reminders (PRE-03) integradas al job horario.
+- **API**: `GET /dashboard/summary?month=` (un payload con todo),
+  `/budgets` CRUD + `/copy` + `/check-alerts`. Migración `0004` (budgets).
+
+### Frontend
+
+- **Dashboard** (`features/dashboard/`): toggle Devengado/Flujo con tooltip
+  explicativo (DSH-04), tarjetas de totales, tendencia 6 meses (línea),
+  gasto por categoría (barras), naturaleza (dona), próximos compromisos con
+  chip "Vencido", y sección de presupuestos con barras de avance
+  (verde→ámbar≥80%→rojo si excedido), alta y "repetir mes anterior".
+
+### Tests (67/67 ✅ — Fases 0..3)
+
+| Regla | Test |
+|---|---|
+| DSH-02 + TXN-02/03 | transfers nunca suman; gasto futuro excluido hasta su fecha |
+| Caso obligatorio 4 | MSI 12,000×12 ⇒ mes = 1,000 en totales, categoría y naturaleza |
+| DSH-04 | compra TDC: devengado sí, flujo no; al pagar: flujo sí, devengado igual |
+| DSH-03 + CAT-06 + FX-05 | subcategoría suma al padre; USD con tasa congelada |
+| DSH-03 | tendencia == resumen (mismos predicados) |
+| DSH-05 | card_due + msi_quota + recurring ordenados por fecha |
+| PRE-01 | único por categoría+mes (409); solo raíz de gasto; copy idempotente |
+| PRE-02 | consumo con subcategorías, sin transfers, variación PRE-04 |
+| PRE-03 | alerta una vez por nivel (80% y 100%), cero spam |
+
+Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
+
+### Decisiones / notas
+
+- Los pagos de TDC se identifican en flujo de caja como transfers cuyo
+  método destino es `type=credit_card` — sin marcar nada extra.
+- Las alertas de presupuesto reutilizan la tabla/canales de reminders
+  (REM-04) con `offset_days` como nivel (80/100) para la unicidad.
+- `to_money()` cuantiza todo resultado agregado a 2 decimales
+  ROUND_HALF_EVEN (GLO-01) tras el producto monto×tasa.
+
+---

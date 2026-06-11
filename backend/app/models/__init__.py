@@ -1,6 +1,7 @@
 """Import every model here so Alembic autogenerate sees the full metadata."""
 
 from app.db.base import Base
+from app.models.budgets import Budget
 from app.models.cards import CardStatement, CreditCard, CutoffDayPolicy, StatementStatus
 from app.models.catalogs import (
     Category,
@@ -18,6 +19,7 @@ from app.models.transactions import Transaction, TransactionType
 
 __all__ = [
     "Base",
+    "Budget",
     "CardStatement",
     "Category",
     "CategoryKind",
