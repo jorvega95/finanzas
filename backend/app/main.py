@@ -10,8 +10,15 @@ from app.core.config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # TODO Fase 1+: arrancar APScheduler (app/jobs/scheduler.py)
+    scheduler = None
+    if settings.scheduler_enabled:
+        from app.jobs.scheduler import build_scheduler
+
+        scheduler = build_scheduler()
+        scheduler.start()
     yield
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
 
 
 def create_app() -> FastAPI:

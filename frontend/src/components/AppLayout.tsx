@@ -1,8 +1,8 @@
 // Shell de la app: sidebar de navegación + header con espacio activo,
 // toggle de tema y cierre de sesión.
 import { NavLink, Outlet } from "react-router-dom";
-import { useMe } from "../api/me";
 import { useAuth } from "../auth/AuthProvider";
+import { useSpace } from "../features/spaces/SpaceProvider";
 import { useTheme } from "../lib/theme";
 
 const NAV = [
@@ -15,12 +15,9 @@ const NAV = [
 ];
 
 export default function AppLayout() {
-  const { session, signOut } = useAuth();
+  const { signOut } = useAuth();
   const { theme, toggle } = useTheme();
-  const me = useMe(Boolean(session));
-  const activeSpace =
-    me.data?.spaces.find((s) => s.id === me.data?.profile.default_space_id) ??
-    me.data?.spaces[0];
+  const { me, activeSpace } = useSpace();
 
   return (
     <div className="flex min-h-screen">
@@ -46,7 +43,7 @@ export default function AppLayout() {
           ))}
         </nav>
         <div className="mt-auto px-2 text-xs text-ink-muted dark:text-slate-500">
-          {me.data?.profile.display_name}
+          {me.profile.display_name}
         </div>
       </aside>
 
@@ -54,7 +51,7 @@ export default function AppLayout() {
         <header className="flex items-center justify-between border-b border-line bg-card px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
           <div className="text-sm">
             <span className="text-ink-muted dark:text-slate-400">Espacio: </span>
-            <span className="font-medium">{activeSpace?.name ?? "…"}</span>
+            <span className="font-medium">{activeSpace.name}</span>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={toggle} className="btn-secondary" aria-label="Cambiar tema">

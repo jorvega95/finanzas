@@ -74,3 +74,23 @@ def make_token(user_id: uuid.UUID | None = None, email: str = "user@example.com"
 
 def auth_headers(user_id: uuid.UUID | None = None, email: str = "user@example.com") -> dict:
     return {"Authorization": f"Bearer {make_token(user_id, email)}"}
+
+
+async def bootstrap_space(client, user_id: uuid.UUID | None = None) -> dict:
+    """Provision a user (ESP-01) and return ready-to-use request context:
+    headers (auth + X-Space-Id), space_id, and seeded catalogs by name."""
+    user_id = user_id or uuid.uuid4()
+    base_headers = auth_headers(user_id)
+    me = (await client.get("/api/v1/me", headers=base_headers)).json()
+    space_id = me["spaces"][0]["id"]
+    headers = {**base_headers, "X-Space-Id": space_id}
+
+    categories = (await client.get("/api/v1/catalogs/categories", headers=headers)).json()
+    methods = (await client.get("/api/v1/catalogs/payment-methods", headers=headers)).json()
+    return {
+        "user_id": user_id,
+        "space_id": space_id,
+        "headers": headers,
+        "categories": {c["name"]: c for c in categories},
+        "methods": {m["name"]: m for m in methods},
+    }

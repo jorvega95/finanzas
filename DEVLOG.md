@@ -74,3 +74,86 @@ Calidad: `ruff check` ✅ · `ruff format` ✅ · `mypy app` (strict) ✅ ·
   `frontend/.env` (URL + anon key); luego `uv run alembic upgrade head`.
 
 ---
+
+## Iteración 1 — Fase 1: Transacciones + catálogos + recurrentes + FX (2026-06-10)
+
+**Objetivo (PLAN §6 Fase 1):** registrar el día a día, catálogos editables,
+suscripciones que se capturan solas, multimoneda.
+
+### Backend
+
+- **Modelos**: `Transaction` (TXN-01..06: tipos expense/income/transfer,
+  `fx_rate_to_base` congelada FX-03, `needs_review`, constraint único
+  `(recurring_rule_id, scheduled_date)` para REC-02), `RecurringRule` +
+  `RecurringTombstone` (REC-01/03), `ExchangeRate` (FX-02). Migración `0002`.
+- **`services/transactions.py`**: validaciones TXN-01 (categoría de kind
+  acorde, método activo), TXN-02 (transfer: origen≠destino, sin categoría),
+  TXN-03 (fecha futura máx. +1 año, hoy en tz del espacio), TXN-04 (MXN/USD),
+  TXN-05 (editar mantiene trazabilidad y no regenera), FX-03 (tasa congelada:
+  solo cambia si cambia fecha/moneda u override manual). Borrar instancia
+  recurrente ⇒ tombstone (REC-03).
+- **`services/recurring.py`**: generador puro de ocurrencias (weekly/biweekly/
+  monthly con día N ajustado o último día/yearly), job idempotente con
+  catch-up (REC-02/05), auto-pausa si categoría/método inactivo (REC-04).
+- **`services/fx.py`**: `get_rate` (tasa de la fecha o previa más cercana,
+  fallback inverso), `sync_usd_mxn_rate` con Banxico FIX y carry-forward en
+  inhábiles (FX-02), upsert idempotente.
+- **`services/catalogs.py` CRUD**: CAT-01 (unicidad unaccent+lower), CAT-04
+  (desactivar/reactivar), CAT-05 (última activa protegida), CAT-06 (2 niveles,
+  herencia), CAT-07 (método credit_card solo vía tarjeta), GLO-03 (delete
+  físico solo sin referencias).
+- **Routers**: `/catalogs/*`, `/transactions` (filtros + paginación + confirm),
+  `/recurring-rules` (+`/generate` manual). Mutaciones requieren editor+
+  (ESP-03); lecturas cualquier miembro; no-miembro 404.
+- **Scheduler** (`jobs/scheduler.py`): job horario de recurrentes (idempotente
+  ⇒ seguro multi-tz) y job diario FX. Activable con `SCHEDULER_ENABLED=true`.
+- Fix notable: la columna `date` de `Transaction` sombreaba el tipo
+  `datetime.date` en el cuerpo de la clase y rompía la nulabilidad de
+  `scheduled_date` ⇒ se usa `dt.date`.
+
+### Frontend
+
+- `SpaceProvider`: carga `/me`, fija `X-Space-Id` global (GLO-05) y expone el
+  espacio activo.
+- **Transacciones** (`features/transactions/`): captura rápida (tipo, monto,
+  fecha, categoría, método, transfer con desde/hacia, moneda MXN/USD),
+  bandeja "Por confirmar" (REC-03: confirmar 1 tap / descartar) y lista del
+  mes con filtros. Montos siempre strings (GLO-01).
+- **Ajustes** (`features/settings/`): CRUD de categorías (con naturaleza
+  visible) y métodos de pago (desactivar/reactivar), y gestión de gastos
+  recurrentes (crear, pausar/reanudar).
+
+### Tests (30/30 ✅, incluye los 8 de Fase 0)
+
+| Regla | Test |
+|---|---|
+| CAT-01 | unicidad case/acentos-insensible (cat y métodos) |
+| CAT-04/05 | desactivación oculta de formularios, reactivable; última activa protegida |
+| CAT-06 | herencia kind/naturaleza; tercer nivel rechazado |
+| CAT-07 | método credit_card manual rechazado |
+| GLO-03 | delete físico solo sin referencias (409 si hay) |
+| TXN-01 | campos obligatorios, kind acorde, monto > 0 |
+| TXN-02 | transfer: origen≠destino, sin categoría |
+| TXN-03 | fecha futura cap +1 año (freezegun) |
+| TXN-04 | EUR rechazada |
+| FX-03 (caso 6) | tasa congelada al editar; re-resuelve al cambiar fecha; override manual |
+| FX-02 | carry-forward en domingo + idempotencia del job |
+| REC-02/05 (caso 5) | 2 corridas ⇒ 0 duplicados; catch-up enero→junio = 5 instancias |
+| REC-01 | día 31 ajustado a feb 28; weekly con end_date |
+| REC-03 | descartar ⇒ tombstone (no regenera); confirmar con ajuste de monto |
+| REC-04 | editar regla no toca generadas; auto-pausa con categoría inactiva |
+| ESP-03/GLO-05 | viewer no muta catálogos (403); cross-space 404 |
+
+Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
+
+### Decisiones / notas
+
+- Plantilla de regla recurrente con columnas explícitas (no jsonb) para
+  paridad SQLite/Postgres en tests.
+- El job de recurrentes corre **cada hora** y es idempotente — así cada
+  espacio genera poco después de su medianoche local sin un scheduler por tz.
+- `fx_rate_to_base` es NULL cuando la moneda es la base (tasa 1 implícita).
+- Agregados (DSH-02: transfers fuera, etc.) se prueban en Fase 3 con los
+  endpoints de dashboard — los predicados vivirán en un solo lugar (DSH-03).
+
+---
