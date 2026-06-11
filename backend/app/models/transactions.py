@@ -75,8 +75,11 @@ class Transaction(Base, AuditMixin):
         Uuid, ForeignKey("payment_methods.id", ondelete="RESTRICT")
     )
 
-    # TDC (Fase 2): derived from the payment method when type=credit_card.
+    # TDC: derived from the payment method when type=credit_card (TXN-06).
     credit_card_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    # TDC-05: billing cycle this charge (or payment, TDC-10) belongs to.
+    statement_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    # MSI-03: set on the parent purchase; excluded from all aggregates.
     installment_plan_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
 
     # REC-02/03: provenance of generated instances.

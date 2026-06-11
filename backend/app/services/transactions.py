@@ -198,6 +198,13 @@ async def create_transaction(
         created_by=created_by,
     )
     session.add(txn)
+    await session.flush()
+    if credit_card_id is not None and data.type != TransactionType.transfer:
+        # TXN-06/TDC-05: card charges belong to a billing cycle.
+        from app.services.cards import assign_charge_to_statement, get_card
+
+        card = await get_card(session, space.id, credit_card_id)
+        await assign_charge_to_statement(session, card, txn)
     await session.commit()
     await session.refresh(txn)
     return txn
@@ -236,6 +243,22 @@ async def update_transaction(
     txn.updated_by = updated_by
     txn.needs_review = False  # REC-03: adjusting counts as reviewing.
 
+    # TDC-05: re-resolve the cycle (date or method may have changed) and
+    # recompute any closed statement totals affected.
+    from app.services.cards import assign_charge_to_statement, get_card, recompute_statement_total
+
+    old_statement_id = txn.statement_id
+    if credit_card_id is not None and data.type != TransactionType.transfer:
+        card = await get_card(session, space.id, credit_card_id)
+        await assign_charge_to_statement(session, card, txn)
+    elif txn.statement_id is not None and data.type != TransactionType.transfer:
+        txn.statement_id = None
+    await session.flush()
+    if old_statement_id is not None and old_statement_id != txn.statement_id:
+        await recompute_statement_total(session, old_statement_id)
+    if txn.statement_id is not None:
+        await recompute_statement_total(session, txn.statement_id)
+
     await session.commit()
     await session.refresh(txn)
     return txn
@@ -243,6 +266,22 @@ async def update_transaction(
 
 async def delete_transaction(session: AsyncSession, space_id: uuid.UUID, txn_id: uuid.UUID) -> None:
     txn = await get_transaction(session, space_id, txn_id)
+    if txn.installment_plan_id is not None:
+        # MSI-08: deleting the purchase deletes the plan only if every
+        # installment is still pending; otherwise it's blocked.
+        from sqlalchemy.orm import selectinload
+
+        from app.models.msi import InstallmentPlan
+        from app.services.msi import delete_plan_if_allowed
+
+        plan = await session.get(
+            InstallmentPlan,
+            txn.installment_plan_id,
+            options=[selectinload(InstallmentPlan.installments)],
+        )
+        if plan is not None:
+            await delete_plan_if_allowed(session, plan)
+    old_statement_id = txn.statement_id
     if txn.recurring_rule_id is not None and txn.scheduled_date is not None:
         # REC-03: discarding a generated instance leaves a tombstone so the
         # job never regenerates it.
@@ -257,6 +296,11 @@ async def delete_transaction(session: AsyncSession, space_id: uuid.UUID, txn_id:
                 RecurringTombstone(rule_id=txn.recurring_rule_id, scheduled_date=txn.scheduled_date)
             )
     await session.delete(txn)
+    await session.flush()
+    if old_statement_id is not None:
+        from app.services.cards import recompute_statement_total
+
+        await recompute_statement_total(session, old_statement_id)
     await session.commit()
 
 

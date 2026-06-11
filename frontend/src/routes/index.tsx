@@ -4,6 +4,8 @@ import { useAuth } from "../auth/AuthProvider";
 import AppLayout from "../components/AppLayout";
 import Placeholder from "../components/Placeholder";
 import LoginPage from "../features/auth/LoginPage";
+import CardsPage from "../features/cards/CardsPage";
+import MsiPage from "../features/msi/MsiPage";
 import SettingsPage from "../features/settings/SettingsPage";
 import { SpaceProvider } from "../features/spaces/SpaceProvider";
 import TransactionsPage from "../features/transactions/TransactionsPage";
@@ -35,8 +37,8 @@ export const router = createBrowserRouter([
         children: [
           { path: "/", element: <Placeholder title="Dashboard" /> },
           { path: "/transacciones", element: <TransactionsPage /> },
-          { path: "/tarjetas", element: <Placeholder title="Tarjetas" /> },
-          { path: "/msi", element: <Placeholder title="Meses sin intereses" /> },
+          { path: "/tarjetas", element: <CardsPage /> },
+          { path: "/msi", element: <MsiPage /> },
           { path: "/inversiones", element: <Placeholder title="Inversiones" /> },
           { path: "/ajustes", element: <SettingsPage /> },
         ],

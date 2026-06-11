@@ -19,6 +19,11 @@ Money = Annotated[
     Field(gt=0, max_digits=14, decimal_places=2),
     PlainSerializer(lambda v: str(v), return_type=str, when_used="json"),
 ]
+# Output-only money: may be zero or negative (e.g. statement credit, TDC-10).
+MoneyOut = Annotated[
+    Decimal,
+    PlainSerializer(lambda v: str(v), return_type=str, when_used="json"),
+]
 FxRate = Annotated[
     Decimal,
     Field(gt=0, max_digits=20, decimal_places=8),

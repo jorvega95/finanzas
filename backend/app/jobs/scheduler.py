@@ -35,6 +35,23 @@ async def run_recurring_job() -> None:
                 logger.exception("recurring job failed for space %s", space.id)
 
 
+async def run_card_close_job() -> None:
+    """TDC-07 + REM-01: close due statements and fire due reminders. Hourly
+    and idempotent, so every space closes shortly after its local midnight."""
+    from app.core.dates import today_in_tz
+    from app.services.cards import close_due_statements
+    from app.services.reminders import fire_due_reminders
+
+    async with SessionLocal() as session:
+        spaces = (await session.execute(select(Space))).scalars().all()
+        for space in spaces:
+            try:
+                await close_due_statements(session, space)
+                await fire_due_reminders(session, today_in_tz(space.timezone))
+            except Exception:
+                logger.exception("card close job failed for space %s", space.id)
+
+
 async def run_fx_job() -> None:
     """FX-02: persist today's USD/MXN FIX (carry-forward on holidays)."""
     async with SessionLocal() as session:
@@ -47,5 +64,6 @@ async def run_fx_job() -> None:
 def build_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(run_recurring_job, "cron", minute=35, id="recurring")
+    scheduler.add_job(run_card_close_job, "cron", minute=50, id="card_close")
     scheduler.add_job(run_fx_job, "cron", hour=18, minute=10, id="fx")  # ~12:10 MX
     return scheduler

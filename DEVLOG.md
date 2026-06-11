@@ -157,3 +157,88 @@ Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
   endpoints de dashboard — los predicados vivirán en un solo lugar (DSH-03).
 
 ---
+
+## Iteración 2 — Fase 2: TDC, MSI y recordatorios (2026-06-11)
+
+**Objetivo (PLAN §6 Fase 2):** saber cuánto y cuándo pagar cada tarjeta, MSI
+como plan de pagos, y que la app lo recuerde. Tests primero para el código
+más delicado.
+
+### Backend
+
+- **`services/billing_cycles.py`** (funciones puras, tests ANTES de
+  implementar): `statement_cutoff` (TDC-02: 1-28 o `last`, min con fin de
+  mes), `cycle_for_purchase` (TDC-03/05 con `cutoff_day_policy`
+  include/next_cycle), `due_date_for` (TDC-04: `payment_due_days` o primer
+  `payment_day` posterior), `next_cutoff` (proyección MSI-04).
+- **Modelos**: `CreditCard` (TDC-01: solo last4, jamás PAN/CVV; constraint
+  "exactamente uno" entre due_days/payment_day), `CardStatement` (único por
+  tarjeta+corte, `applied_credit` para TDC-10), `InstallmentPlan` +
+  `Installment` (MSI-01..05), `Reminder` (único por statement+offset+canal,
+  REM-02). `transactions.statement_id` nuevo. Migración `0003`.
+- **`services/cards.py`**: alta con método de pago auto (CAT-07) y seed
+  "Comisiones e intereses" (TDC-13); statements materializados on-demand
+  (TDC-11); asignación de cargos al ciclo (TDC-05/TXN-06) al crear/editar
+  transacciones; **cierre** (TDC-07): cuotas MSI del ciclo pasan a `charged`,
+  saldo a favor del statement anterior se aplica como `applied_credit`
+  (TDC-10), recordatorios programados (REM-01); estados TDC-08 con
+  `is_overdue` como flag; pagos como transfer asignado a statement con
+  excedente que viaja al siguiente cierre; deuda en 3 números (TDC-09);
+  reasignación de ciclo ±1 con recálculo de ambos statements (TDC-06);
+  desactivación que sigue cerrando ciclos (TDC-12).
+- **`services/msi.py`**: `split_installments` (MSI-02: ROUND_FLOOR + última
+  cuota absorbe residuo), calendario de cuotas proyectado con el motor de
+  ciclos (MSI-04), conversión compra→plan con MSI-09 (moneda tarjeta),
+  exclusión de la madre en totales (MSI-03), liquidación anticipada con cargo
+  único en el ciclo abierto (MSI-07), borrado bloqueado con cuotas cargadas
+  (MSI-08), vista por plan y proyección mes×tarjeta (MSI-06).
+- **`services/reminders.py`**: programación a due_date−N por canal
+  (REM-01/04), unicidad y reintentos (REM-02), mensaje con alias sin last4
+  (REM-03), cancelación al pagar.
+- **API**: `/cards` (CRUD + deuda TDC-09 + statements + pagos + cierre manual
+  + bandeja de notificaciones), `/installment-plans` (crear desde compra,
+  resumen, proyección, liquidar), `/transactions/{id}/move-cycle` (TDC-06).
+- **Scheduler**: job horario de cierre de statements + disparo de
+  recordatorios (idempotente, multi-tz).
+
+### Frontend
+
+- **Tarjetas** (`features/cards/`): alta segura (aviso de que solo se guarda
+  last4), deuda en 3 números + total por tarjeta, statements con estados y
+  flag vencido, pago con método origen y statement destino, botón de cierre
+  manual de ciclos, recordatorios visibles.
+- **MSI** (`features/msi/`): convertir compra con tarjeta a plan, barra de
+  progreso de cuotas, detalle por cuota, liquidación anticipada, tabla de
+  comprometido por mes × tarjeta.
+
+### Tests (58/58 ✅ — Fases 0+1+2 juntas)
+
+| Caso | Test |
+|---|---|
+| Obligatorio 1 (TDC-02/04) | corte `last` feb bisiesto/no + corte 28 los 12 meses + due `last`+20 |
+| Obligatorio 2 (TDC-05) | compra el día del corte con `include` y `next_cycle` |
+| Obligatorio 3 (MSI-02) | 1000/3 ⇒ 333.33+333.33+333.34; Σ==total en 1000 casos (hypothesis) |
+| Obligatorio 4 (MSI-03) | compra 12,000 a 12 MSI ⇒ statement refleja 1,000, nunca 13,000 |
+| Obligatorio 7 (TDC-10) | pago de 800 sobre 500 ⇒ 300 a favor; siguiente cierre 300−300=0 ⇒ paid |
+| TDC-01/CAT-07/TDC-13 | validaciones de alta; método auto; categoría comisiones |
+| TDC-07/08/11 | cierre idempotente, due_date, statement abierto materializado |
+| TDC-06 | mover cargo a ciclo anterior y recálculo |
+| TDC-12 | tarjeta inactiva no acepta cargos pero cierra ciclos |
+| MSI-05/06/07/08/09 | ciclo de vida de cuotas, proyección, liquidación, borrado, moneda |
+| REM-01/02/03 | programación, no-duplicación, cancelación al pagar, sin last4 |
+| GLO-05 | tarjetas cross-space ⇒ 404 |
+
+Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
+
+### Decisiones / notas
+
+- `computed_total` puede ser negativo (crédito que sigue viajando): la
+  fórmula `saldo_a_favor = max(paid − computed_total, 0)` hace que el
+  excedente se arrastre solo entre cierres consecutivos.
+- Pagos (transfers) abonan a `paid_amount` del statement asignado; los
+  income en tarjeta se tratan como devoluciones que restan del total del
+  ciclo.
+- El statement_day de la UI se limita a 1-28 o `last` (TDC-02), y eso mismo
+  valida el alta de tarjeta reutilizando el motor de ciclos.
+
+---

@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
 from app.models.transactions import Transaction, TransactionType
+from app.schemas.cards import MoveCycle
 from app.schemas.transactions import (
     TransactionConfirm,
     TransactionCreate,
@@ -122,4 +123,21 @@ async def confirm_transaction(
     """REC-03: confirm an instance from the review tray (optional new amount)."""
     space, _ = space_and_member
     txn = await svc.confirm_transaction(db, space.id, txn_id, payload.amount)
+    return TransactionOut.model_validate(txn)
+
+
+@router.post("/{txn_id}/move-cycle", response_model=TransactionOut)
+async def move_cycle(
+    db: DbSession,
+    space_and_member: EditorSpace,
+    user: CurrentUser,
+    txn_id: uuid.UUID,
+    payload: MoveCycle,
+) -> TransactionOut:
+    """TDC-06: move a card charge to the previous/next billing cycle."""
+    from app.services.cards import move_charge_cycle
+
+    space, _ = space_and_member
+    txn = await svc.get_transaction(db, space.id, txn_id)
+    txn = await move_charge_cycle(db, space, user.id, txn, payload.direction)
     return TransactionOut.model_validate(txn)
