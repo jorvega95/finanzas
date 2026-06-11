@@ -1,33 +1,59 @@
 // Login con Google y email/contraseña (R7, ESP-01). Textos es-MX.
 import { useState, type FormEvent } from "react";
+import { Navigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
+import { translateAuthError } from "../../lib/authErrors";
 import { useTheme } from "../../lib/theme";
 
 export default function LoginPage() {
-  const { configured, signInWithGoogle, signInWithPassword, signUpWithPassword } =
-    useAuth();
+  const {
+    session,
+    configured,
+    signInWithGoogle,
+    signInWithPassword,
+    signUpWithPassword,
+  } = useAuth();
   const { theme, toggle } = useTheme();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Con sesión activa esta página no tiene nada que mostrar: a la app.
+  // (Cubre login, signup sin confirmación de correo y el retorno de OAuth.)
+  if (session) return <Navigate to="/" replace />;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setInfo(null);
+    if (mode === "signup" && password !== passwordConfirm) {
+      setError("Las contraseñas no coinciden.");
+      return;
+    }
     setBusy(true);
     try {
       if (mode === "signin") {
         await signInWithPassword(email, password);
+        // El redirect lo dispara el cambio de sesión (Navigate de arriba).
       } else {
-        await signUpWithPassword(email, password);
-        setInfo("Revisa tu correo para confirmar tu cuenta.");
+        const needsConfirmation = await signUpWithPassword(
+          email,
+          password,
+          displayName.trim(),
+        );
+        if (needsConfirmation) {
+          setInfo("Te enviamos un correo: confírmalo para poder entrar.");
+        }
+        // Si no requiere confirmación, Supabase ya creó la sesión y el
+        // Navigate de arriba nos lleva directo a la app.
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al iniciar sesión");
+      setError(translateAuthError(err));
     } finally {
       setBusy(false);
     }
@@ -57,7 +83,7 @@ export default function LoginPage() {
         )}
 
         <button
-          onClick={() => signInWithGoogle().catch((e) => setError(e.message))}
+          onClick={() => signInWithGoogle().catch((e) => setError(translateAuthError(e)))}
           disabled={!configured || busy}
           className="btn-secondary mt-6 w-full"
         >
@@ -77,6 +103,25 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === "signup" && (
+            <div>
+              <label htmlFor="displayName" className="label">
+                Tu nombre
+              </label>
+              <input
+                id="displayName"
+                type="text"
+                required
+                minLength={2}
+                maxLength={80}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="input"
+                placeholder="Ana Pérez"
+                autoComplete="name"
+              />
+            </div>
+          )}
           <div>
             <label htmlFor="email" className="label">
               Correo electrónico
@@ -89,6 +134,7 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               className="input"
               placeholder="tu@correo.com"
+              autoComplete="email"
             />
           </div>
           <div>
@@ -104,19 +150,47 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               className="input"
               placeholder="••••••••"
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
             />
           </div>
+          {mode === "signup" && (
+            <div>
+              <label htmlFor="passwordConfirm" className="label">
+                Confirma tu contraseña
+              </label>
+              <input
+                id="passwordConfirm"
+                type="password"
+                required
+                minLength={8}
+                value={passwordConfirm}
+                onChange={(e) => setPasswordConfirm(e.target.value)}
+                className="input"
+                placeholder="••••••••"
+                autoComplete="new-password"
+              />
+              {passwordConfirm.length > 0 && password !== passwordConfirm && (
+                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  Las contraseñas no coinciden.
+                </p>
+              )}
+            </div>
+          )}
 
           {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
           {info && <p className="text-sm text-emerald-700 dark:text-emerald-400">{info}</p>}
 
           <button type="submit" disabled={!configured || busy} className="btn-primary w-full">
-            {mode === "signin" ? "Iniciar sesión" : "Crear cuenta"}
+            {busy ? "Un momento…" : mode === "signin" ? "Iniciar sesión" : "Crear cuenta"}
           </button>
         </form>
 
         <button
-          onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+          onClick={() => {
+            setMode(mode === "signin" ? "signup" : "signin");
+            setError(null);
+            setInfo(null);
+          }}
           className="mt-4 w-full text-center text-sm text-accent hover:underline"
         >
           {mode === "signin"

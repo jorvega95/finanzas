@@ -15,7 +15,12 @@ interface AuthContextValue {
   configured: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithPassword: (email: string, password: string) => Promise<void>;
-  signUpWithPassword: (email: string, password: string) => Promise<void>;
+  /** Devuelve true si Supabase exige confirmar el correo (no creó sesión). */
+  signUpWithPassword: (
+    email: string,
+    password: string,
+    displayName: string,
+  ) => Promise<boolean>;
   signOut: () => Promise<void>;
 }
 
@@ -54,10 +59,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
     },
-    async signUpWithPassword(email, password) {
-      if (!supabase) return;
-      const { error } = await supabase.auth.signUp({ email, password });
+    async signUpWithPassword(email, password, displayName) {
+      if (!supabase) return false;
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        // ESP-01: el backend lee user_metadata.full_name como display_name.
+        options: { data: { full_name: displayName } },
+      });
       if (error) throw error;
+      // Sin sesión == el proyecto exige confirmación por correo.
+      return data.session === null;
     },
     async signOut() {
       if (!supabase) return;
