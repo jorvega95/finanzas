@@ -3,6 +3,7 @@
 Proveedor default: CoinGecko (crédito plano, históricos 1 año).
 Alterno: CoinMarketCap. La API key jamás sale del backend.
 """
+
 from decimal import Decimal
 from typing import Protocol
 

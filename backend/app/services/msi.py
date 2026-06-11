@@ -2,6 +2,7 @@
 
 Invariante MSI-02 (test property-based obligatorio): sum(cuotas) == total exacto.
 """
+
 from decimal import Decimal
 
 

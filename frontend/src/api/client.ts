@@ -3,9 +3,11 @@
 import { supabase } from "../auth/supabase";
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  const res = await fetch(`${import.meta.env.VITE_API_URL}${path}`, {
+  const session = supabase ? (await supabase.auth.getSession()).data.session : null;
+  const token = session?.access_token;
+  // Sin VITE_API_URL se usa el proxy de Vite (/api -> :8000).
+  const base = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
+  const res = await fetch(`${base}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",

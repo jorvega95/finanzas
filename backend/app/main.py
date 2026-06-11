@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -8,7 +9,7 @@ from app.core.config import settings
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # TODO Fase 1+: arrancar APScheduler (app/jobs/scheduler.py)
     yield
 

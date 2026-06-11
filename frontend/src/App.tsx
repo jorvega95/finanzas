@@ -1,7 +1,14 @@
+import { RouterProvider } from "react-router-dom";
+import { AuthProvider } from "./auth/AuthProvider";
+import { ThemeProvider } from "./lib/theme";
+import { router } from "./routes";
+
 export default function App() {
   return (
-    <main className="grid min-h-screen place-items-center">
-      <h1 className="text-2xl font-semibold">Finanzas — scaffold listo 🚧</h1>
-    </main>
+    <ThemeProvider>
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
