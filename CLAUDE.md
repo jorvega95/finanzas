@@ -81,3 +81,8 @@ frontend/src/
 ## Estado actual
 
 Scaffold de Fase 0 (ver PLAN.md §6). Nada implementado aún: los servicios son stubs con `NotImplementedError` y referencia a sus reglas. Siguiente: Supabase project + login + migración inicial (`profiles`, `spaces`, `space_members`) + seed ESP-01/CAT-02.
+
+## Git
+
+Commits siempre con Conventional Commits y sin añadirte como co-autor.
+NUNCA hacer push directamente, solo generar los commits solicitados.
