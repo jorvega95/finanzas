@@ -187,6 +187,52 @@ async def test_fx03_no_rate_available_rejects(client):
     assert res.status_code == 422
 
 
+async def test_txn05_update_basic_fields(client):
+    """TXN-05: editar descripción, monto y categoría de un gasto normal."""
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/transactions", headers=ctx["headers"], json=expense_payload(ctx)
+    )
+    txn_id = res.json()["id"]
+
+    update = expense_payload(
+        ctx,
+        description="Editada",
+        amount="200.00",
+        category_id=ctx["categories"]["Transporte"]["id"],
+    )
+    res = await client.put(f"/api/v1/transactions/{txn_id}", headers=ctx["headers"], json=update)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["description"] == "Editada"
+    assert body["amount"] == "200.00"
+    assert body["category_id"] == ctx["categories"]["Transporte"]["id"]
+
+
+async def test_txn05_update_blocked_for_msi(client, db_session):
+    """TXN-05 + MSI-08: editar transacción con plan MSI activo debe rechazarse."""
+    from app.models.transactions import Transaction
+
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/transactions", headers=ctx["headers"], json=expense_payload(ctx)
+    )
+    txn_id = res.json()["id"]
+
+    # Simulate an MSI plan by setting installment_plan_id directly (SQLite, no FK check).
+    txn = await db_session.get(Transaction, uuid.UUID(txn_id))
+    txn.installment_plan_id = uuid.uuid4()
+    await db_session.commit()
+
+    res = await client.put(
+        f"/api/v1/transactions/{txn_id}",
+        headers=ctx["headers"],
+        json=expense_payload(ctx),
+    )
+    assert res.status_code == 422
+    assert "MSI" in res.json()["detail"]
+
+
 async def test_txn05_delete_and_glo05_cross_space_404(client):
     ctx = await bootstrap_space(client)
     res = await client.post(

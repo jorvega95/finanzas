@@ -221,6 +221,13 @@ async def update_transaction(
     FX-03 (mandatory case 6): the frozen rate only changes if the date or the
     currency change (or with an explicit manual override)."""
     txn = await get_transaction(session, space.id, txn_id)
+    # MSI-08: a purchase that originated an installment plan is managed through
+    # the plan UI (adjust cuota by cuota); block direct editing here.
+    if txn.installment_plan_id is not None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Esta transacción tiene un plan MSI activo; ajusta las cuotas desde el plan",
+        )
     credit_card_id = await _validate_input(session, space, data)
 
     if data.fx_rate_override is not None:

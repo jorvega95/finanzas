@@ -1,13 +1,19 @@
 import { useEffect, type ReactNode } from "react";
 
+const SIZE_CLASSES = {
+  sm: "max-w-sm",
+  lg: "max-w-2xl",
+};
+
 interface ModalProps {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  size?: keyof typeof SIZE_CLASSES;
 }
 
-export default function Modal({ open, onClose, title, children }: ModalProps) {
+export default function Modal({ open, onClose, title, children, size = "sm" }: ModalProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -21,14 +27,14 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className="card w-full max-w-sm p-6 shadow-xl"
+        className={`card w-full ${SIZE_CLASSES[size]} p-6 shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="modal-title" className="mb-5 font-semibold">

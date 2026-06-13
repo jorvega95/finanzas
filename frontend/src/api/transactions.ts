@@ -88,6 +88,18 @@ export function useDeleteTransaction() {
   });
 }
 
+export function useUpdateTransaction() {
+  const invalidate = useInvalidateTransactions();
+  return useMutation({
+    mutationFn: ({ id, ...body }: TransactionBody & { id: string }) =>
+      api<TransactionOut>(`/api/v1/transactions/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: invalidate,
+  });
+}
+
 export function useConfirmTransaction() {
   const invalidate = useInvalidateTransactions();
   return useMutation({
