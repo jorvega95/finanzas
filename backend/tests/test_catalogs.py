@@ -6,6 +6,67 @@ from app.models.spaces import SpaceMember, SpaceRole
 from tests.conftest import auth_headers, bootstrap_space
 
 
+async def test_cat03_update_expense_nature(client):
+    """CAT-03: PATCH can change expense_nature on an existing expense category."""
+    ctx = await bootstrap_space(client)
+    cat_id = ctx["categories"]["Comida"]["id"]  # seeded as "variable"
+
+    res = await client.patch(
+        f"/api/v1/catalogs/categories/{cat_id}",
+        headers=ctx["headers"],
+        json={"expense_nature": "discretionary"},
+    )
+    assert res.status_code == 200
+    assert res.json()["expense_nature"] == "discretionary"
+
+    # Verify income category ignores expense_nature update.
+    income_id = ctx["categories"]["Nómina"]["id"]
+    res = await client.patch(
+        f"/api/v1/catalogs/categories/{income_id}",
+        headers=ctx["headers"],
+        json={"expense_nature": "fixed"},
+    )
+    assert res.status_code == 200
+    assert res.json()["expense_nature"] is None
+
+
+async def test_cat03_expense_nature_explicit(client):
+    """CAT-03: expense_nature is stored verbatim when explicitly provided."""
+    ctx = await bootstrap_space(client)
+    for nature in ("fixed", "variable", "discretionary"):
+        res = await client.post(
+            "/api/v1/catalogs/categories",
+            headers=ctx["headers"],
+            json={"name": f"Test {nature}", "kind": "expense", "expense_nature": nature},
+        )
+        assert res.status_code == 201, nature
+        assert res.json()["expense_nature"] == nature, nature
+
+
+async def test_cat03_expense_default_nature_is_variable(client):
+    """CAT-03: omitting expense_nature on an expense category defaults to 'variable'."""
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/catalogs/categories",
+        headers=ctx["headers"],
+        json={"name": "Sin naturaleza", "kind": "expense"},
+    )
+    assert res.status_code == 201
+    assert res.json()["expense_nature"] == "variable"
+
+
+async def test_cat03_income_nature_always_null(client):
+    """CAT-03: income categories never carry expense_nature, even when sent."""
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/catalogs/categories",
+        headers=ctx["headers"],
+        json={"name": "Bono", "kind": "income", "expense_nature": "fixed"},
+    )
+    assert res.status_code == 201
+    assert res.json()["expense_nature"] is None
+
+
 async def test_cat01_unique_name_accent_and_case_insensitive(client):
     """CAT-01: 'Comida' ya existe ⇒ 'comida', 'CÓMIDA' chocan (unaccent+lower)."""
     ctx = await bootstrap_space(client)

@@ -66,11 +66,28 @@ export function useCreateCategory() {
 export function useUpdateCategory() {
   const invalidate = useInvalidate(["categories"]);
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; name?: string; is_active?: boolean }) =>
+    mutationFn: ({
+      id,
+      ...body
+    }: {
+      id: string;
+      name?: string;
+      expense_nature?: string | null;
+      is_active?: boolean;
+    }) =>
       api<CategoryOut>(`/api/v1/catalogs/categories/${id}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteCategory() {
+  const invalidate = useInvalidate(["categories"]);
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<void>(`/api/v1/catalogs/categories/${id}`, { method: "DELETE" }),
     onSuccess: invalidate,
   });
 }
