@@ -25,8 +25,40 @@ class PaymentMethodType(enum.StrEnum):
     cash = "cash"
     debit = "debit"
     credit_card = "credit_card"
+    prepaid = "prepaid"  # CAT-07: vales/regalo y demás prepago
     transfer = "transfer"
     other = "other"
+
+
+class CardBehavior(enum.StrEnum):
+    """CAT-08: system classifier driving the card engine (TAR-01)."""
+
+    credit = "credit"  # deuda, ciclos, statements, MSI (TDC)
+    debit = "debit"  # saldo de valor almacenado (TAR-05)
+    prepaid = "prepaid"  # vales/regalo: saldo de valor almacenado (TAR-05)
+
+
+class CardType(Base, AuditMixin):
+    """CAT-08: per-space catalog of card types. The name is free/editable;
+    the behavior is a fixed system classifier the engine depends on."""
+
+    __tablename__ = "card_types"
+    __table_args__ = (UniqueConstraint("space_id", "name_normalized", name="uq_card_type_name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    space_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+    name_normalized: Mapped[str] = mapped_column(String(60), nullable=False)
+    behavior: Mapped[CardBehavior] = mapped_column(
+        Enum(CardBehavior, name="card_behavior", native_enum=False, length=10),
+        nullable=False,
+    )
+    icon: Mapped[str | None] = mapped_column(String(40))
+    color: Mapped[str | None] = mapped_column(String(20))
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class Category(Base, AuditMixin):
@@ -81,7 +113,6 @@ class PaymentMethod(Base, AuditMixin):
         Enum(PaymentMethodType, name="payment_method_type", native_enum=False, length=15),
         nullable=False,
     )
-    # CAT-07: type=credit_card must reference a card. FK added with the
-    # credit_cards table (Fase 2); kept as plain UUID until then.
-    credit_card_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    # CAT-07/TAR-03: a card-linked method references its card (any type).
+    card_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

@@ -349,8 +349,8 @@ async def export_transactions_csv(session: AsyncSession, space: Space) -> str:
 
 async def export_full_json(session: AsyncSession, space: Space) -> str:
     """IMP-07: export JSON completo (mitigación de ESP-06)."""
-    from app.models.cards import CardStatement, CreditCard
-    from app.models.catalogs import PaymentMethod
+    from app.models.cards import Card, CardStatement
+    from app.models.catalogs import CardType, PaymentMethod
     from app.models.msi import InstallmentPlan
 
     def serialize(obj: Any) -> dict[str, Any]:
@@ -368,9 +368,10 @@ async def export_full_json(session: AsyncSession, space: Space) -> str:
     payload: dict[str, Any] = {"space": serialize(space)}
     for key, model in (
         ("categories", Category),
+        ("card_types", CardType),
         ("payment_methods", PaymentMethod),
         ("transactions", Transaction),
-        ("credit_cards", CreditCard),
+        ("cards", Card),
         ("card_statements", CardStatement),
         ("installment_plans", InstallmentPlan),
     ):

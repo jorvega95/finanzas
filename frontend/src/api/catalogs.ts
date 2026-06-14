@@ -16,8 +16,20 @@ export interface CategoryOut {
 export interface PaymentMethodOut {
   id: string;
   name: string;
-  type: "cash" | "debit" | "credit_card" | "transfer" | "other";
-  credit_card_id: string | null;
+  type: "cash" | "debit" | "credit_card" | "prepaid" | "transfer" | "other";
+  card_id: string | null;
+  is_active: boolean;
+}
+
+export type CardBehavior = "credit" | "debit" | "prepaid";
+
+export interface CardTypeOut {
+  id: string;
+  name: string;
+  behavior: CardBehavior;
+  icon: string | null;
+  color: string | null;
+  is_system: boolean;
   is_active: boolean;
 }
 
@@ -38,6 +50,26 @@ export function usePaymentMethods(includeInactive = false) {
       api<PaymentMethodOut[]>(
         `/api/v1/catalogs/payment-methods?include_inactive=${includeInactive}`,
       ),
+  });
+}
+
+export function useCardTypes(includeInactive = false) {
+  return useQuery({
+    queryKey: ["card-types", includeInactive],
+    queryFn: () =>
+      api<CardTypeOut[]>(`/api/v1/catalogs/card-types?include_inactive=${includeInactive}`),
+  });
+}
+
+export function useCreateCardType() {
+  const invalidate = useInvalidate(["card-types"]);
+  return useMutation({
+    mutationFn: (body: { name: string; behavior: CardBehavior }) =>
+      api<CardTypeOut>("/api/v1/catalogs/card-types", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: invalidate,
   });
 }
 

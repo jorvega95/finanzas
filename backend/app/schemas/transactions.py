@@ -19,6 +19,12 @@ Money = Annotated[
     Field(gt=0, max_digits=14, decimal_places=2),
     PlainSerializer(lambda v: str(v), return_type=str, when_used="json"),
 ]
+# Non-negative money: opening balances may legitimately be zero (TAR-05).
+MoneyNonNeg = Annotated[
+    Decimal,
+    Field(ge=0, max_digits=14, decimal_places=2),
+    PlainSerializer(lambda v: str(v), return_type=str, when_used="json"),
+]
 # Output-only money: may be zero or negative (e.g. statement credit, TDC-10).
 MoneyOut = Annotated[
     Decimal,
@@ -68,7 +74,7 @@ class TransactionOut(BaseModel):
     category_id: uuid.UUID | None
     payment_method_id: uuid.UUID | None
     payment_method_to_id: uuid.UUID | None
-    credit_card_id: uuid.UUID | None
+    card_id: uuid.UUID | None
     expense_nature_override: ExpenseNature | None
     recurring_rule_id: uuid.UUID | None
     needs_review: bool

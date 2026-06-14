@@ -6,8 +6,11 @@ from fastapi import APIRouter, status
 from sqlalchemy import select
 
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
-from app.models.catalogs import Category, CategoryKind, PaymentMethod
+from app.models.catalogs import CardType, Category, CategoryKind, PaymentMethod
 from app.schemas.catalogs import (
+    CardTypeCreate,
+    CardTypeOut,
+    CardTypeUpdate,
     CategoryCreate,
     CategoryOut,
     CategoryUpdate,
@@ -130,3 +133,61 @@ async def delete_payment_method(
 ) -> None:
     space, _ = space_and_member
     await svc.delete_payment_method(db, space.id, method_id)
+
+
+# --- Card types (CAT-08) -----------------------------------------------------
+
+
+@router.get("/card-types", response_model=list[CardTypeOut])
+async def list_card_types(
+    db: DbSession, space_and_member: ActiveSpace, include_inactive: bool = False
+) -> list[CardType]:
+    space, _ = space_and_member
+    stmt = select(CardType).where(CardType.space_id == space.id)
+    if not include_inactive:
+        stmt = stmt.where(CardType.is_active.is_(True))
+    rows = await db.execute(stmt.order_by(CardType.name))
+    return list(rows.scalars().all())
+
+
+@router.post("/card-types", response_model=CardTypeOut, status_code=status.HTTP_201_CREATED)
+async def create_card_type(
+    db: DbSession, space_and_member: EditorSpace, user: CurrentUser, payload: CardTypeCreate
+) -> CardType:
+    space, _ = space_and_member
+    return await svc.create_card_type(
+        db,
+        space.id,
+        user.id,
+        name=payload.name,
+        behavior=payload.behavior,
+        icon=payload.icon,
+        color=payload.color,
+    )
+
+
+@router.patch("/card-types/{card_type_id}", response_model=CardTypeOut)
+async def update_card_type(
+    db: DbSession,
+    space_and_member: EditorSpace,
+    card_type_id: uuid.UUID,
+    payload: CardTypeUpdate,
+) -> CardType:
+    space, _ = space_and_member
+    return await svc.update_card_type(
+        db,
+        space.id,
+        card_type_id,
+        name=payload.name,
+        icon=payload.icon,
+        color=payload.color,
+        is_active=payload.is_active,
+    )
+
+
+@router.delete("/card-types/{card_type_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_card_type(
+    db: DbSession, space_and_member: EditorSpace, card_type_id: uuid.UUID
+) -> None:
+    space, _ = space_and_member
+    await svc.delete_card_type(db, space.id, card_type_id)

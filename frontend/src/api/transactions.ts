@@ -14,7 +14,7 @@ export interface TransactionOut {
   category_id: string | null;
   payment_method_id: string | null;
   payment_method_to_id: string | null;
-  credit_card_id: string | null;
+  card_id: string | null;
   expense_nature_override: string | null;
   recurring_rule_id: string | null;
   needs_review: boolean;

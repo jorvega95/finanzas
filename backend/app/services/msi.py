@@ -13,11 +13,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.catalogs import CardBehavior
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus, PlanStatus
 from app.models.spaces import Space
 from app.models.transactions import Transaction, TransactionType
 from app.services import billing_cycles as cycles
 from app.services.cards import (
+    card_behavior,
     get_card,
     get_or_create_statement,
     recompute_statement_total,
@@ -69,7 +71,7 @@ async def create_plan_from_transaction(
     txn = await session.get(Transaction, transaction_id)
     if txn is None or txn.space_id != space.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Transacción no encontrada")
-    if txn.type != TransactionType.expense or txn.credit_card_id is None:
+    if txn.type != TransactionType.expense or txn.card_id is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "MSI solo aplica a compras con tarjeta de crédito",
@@ -81,7 +83,13 @@ async def create_plan_from_transaction(
     if txn.amount < CENT * months:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Monto demasiado pequeño")
 
-    card = await get_card(session, space.id, txn.credit_card_id)
+    card = await get_card(session, space.id, txn.card_id)
+    # MSI-01/TAR-02: MSI only exists on credit cards.
+    if await card_behavior(session, card) != CardBehavior.credit:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "MSI solo aplica a tarjetas de crédito",
+        )
     # MSI-09: compra en moneda distinta a la de la tarjeta no soportada en v1.
     if txn.currency != card.currency:
         raise HTTPException(
@@ -156,7 +164,7 @@ async def settle_plan_early(
         currency=purchase.currency,
         category_id=purchase.category_id,
         payment_method_id=purchase.payment_method_id,
-        credit_card_id=card.id,
+        card_id=card.id,
         created_by=user_id,
     )
     session.add(settlement)

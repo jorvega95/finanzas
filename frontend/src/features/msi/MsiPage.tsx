@@ -2,6 +2,7 @@
 // conversión de compras a MSI (MSI-01) y liquidación anticipada (MSI-07).
 import { useMemo, useState } from "react";
 import { useTransactions } from "../../api/transactions";
+import { usePaymentMethods } from "../../api/catalogs";
 import {
   useCreateMsiPlan,
   useMsiPlans,
@@ -18,11 +19,22 @@ const STATUS_LABELS: Record<string, string> = {
 
 function ConvertSection() {
   const txns = useTransactions({ type: "expense", limit: 100 });
+  const methods = usePaymentMethods();
   const create = useCreateMsiPlan();
   const [txnId, setTxnId] = useState("");
   const [months, setMonths] = useState("12");
 
-  const candidates = (txns.data?.items ?? []).filter((t) => t.credit_card_id !== null);
+  // MSI-01: solo compras con tarjeta de crédito son convertibles (TAR-02).
+  const creditMethodIds = useMemo(
+    () =>
+      new Set(
+        (methods.data ?? []).filter((m) => m.type === "credit_card").map((m) => m.id),
+      ),
+    [methods.data],
+  );
+  const candidates = (txns.data?.items ?? []).filter(
+    (t) => t.payment_method_id !== null && creditMethodIds.has(t.payment_method_id),
+  );
 
   return (
     <section className="card p-5">

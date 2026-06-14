@@ -36,18 +36,25 @@ class StatementStatus(enum.StrEnum):
     partially_paid = "partially_paid"
 
 
-class CreditCard(Base, AuditMixin):
-    """TDC-01: never stores PAN/CVV/expiration — only last4."""
+class Card(Base, AuditMixin):
+    """A card of any type (TAR-01). Credit cards (behavior=credit) carry the
+    statement/cycle fields; debit/prepaid carry a stored-value balance (TAR-05).
+    TDC-01: never stores PAN/CVV/expiration — only last4."""
 
-    __tablename__ = "credit_cards"
+    __tablename__ = "cards"
     __table_args__ = (
+        # TAR-02: statement_day only for credit (NULL otherwise).
         CheckConstraint(
-            "statement_day_is_last OR (statement_day >= 1 AND statement_day <= 28)",
+            "statement_day_is_last OR statement_day IS NULL "
+            "OR (statement_day >= 1 AND statement_day <= 28)",
             name="ck_card_statement_day",
         ),
-        # TDC-01: exactly one of payment_due_days | payment_day(/last).
+        # TDC-01/TAR-02: credit ⇒ exactly one of payment_due_days | payment_day;
+        # non-credit ⇒ no payment rule at all.
         CheckConstraint(
-            "(payment_due_days IS NOT NULL) != (payment_day IS NOT NULL OR payment_day_is_last)",
+            "(payment_due_days IS NULL AND payment_day IS NULL AND NOT payment_day_is_last) "
+            "OR ((payment_due_days IS NOT NULL) != "
+            "(payment_day IS NOT NULL OR payment_day_is_last))",
             name="ck_card_payment_rule",
         ),
     )
@@ -56,14 +63,24 @@ class CreditCard(Base, AuditMixin):
     space_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # TAR-01: the card's type (CAT-08) determines its behavior.
+    card_type_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("card_types.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     alias: Mapped[str] = mapped_column(String(60), nullable=False)
     bank: Mapped[str] = mapped_column(String(60), nullable=False)
     network: Mapped[str] = mapped_column(String(20), nullable=False)
     last4: Mapped[str] = mapped_column(String(4), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="MXN")
+
+    # TAR-05: stored-value balance for debit/prepaid (NULL for credit).
+    initial_balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    allow_overdraft: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # TDC-01 (credit only): credit limit.
     credit_limit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
-    # TDC-02: 1-28 or last.
+    # TDC-02: 1-28 or last (credit only).
     statement_day: Mapped[int | None] = mapped_column(Integer)
     statement_day_is_last: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # TDC-05.
@@ -100,8 +117,9 @@ class CardStatement(Base):
     space_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Statements exist only for credit cards, hence the explicit name.
     credit_card_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("credit_cards.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid, ForeignKey("cards.id", ondelete="CASCADE"), nullable=False, index=True
     )
     period_start: Mapped[dt.date] = mapped_column(Date, nullable=False)
     period_end: Mapped[dt.date] = mapped_column(Date, nullable=False)
@@ -124,4 +142,4 @@ class CardStatement(Base):
         default=StatementStatus.open,
     )
 
-    card: Mapped[CreditCard] = relationship(back_populates="statements")
+    card: Mapped[Card] = relationship(back_populates="statements")

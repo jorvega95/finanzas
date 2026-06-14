@@ -2,8 +2,10 @@
 
 from app.db.base import Base
 from app.models.budgets import Budget
-from app.models.cards import CardStatement, CreditCard, CutoffDayPolicy, StatementStatus
+from app.models.cards import Card, CardStatement, CutoffDayPolicy, StatementStatus
 from app.models.catalogs import (
+    CardBehavior,
+    CardType,
     Category,
     CategoryKind,
     ExpenseNature,
@@ -33,7 +35,10 @@ __all__ = [
     "AssetPrice",
     "Base",
     "Budget",
+    "Card",
+    "CardBehavior",
     "CardStatement",
+    "CardType",
     "Holding",
     "ImportBatch",
     "ImportStatus",
@@ -44,7 +49,6 @@ __all__ = [
     "PortfolioSnapshot",
     "Category",
     "CategoryKind",
-    "CreditCard",
     "CutoffDayPolicy",
     "ExchangeRate",
     "ExpenseNature",

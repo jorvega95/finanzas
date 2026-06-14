@@ -259,11 +259,12 @@ async def snapshot_portfolio(
 
 
 async def snapshot_net_worth(session: AsyncSession, space: Space) -> NetWorthSnapshot:
-    """PAT-01: activos (último snapshot de portafolio del día) − pasivos
-    (deuda TDC-09 a+b+c de todas las tarjetas). Idempotente por día.
-    PAT-02: no incluye saldos de cuentas de efectivo/débito (v1)."""
-    from app.models.cards import CreditCard
-    from app.services.cards import debt_summary
+    """PAT-01/PAT-02: activos = portafolio + saldos de tarjetas no-crédito
+    (TAR-05); pasivos = deuda de tarjetas de crédito (TDC-09 a+b+c). Idempotente
+    por día."""
+    from app.models.cards import Card
+    from app.models.catalogs import CardBehavior, CardType
+    from app.services.cards import card_balance, debt_summary
 
     today = today_in_tz(space.timezone)
     portfolio = await session.scalar(
@@ -271,24 +272,36 @@ async def snapshot_net_worth(session: AsyncSession, space: Space) -> NetWorthSna
             PortfolioSnapshot.space_id == space.id, PortfolioSnapshot.date == today
         )
     )
-    assets = portfolio.total_value if portfolio is not None else ZERO
+    portfolio_value = portfolio.total_value if portfolio is not None else ZERO
 
     cards = (
-        (await session.execute(select(CreditCard).where(CreditCard.space_id == space.id)))
-        .scalars()
-        .all()
-    )
+        await session.execute(
+            select(Card, CardType.behavior)
+            .join(CardType, Card.card_type_id == CardType.id)
+            .where(Card.space_id == space.id)
+        )
+    ).all()
     liabilities = ZERO
-    for card in cards:
-        debt = await debt_summary(session, card)
-        liabilities += debt["total_debt"]
+    card_balances = ZERO
+    for card, behavior in cards:
+        if behavior == CardBehavior.credit:
+            debt = await debt_summary(session, card)
+            liabilities += debt["total_debt"]
+        else:
+            card_balances += await card_balance(session, card)  # TAR-05
+
+    assets = portfolio_value + card_balances
 
     existing = await session.scalar(
         select(NetWorthSnapshot).where(
             NetWorthSnapshot.space_id == space.id, NetWorthSnapshot.date == today
         )
     )
-    breakdown = {"assets": str(assets), "liabilities": str(liabilities)}
+    breakdown = {
+        "portfolio": str(portfolio_value),
+        "card_balances": str(card_balances),
+        "card_debt": str(liabilities),
+    }
     if existing is not None:
         existing.assets = assets
         existing.liabilities = liabilities

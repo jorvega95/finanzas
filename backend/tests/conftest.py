@@ -87,10 +87,14 @@ async def bootstrap_space(client, user_id: uuid.UUID | None = None) -> dict:
 
     categories = (await client.get("/api/v1/catalogs/categories", headers=headers)).json()
     methods = (await client.get("/api/v1/catalogs/payment-methods", headers=headers)).json()
+    card_types = (await client.get("/api/v1/catalogs/card-types", headers=headers)).json()
     return {
         "user_id": user_id,
         "space_id": space_id,
         "headers": headers,
         "categories": {c["name"]: c for c in categories},
         "methods": {m["name"]: m for m in methods},
+        # CAT-08: seeded card types keyed by behavior for convenience.
+        "card_types": {ct["name"]: ct for ct in card_types},
+        "card_type_by_behavior": {ct["behavior"]: ct for ct in card_types},
     }

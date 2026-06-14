@@ -8,7 +8,8 @@ from sqlalchemy import select
 
 from app.core.dates import today_in_tz
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
-from app.models.cards import CardStatement, CreditCard, StatementStatus
+from app.models.cards import Card, CardStatement, StatementStatus
+from app.models.catalogs import CardBehavior
 from app.models.reminders import Reminder, ReminderChannel
 from app.schemas.cards import (
     CardCreate,
@@ -16,6 +17,7 @@ from app.schemas.cards import (
     CardUpdate,
     CardWithDebtOut,
     DebtSummary,
+    NextPaymentOut,
     PaymentCreate,
     ReminderOut,
     StatementOut,
@@ -37,43 +39,56 @@ def _statement_out(statement: CardStatement, today: dt.date) -> StatementOut:
     return out
 
 
+async def _card_with_debt(db: DbSession, card: Card) -> CardWithDebtOut:
+    out = CardWithDebtOut.model_validate(card)
+    out.behavior = await svc.card_behavior(db, card)
+    if out.behavior == CardBehavior.credit:
+        out.debt = DebtSummary(**(await svc.debt_summary(db, card)))  # TDC-09
+        nxt = await svc.next_payment_due(db, card)  # TDC-14
+        if nxt is not None:
+            amount, due_date = nxt
+            out.next_payment = NextPaymentOut(amount=amount, due_date=due_date)
+    else:
+        out.balance = await svc.card_balance(db, card)  # TAR-05
+    return out
+
+
 @router.get("", response_model=list[CardWithDebtOut])
 async def list_cards(
     db: DbSession, space_and_member: ActiveSpace, include_inactive: bool = False
 ) -> list[CardWithDebtOut]:
     space, _ = space_and_member
-    stmt = select(CreditCard).where(CreditCard.space_id == space.id)
+    stmt = select(Card).where(Card.space_id == space.id)
     if not include_inactive:
-        stmt = stmt.where(CreditCard.is_active.is_(True))
-    cards = (await db.execute(stmt.order_by(CreditCard.alias))).scalars().all()
-    result = []
-    for card in cards:
-        out = CardWithDebtOut.model_validate(card)
-        out.debt = DebtSummary(**(await svc.debt_summary(db, card)))  # TDC-09
-        result.append(out)
-    return result
+        stmt = stmt.where(Card.is_active.is_(True))
+    cards = (await db.execute(stmt.order_by(Card.alias))).scalars().all()
+    return [await _card_with_debt(db, card) for card in cards]
 
 
 @router.post("", response_model=CardOut, status_code=status.HTTP_201_CREATED)
 async def create_card(
     db: DbSession, space_and_member: EditorSpace, user: CurrentUser, payload: CardCreate
-) -> CreditCard:
+) -> Card:
     space, _ = space_and_member
     return await svc.create_card(
         db,
         space,
         user.id,
+        card_type_id=payload.card_type_id,
         alias=payload.alias,
         bank=payload.bank,
         network=payload.network,
         last4=payload.last4,
+        currency=payload.currency,
         statement_day=payload.statement_day,
         cutoff_day_policy=payload.cutoff_day_policy.value,
         payment_due_days=payload.payment_due_days,
         payment_day=payload.payment_day,
         credit_limit=payload.credit_limit,
-        currency=payload.currency,
         reminder_days=payload.reminder_days,
+        opening_balance=payload.opening_balance,
+        initial_balance=payload.initial_balance,
+        allow_overdraft=payload.allow_overdraft,
         color=payload.color,
     )
 
@@ -84,32 +99,29 @@ async def get_card(
 ) -> CardWithDebtOut:
     space, _ = space_and_member
     card = await svc.get_card(db, space.id, card_id)
-    out = CardWithDebtOut.model_validate(card)
-    out.debt = DebtSummary(**(await svc.debt_summary(db, card)))
-    return out
+    return await _card_with_debt(db, card)
 
 
-@router.patch("/{card_id}", response_model=CardOut)
+@router.patch("/{card_id}", response_model=CardWithDebtOut)
 async def update_card(
     db: DbSession,
     space_and_member: EditorSpace,
-    user: CurrentUser,
     card_id: uuid.UUID,
     payload: CardUpdate,
-) -> CreditCard:
+) -> CardWithDebtOut:
+    """TDC-15: full edit; fields left blank at creation can be filled later."""
     space, _ = space_and_member
     card = await svc.get_card(db, space.id, card_id)
-    data = payload.model_dump(exclude_unset=True)
-    deactivate = data.pop("is_active", None)
-    for field, value in data.items():
-        setattr(card, field, value)
-    if deactivate is False:
+    changes = payload.model_dump(exclude_unset=True)
+    is_active = changes.pop("is_active", None)
+    if is_active is False:
         await svc.deactivate_card(db, card)  # TDC-12 (+ CAT-07 method)
-    elif deactivate is True:
-        card.is_active = True
-    await db.commit()
+    elif is_active is True:
+        await svc.set_card_active(db, card, True)
+    if changes:
+        await svc.update_card(db, space, card, changes)
     await db.refresh(card)
-    return card
+    return await _card_with_debt(db, card)
 
 
 @router.get("/{card_id}/statements", response_model=list[StatementOut])

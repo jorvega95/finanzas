@@ -14,7 +14,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dates import today_in_tz
-from app.models.catalogs import Category, CategoryKind, ExpenseNature, PaymentMethod
+from app.models.cards import Card
+from app.models.catalogs import (
+    CardBehavior,
+    Category,
+    CategoryKind,
+    ExpenseNature,
+    PaymentMethod,
+)
 from app.models.recurring import RecurringTombstone
 from app.models.spaces import Space
 from app.models.transactions import Transaction, TransactionType
@@ -104,11 +111,19 @@ async def _resolve_fx_rate(
     return rate
 
 
+@dataclass
+class _ResolvedCard:
+    """The card behind a transaction's source method, if any (TAR-03)."""
+
+    card: Card | None = None
+    behavior: CardBehavior | None = None
+
+
 async def _validate_input(
     session: AsyncSession, space: Space, data: TransactionInput
-) -> uuid.UUID | None:
-    """Shared TXN-01/02 validation. Returns the credit card id derived from
-    the payment method (TXN-06), if any."""
+) -> _ResolvedCard:
+    """Shared TXN-01/02 validation. Resolves the card behind the source
+    payment method (TAR-03) and its behavior (TXN-06 for credit)."""
     if data.currency not in SUPPORTED_CURRENCIES:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -116,7 +131,6 @@ async def _validate_input(
         )
     _validate_date(data.date, space)
 
-    credit_card_id: uuid.UUID | None = None
     if data.type == TransactionType.transfer:
         # TXN-02: transfer needs distinct from/to methods and no category.
         if not data.payment_method_id or not data.payment_method_to_id:
@@ -136,23 +150,53 @@ async def _validate_input(
             )
         await _validate_payment_method(session, space.id, data.payment_method_id)
         await _validate_payment_method(session, space.id, data.payment_method_to_id)
-    else:
-        # TXN-01: expense/income require category + payment method.
-        if data.category_id is None or data.payment_method_id is None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Categoría y método de pago son obligatorios",
-            )
-        await _validate_category(session, space.id, data.category_id, data.type)
-        method = await _validate_payment_method(session, space.id, data.payment_method_id)
-        # TXN-06: charges on a credit-card method belong to a billing cycle.
-        credit_card_id = method.credit_card_id
-        if data.payment_method_to_id is not None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Solo las transferencias llevan método destino",
-            )
-    return credit_card_id
+        return _ResolvedCard()
+
+    # TXN-01: expense/income require category + payment method.
+    if data.category_id is None or data.payment_method_id is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Categoría y método de pago son obligatorios",
+        )
+    await _validate_category(session, space.id, data.category_id, data.type)
+    method = await _validate_payment_method(session, space.id, data.payment_method_id)
+    if data.payment_method_to_id is not None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Solo las transferencias llevan método destino",
+        )
+    # TAR-03: resolve the card behind the method, if any.
+    if method.card_id is None:
+        return _ResolvedCard()
+    from app.services.cards import card_behavior, get_card
+
+    card = await get_card(session, space.id, method.card_id)
+    return _ResolvedCard(card=card, behavior=await card_behavior(session, card))
+
+
+async def _check_sufficient_funds(
+    session: AsyncSession,
+    resolved: _ResolvedCard,
+    data: TransactionInput,
+    exclude_txn_id: uuid.UUID | None = None,
+) -> None:
+    """TAR-05: an expense on a debit/prepaid card cannot overdraw the balance
+    unless the card allows it."""
+    if (
+        data.type != TransactionType.expense
+        or resolved.card is None
+        or resolved.behavior == CardBehavior.credit
+        or resolved.card.allow_overdraft
+    ):
+        return
+    from app.services.cards import card_balance
+
+    available = await card_balance(session, resolved.card, exclude_txn_id=exclude_txn_id)
+    if data.amount > available:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Saldo insuficiente en la tarjeta (disponible {available})",
+        )
 
 
 async def get_transaction(
@@ -174,7 +218,8 @@ async def create_transaction(
     scheduled_date: date | None = None,
     needs_review: bool = False,
 ) -> Transaction:
-    credit_card_id = await _validate_input(session, space, data)
+    resolved = await _validate_input(session, space, data)
+    await _check_sufficient_funds(session, resolved, data)  # TAR-05
     fx_rate = await _resolve_fx_rate(
         session, space, data.currency, data.date, data.fx_rate_override
     )
@@ -191,7 +236,7 @@ async def create_transaction(
         expense_nature_override=data.expense_nature_override,
         payment_method_id=data.payment_method_id,
         payment_method_to_id=data.payment_method_to_id,
-        credit_card_id=credit_card_id,
+        card_id=resolved.card.id if resolved.card is not None else None,
         recurring_rule_id=recurring_rule_id,
         scheduled_date=scheduled_date,
         needs_review=needs_review,
@@ -199,12 +244,16 @@ async def create_transaction(
     )
     session.add(txn)
     await session.flush()
-    if credit_card_id is not None and data.type != TransactionType.transfer:
-        # TXN-06/TDC-05: card charges belong to a billing cycle.
-        from app.services.cards import assign_charge_to_statement, get_card
+    from app.services.cards import assign_charge_to_statement, cycle_ready
 
-        card = await get_card(session, space.id, credit_card_id)
-        await assign_charge_to_statement(session, card, txn)
+    if (
+        resolved.card is not None
+        and resolved.behavior == CardBehavior.credit
+        and cycle_ready(resolved.card)  # TDC-15: skip unconfigured cards
+        and data.type != TransactionType.transfer
+    ):
+        # TXN-06/TDC-05: only credit charges belong to a billing cycle (TAR-04).
+        await assign_charge_to_statement(session, resolved.card, txn)
     await session.commit()
     await session.refresh(txn)
     return txn
@@ -228,7 +277,9 @@ async def update_transaction(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Esta transacción tiene un plan MSI activo; ajusta las cuotas desde el plan",
         )
-    credit_card_id = await _validate_input(session, space, data)
+    resolved = await _validate_input(session, space, data)
+    # TAR-05: the edited amount cannot overdraw the balance (excluding itself).
+    await _check_sufficient_funds(session, resolved, data, exclude_txn_id=txn.id)
 
     if data.fx_rate_override is not None:
         txn.fx_rate_to_base = data.fx_rate_override
@@ -246,18 +297,26 @@ async def update_transaction(
     txn.expense_nature_override = data.expense_nature_override
     txn.payment_method_id = data.payment_method_id
     txn.payment_method_to_id = data.payment_method_to_id
-    txn.credit_card_id = credit_card_id
+    txn.card_id = resolved.card.id if resolved.card is not None else None
     txn.updated_by = updated_by
     txn.needs_review = False  # REC-03: adjusting counts as reviewing.
 
     # TDC-05: re-resolve the cycle (date or method may have changed) and
-    # recompute any closed statement totals affected.
-    from app.services.cards import assign_charge_to_statement, get_card, recompute_statement_total
+    # recompute any closed statement totals affected. Only credit charges (TAR-04).
+    from app.services.cards import (
+        assign_charge_to_statement,
+        cycle_ready,
+        recompute_statement_total,
+    )
 
     old_statement_id = txn.statement_id
-    if credit_card_id is not None and data.type != TransactionType.transfer:
-        card = await get_card(session, space.id, credit_card_id)
-        await assign_charge_to_statement(session, card, txn)
+    if (
+        resolved.card is not None
+        and resolved.behavior == CardBehavior.credit
+        and cycle_ready(resolved.card)  # TDC-15
+        and data.type != TransactionType.transfer
+    ):
+        await assign_charge_to_statement(session, resolved.card, txn)
     elif txn.statement_id is not None and data.type != TransactionType.transfer:
         txn.statement_id = None
     await session.flush()

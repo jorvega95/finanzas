@@ -6,7 +6,7 @@ from fastapi import APIRouter, status
 from sqlalchemy import select
 
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
-from app.models.cards import CreditCard
+from app.models.cards import Card
 from app.models.transactions import Transaction
 from app.schemas.cards import (
     InstallmentOut,
@@ -41,7 +41,7 @@ async def list_plans(db: DbSession, space_and_member: ActiveSpace) -> list[PlanS
     for item in summaries:
         plan = item["plan"]
         txn = await db.get(Transaction, plan.transaction_id)
-        card = await db.get(CreditCard, plan.credit_card_id)
+        card = await db.get(Card, plan.credit_card_id)
         out.append(
             PlanSummaryOut(
                 plan=PlanOut.model_validate(plan),
@@ -65,9 +65,7 @@ async def projection(db: DbSession, space_and_member: ActiveSpace) -> list[Proje
     rows = await svc.monthly_projection(db, space.id)
     aliases = {
         c.id: c.alias
-        for c in (await db.execute(select(CreditCard).where(CreditCard.space_id == space.id)))
-        .scalars()
-        .all()
+        for c in (await db.execute(select(Card).where(Card.space_id == space.id))).scalars().all()
     }
     return [
         ProjectionRow(

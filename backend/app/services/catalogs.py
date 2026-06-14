@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.text import normalize_name
 from app.models.catalogs import (
+    CardBehavior,
+    CardType,
     Category,
     CategoryKind,
     ExpenseNature,
@@ -36,10 +38,17 @@ SEED_PAYMENT_METHODS: list[tuple[str, PaymentMethodType]] = [
     ("Débito", PaymentMethodType.debit),
     ("Transferencia", PaymentMethodType.transfer),
 ]
+# CAT-08: default card types. Name is free/editable; behavior is fixed.
+SEED_CARD_TYPES: list[tuple[str, CardBehavior]] = [
+    ("Crédito", CardBehavior.credit),
+    ("Débito", CardBehavior.debit),
+    ("Vales de despensa", CardBehavior.prepaid),
+    ("Tarjeta de regalo", CardBehavior.prepaid),
+]
 
 
 def seed_catalogs(session: AsyncSession, space_id: uuid.UUID, created_by: uuid.UUID) -> None:
-    """CAT-02: seed default categories and payment methods for a new space."""
+    """CAT-02: seed default categories, payment methods and card types."""
     for name, nature in SEED_EXPENSE_CATEGORIES:
         session.add(
             Category(
@@ -68,6 +77,17 @@ def seed_catalogs(session: AsyncSession, space_id: uuid.UUID, created_by: uuid.U
                 name=name,
                 name_normalized=normalize_name(name),
                 type=method_type,
+                created_by=created_by,
+            )
+        )
+    for name, behavior in SEED_CARD_TYPES:
+        session.add(
+            CardType(
+                space_id=space_id,
+                name=name,
+                name_normalized=normalize_name(name),
+                behavior=behavior,
+                is_system=True,
                 created_by=created_by,
             )
         )
@@ -256,11 +276,11 @@ async def create_payment_method(
     *,
     name: str,
     type: PaymentMethodType,
-    credit_card_id: uuid.UUID | None = None,
+    card_id: uuid.UUID | None = None,
 ) -> PaymentMethod:
-    # CAT-07: a credit_card method must reference a card; those are created
-    # automatically with the card (TDC-01), never by hand.
-    if type == PaymentMethodType.credit_card and credit_card_id is None:
+    # CAT-07/TAR-03: a card-linked method is created automatically with the
+    # card (TAR-03), never by hand.
+    if type == PaymentMethodType.credit_card and card_id is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Un método de tarjeta de crédito se crea junto con la tarjeta",
@@ -271,7 +291,7 @@ async def create_payment_method(
         name=name,
         name_normalized=normalized,
         type=type,
-        credit_card_id=credit_card_id,
+        card_id=card_id,
         created_by=created_by,
     )
     session.add(method)
@@ -338,4 +358,117 @@ async def delete_payment_method(
             "El método tiene transacciones asociadas; desactívalo en su lugar",
         )
     await session.delete(method)
+    await session.commit()
+
+
+# --- Card types (CAT-08) -----------------------------------------------------
+
+
+async def _ensure_unique_card_type(
+    session: AsyncSession,
+    space_id: uuid.UUID,
+    name: str,
+    exclude_id: uuid.UUID | None = None,
+) -> str:
+    """CAT-08: name unique per space, case/accent-insensitive."""
+    normalized = normalize_name(name)
+    stmt = select(CardType.id).where(
+        CardType.space_id == space_id,
+        CardType.name_normalized == normalized,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(CardType.id != exclude_id)
+    if await session.scalar(stmt) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ya existe un tipo de tarjeta con ese nombre")
+    return normalized
+
+
+async def get_card_type(
+    session: AsyncSession, space_id: uuid.UUID, card_type_id: uuid.UUID
+) -> CardType:
+    card_type = await session.get(CardType, card_type_id)
+    if card_type is None or card_type.space_id != space_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tipo de tarjeta no encontrado")
+    return card_type
+
+
+async def create_card_type(
+    session: AsyncSession,
+    space_id: uuid.UUID,
+    created_by: uuid.UUID,
+    *,
+    name: str,
+    behavior: CardBehavior,
+    icon: str | None = None,
+    color: str | None = None,
+) -> CardType:
+    normalized = await _ensure_unique_card_type(session, space_id, name)
+    card_type = CardType(
+        space_id=space_id,
+        name=name,
+        name_normalized=normalized,
+        behavior=behavior,
+        icon=icon,
+        color=color,
+        created_by=created_by,
+    )
+    session.add(card_type)
+    await session.commit()
+    await session.refresh(card_type)
+    return card_type
+
+
+async def _card_type_has_cards(session: AsyncSession, card_type_id: uuid.UUID) -> bool:
+    from app.models.cards import Card
+
+    return bool(await session.scalar(select(exists().where(Card.card_type_id == card_type_id))))
+
+
+async def update_card_type(
+    session: AsyncSession,
+    space_id: uuid.UUID,
+    card_type_id: uuid.UUID,
+    *,
+    name: str | None = None,
+    icon: str | None = None,
+    color: str | None = None,
+    is_active: bool | None = None,
+) -> CardType:
+    """CAT-08: behavior is immutable (system classifier). A type with cards
+    cannot be deactivated."""
+    card_type = await get_card_type(session, space_id, card_type_id)
+
+    if name is not None and name != card_type.name:
+        card_type.name_normalized = await _ensure_unique_card_type(
+            session, space_id, name, exclude_id=card_type.id
+        )
+        card_type.name = name
+    if icon is not None:
+        card_type.icon = icon
+    if color is not None:
+        card_type.color = color
+    if is_active is not None and is_active != card_type.is_active:
+        if not is_active and await _card_type_has_cards(session, card_type.id):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "El tipo tiene tarjetas asociadas; no puede desactivarse",
+            )
+        card_type.is_active = is_active
+
+    await session.commit()
+    await session.refresh(card_type)
+    return card_type
+
+
+async def delete_card_type(
+    session: AsyncSession, space_id: uuid.UUID, card_type_id: uuid.UUID
+) -> None:
+    """CAT-08/GLO-03: physical delete only without cards referencing it."""
+    card_type = await get_card_type(session, space_id, card_type_id)
+    if await _card_type_has_cards(session, card_type.id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "El tipo tiene tarjetas asociadas; desactívalo en su lugar",
+        )
+    await session.delete(card_type)
     await session.commit()

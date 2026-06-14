@@ -46,8 +46,9 @@ class InstallmentPlan(Base, AuditMixin):
     space_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # MSI-01: always a credit card; FK to the unified cards table.
     credit_card_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("credit_cards.id", ondelete="RESTRICT"), nullable=False
+        Uuid, ForeignKey("cards.id", ondelete="RESTRICT"), nullable=False
     )
     # MSI-03: the purchase transaction never enters aggregates by its total.
     transaction_id: Mapped[uuid.UUID] = mapped_column(

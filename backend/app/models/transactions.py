@@ -75,9 +75,10 @@ class Transaction(Base, AuditMixin):
         Uuid, ForeignKey("payment_methods.id", ondelete="RESTRICT")
     )
 
-    # TDC: derived from the payment method when type=credit_card (TXN-06).
-    credit_card_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    # TAR-03: card behind the payment method, any type (TXN-06 for credit).
+    card_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     # TDC-05: billing cycle this charge (or payment, TDC-10) belongs to.
+    # Only credit charges get a statement; debit/prepaid never do (TAR-04).
     statement_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     # MSI-03: set on the parent purchase; excluded from all aggregates.
     installment_plan_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)

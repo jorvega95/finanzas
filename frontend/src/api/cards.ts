@@ -9,8 +9,11 @@ export interface DebtSummary {
   total_debt: string;
 }
 
+export type CardBehavior = "credit" | "debit" | "prepaid";
+
 export interface CardOut {
   id: string;
+  card_type_id: string;
   alias: string;
   bank: string;
   network: string;
@@ -24,10 +27,16 @@ export interface CardOut {
   payment_day: number | null;
   payment_day_is_last: boolean;
   reminder_days: number[];
+  initial_balance: string | null;
+  allow_overdraft: boolean;
   color: string | null;
   payment_method_id: string | null;
   is_active: boolean;
+  // CardWithDebtOut extras (list/detail endpoints):
+  behavior: CardBehavior | null;
   debt: DebtSummary | null;
+  balance: string | null; // TAR-05, debit/prepaid only
+  next_payment: { amount: string; due_date: string } | null; // TDC-14
 }
 
 export interface StatementOut {
@@ -53,15 +62,41 @@ export interface ReminderOut {
 }
 
 export interface CardBody {
+  card_type_id: string;
   alias: string;
   bank: string;
   network: string;
   last4: string;
-  statement_day: number | string;
+  // Credit-only (TAR-02):
+  statement_day?: number | string | null;
   cutoff_day_policy?: string;
   payment_due_days?: number | null;
   payment_day?: number | string | null;
   credit_limit?: string | null;
+  opening_balance?: string | null; // TDC-14
+  // Non-credit (TAR-05):
+  initial_balance?: string | null;
+  allow_overdraft?: boolean;
+}
+
+// TDC-15: full edit. Only the fields sent are applied.
+export interface CardUpdateBody {
+  alias?: string;
+  bank?: string;
+  network?: string;
+  last4?: string;
+  currency?: string;
+  color?: string | null;
+  statement_day?: number | string | null;
+  cutoff_day_policy?: string;
+  payment_due_days?: number | null;
+  payment_day?: number | string | null;
+  credit_limit?: string | null;
+  reminder_days?: number[];
+  opening_balance?: string | null; // TDC-14
+  initial_balance?: string | null;
+  allow_overdraft?: boolean;
+  is_active?: boolean;
 }
 
 export function useCards() {
@@ -99,6 +134,18 @@ export function useCreateCard() {
   return useMutation({
     mutationFn: (body: CardBody) =>
       api<CardOut>("/api/v1/cards", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateCard() {
+  const invalidate = useInvalidateCards();
+  return useMutation({
+    mutationFn: ({ cardId, ...body }: { cardId: string } & CardUpdateBody) =>
+      api<CardOut>(`/api/v1/cards/${cardId}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
     onSuccess: invalidate,
   });
 }

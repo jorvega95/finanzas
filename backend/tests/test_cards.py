@@ -16,9 +16,18 @@ CARD_PAYLOAD = {
 }
 
 
+def credit_payload(ctx, **overrides):
+    """CARD_PAYLOAD bound to the seeded 'credit' card type (CAT-08)."""
+    return {
+        **CARD_PAYLOAD,
+        "card_type_id": ctx["card_type_by_behavior"]["credit"]["id"],
+        **overrides,
+    }
+
+
 async def create_card(client, ctx, **overrides):
     res = await client.post(
-        "/api/v1/cards", headers=ctx["headers"], json={**CARD_PAYLOAD, **overrides}
+        "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, **overrides)
     )
     assert res.status_code == 201, res.text
     return res.json()
@@ -53,19 +62,17 @@ async def test_tdc01_validation_and_cat07_method(client):
 
     # last4 inválido.
     res = await client.post(
-        "/api/v1/cards", headers=ctx["headers"], json={**CARD_PAYLOAD, "last4": "12a4"}
+        "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, last4="12a4")
     )
     assert res.status_code == 422
     # Ambos payment_due_days y payment_day => 422 (exactamente uno).
     res = await client.post(
-        "/api/v1/cards",
-        headers=ctx["headers"],
-        json={**CARD_PAYLOAD, "payment_day": 5},
+        "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, payment_day=5)
     )
     assert res.status_code == 422
     # statement_day 31 inválido (TDC-02: 1-28 o 'last').
     res = await client.post(
-        "/api/v1/cards", headers=ctx["headers"], json={**CARD_PAYLOAD, "statement_day": 31}
+        "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, statement_day=31)
     )
     assert res.status_code == 422
 
@@ -74,7 +81,7 @@ async def test_tdc01_validation_and_cat07_method(client):
 
     # CAT-07: el método vinculado existe y referencia la tarjeta.
     methods = (await client.get("/api/v1/catalogs/payment-methods", headers=ctx["headers"])).json()
-    linked = [m for m in methods if m["credit_card_id"] == card["id"]]
+    linked = [m for m in methods if m["card_id"] == card["id"]]
     assert len(linked) == 1
     assert linked[0]["type"] == "credit_card"
 
@@ -271,3 +278,199 @@ async def test_glo05_cards_cross_space_404(client):
     own_headers = intruder["headers"]
     res = await client.get(f"/api/v1/cards/{card['id']}", headers=own_headers)
     assert res.status_code == 404
+
+
+# --- TDC-14: opening debt --------------------------------------------------------
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc14_opening_balance(client):
+    """TDC-14: la deuda del corte anterior entra como statement cerrado y es
+    pagable (TDC-10), reflejándose en TDC-09."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx, opening_balance="1500.00")
+
+    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    assert detail["debt"]["statement_balance"] == "1500.00"
+    assert detail["debt"]["total_debt"] == "1500.00"
+    # TDC-14/Pieza 2: próximo pago = monto + fecha (corte 15-jun + 20 días = 5-jul).
+    assert detail["next_payment"]["amount"] == "1500.00"
+    assert detail["next_payment"]["due_date"] == "2026-07-05"
+
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    opening = [s for s in statements if s["computed_total"] == "1500.00"]
+    assert len(opening) == 1 and opening[0]["status"] == "closed"
+
+    # TDC-10: se puede pagar.
+    debito = ctx["methods"]["Débito"]["id"]
+    res = await client.post(
+        f"/api/v1/cards/{card['id']}/payments",
+        headers=ctx["headers"],
+        json={
+            "amount": "1500.00",
+            "from_payment_method_id": debito,
+            "date": "2026-06-20",
+            "statement_id": opening[0]["id"],
+        },
+    )
+    assert res.status_code == 201, res.text
+    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    assert detail["debt"]["statement_balance"] == "0.00"
+    assert detail["next_payment"] is None  # ya no hay nada pendiente
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc14_opening_balance_via_edit(client):
+    """TDC-14: el saldo pendiente del corte anterior se puede añadir por edición
+    a una tarjeta ya existente."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)  # sin deuda inicial
+
+    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    assert detail["debt"]["statement_balance"] == "0.00"
+    assert detail["next_payment"] is None
+
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}",
+        headers=ctx["headers"],
+        json={"opening_balance": "2300.00"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["debt"]["statement_balance"] == "2300.00"
+    assert body["next_payment"]["amount"] == "2300.00"
+    assert body["next_payment"]["due_date"] == "2026-07-05"
+
+    # Idempotente: re-editar reemplaza el monto (no duplica el statement).
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}",
+        headers=ctx["headers"],
+        json={"opening_balance": "2000.00"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["debt"]["statement_balance"] == "2000.00"
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    assert len([s for s in statements if s["status"] == "closed"]) == 1
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc14_opening_balance_edit_collision(client):
+    """No se sobrepone un saldo manual sobre un corte que ya tiene cargos."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    # Cargo del 10-jun cae en el corte 15-jun (= el corte anterior a hoy 20-jun).
+    await charge(client, ctx, card["payment_method_id"], "2026-06-10", "400.00")
+
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}",
+        headers=ctx["headers"],
+        json={"opening_balance": "1000.00"},
+    )
+    assert res.status_code == 409, res.text
+
+
+async def test_tdc14_opening_balance_requires_config(client):
+    ctx = await bootstrap_space(client)
+    credit = ctx["card_type_by_behavior"]["credit"]["id"]
+    res = await client.post(
+        "/api/v1/cards",
+        headers=ctx["headers"],
+        json={
+            "card_type_id": credit,
+            "alias": "Sin config",
+            "bank": "B",
+            "network": "Visa",
+            "last4": "0009",
+            "opening_balance": "1000.00",  # sin día de corte ni términos
+        },
+    )
+    assert res.status_code == 422
+
+
+# --- TDC-15: partial capture + full edit ----------------------------------------
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc15_partial_create_then_complete_by_edit(client):
+    ctx = await bootstrap_space(client)
+    credit = ctx["card_type_by_behavior"]["credit"]["id"]
+    res = await client.post(
+        "/api/v1/cards",
+        headers=ctx["headers"],
+        json={
+            "card_type_id": credit,
+            "alias": "Parcial",
+            "bank": "B",
+            "network": "Visa",
+            "last4": "0010",
+        },
+    )
+    assert res.status_code == 201, res.text
+    card = res.json()
+    method = card["payment_method_id"]
+
+    # TDC-15: sin día de corte, un cargo no se asigna a ningún ciclo.
+    await charge(client, ctx, method, "2026-06-18", "500.00")
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    assert statements == []
+
+    # Completar la configuración por edición.
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}",
+        headers=ctx["headers"],
+        json={"statement_day": 15, "payment_due_days": 20},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["statement_day"] == 15
+
+    # Ahora un nuevo cargo sí entra al ciclo en curso.
+    await charge(client, ctx, method, "2026-06-19", "200.00")
+    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    assert detail["debt"]["current_cycle_spend"] == "200.00"
+
+
+async def test_tdc15_edit_fields_and_method_rename(client):
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}",
+        headers=ctx["headers"],
+        json={
+            "alias": "BBVA Oro",
+            "bank": "BBVA Bancomer",
+            "last4": "4321",
+            "credit_limit": "50000.00",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["alias"] == "BBVA Oro"
+    assert body["bank"] == "BBVA Bancomer"
+    assert body["last4"] == "4321"
+    assert body["credit_limit"] == "50000.00"
+
+    # CAT-07: el método vinculado se renombra con el alias.
+    methods = (await client.get("/api/v1/catalogs/payment-methods", headers=ctx["headers"])).json()
+    linked = [m for m in methods if m["card_id"] == card["id"]]
+    assert linked[0]["name"] == "BBVA Oro"
+
+
+async def test_tdc15_edit_revalidates(client):
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    # statement_day 31 inválido (TDC-02).
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"statement_day": 31}
+    )
+    assert res.status_code == 422
+    # last4 no numérico.
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"last4": "12a4"}
+    )
+    assert res.status_code == 422

@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cards import CardStatement, CreditCard
+from app.models.cards import Card, CardStatement
 from app.models.reminders import Reminder, ReminderChannel, ReminderKind, ReminderStatus
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ MAX_ATTEMPTS = 3  # REM-02
 
 
 async def schedule_card_reminders(
-    session: AsyncSession, card: CreditCard, statement: CardStatement
+    session: AsyncSession, card: Card, statement: CardStatement
 ) -> None:
     """REM-01: al cerrar un statement se programan recordatorios a
     due_date − N para cada N de card.reminder_days, por canal (REM-04).

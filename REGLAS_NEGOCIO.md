@@ -35,12 +35,13 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 ## 2. Catálogos (CAT) — R2
 
 - **CAT-01 · Unicidad:** el nombre de categoría es único por espacio + `kind` (case/acentos-insensible, `unaccent + lower`). Igual para métodos de pago por espacio.
-- **CAT-02 · Seed:** al crear cualquier espacio se siembran: categorías de gasto (Comida, Súper, Transporte, Vivienda, Servicios, Salud, Entretenimiento, Ropa, Educación, Regalos, Otros), de ingreso (Nómina, Freelance, Intereses, Otros) y métodos de pago (Efectivo, Débito, Transferencia). Todas editables y desactivables.
+- **CAT-02 · Seed:** al crear cualquier espacio se siembran: categorías de gasto (Comida, Súper, Transporte, Vivienda, Servicios, Salud, Entretenimiento, Ropa, Educación, Regalos, Otros), de ingreso (Nómina, Freelance, Intereses, Otros), métodos de pago (Efectivo, Débito, Transferencia) y tipos de tarjeta (CAT-08). Todas editables y desactivables.
 - **CAT-03 · Naturaleza del gasto:** cada categoría de gasto lleva `expense_nature` (`fixed | variable | discretionary`). Una transacción hereda la naturaleza de su categoría, pero PUEDE sobreescribirla (`transactions.expense_nature_override`). Los reportes usan `COALESCE(override, categoria)`.
 - **CAT-04 · Desactivación:** una categoría/método inactivo no aparece en formularios de captura, pero las transacciones históricas lo conservan y los reportes lo siguen mostrando. Reactivable en cualquier momento.
 - **CAT-05:** no se puede desactivar la última categoría activa de un `kind` ni el último método de pago activo.
 - **CAT-06 · Subcategorías:** máximo 2 niveles (categoría → subcategoría). Una subcategoría hereda `kind` y `expense_nature` del padre salvo override. Los agregados por categoría suman las subcategorías al padre, con drill-down.
-- **CAT-07:** un método de pago `type=credit_card` DEBE referenciar una tarjeta (`credit_card_id`). Al crear una tarjeta (TDC-01) se crea automáticamente su método de pago vinculado; al desactivar la tarjeta se desactiva el método.
+- **CAT-07:** un método de pago vinculado a una tarjeta DEBE referenciarla (`card_id`). Toda tarjeta (cualquier tipo, TAR-03) crea automáticamente su método de pago al alta y lo desactiva al desactivarse. El `type` del método refleja el `behavior` del tipo: `credit_card` (crédito), `debit` (débito), `prepaid` (vales/regalo y demás prepago).
+- **CAT-08 · Tipos de tarjeta:** catálogo `card_types` por espacio (seed CAT-02). Cada tipo lleva un `behavior` de sistema **no editable** (`credit | debit | prepaid`) que determina el comportamiento del motor (TAR-01); el nombre es libre y editable. Seed: "Crédito" (`credit`), "Débito" (`debit`), "Vales de despensa" (`prepaid`), "Tarjeta de regalo" (`prepaid`). Unicidad de nombre por espacio (estilo CAT-01). NO DEBE borrarse ni desactivarse un tipo con tarjetas asociadas (GLO-03); reactivable en cualquier momento.
 
 ## 3. Transacciones (TXN) — R1, R11
 
@@ -52,9 +53,17 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 - **TXN-06 · TDC:** una transacción con método de pago de tipo `credit_card` se asigna a un ciclo de facturación según TDC-05 y NO cuenta como flujo de salida hasta que se paga el statement (el gasto sí cuenta en reportes por categoría en su fecha; el flujo de caja lo refleja el pago — ver DSH-04).
 - **TXN-07 · Adjuntos (v2+):** preparar `attachment_url` (ticket/factura, Supabase Storage). No bloqueante para v1.
 
-## 4. Tarjetas de crédito y ciclos (TDC) — R3
+## 4. Tarjetas (TAR) y ciclos de crédito (TDC) — R3
 
-- **TDC-01 · Alta:** campos obligatorios: alias, banco, red, `last4` (4 dígitos), `statement_day` (1-28 o `last`), y exactamente uno de: `payment_due_days` (1-30, típico 20) o `payment_day` (1-28 o `last`). Opcionales: `credit_limit`, color/ícono. NO DEBE almacenarse PAN completo, CVV ni fecha de expiración.
+Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas TAR aplican a cualquier tarjeta; las TDC, MSI y REM solo al behavior `credit`.
+
+- **TAR-01 · Tipo:** toda tarjeta DEBE tener un `card_type` (CAT-08). Su `behavior` define el modelo: `credit` (deuda, ciclos, statements, MSI — ver TDC) o `debit`/`prepaid` (saldo de valor almacenado, sin ciclos).
+- **TAR-02 · Campos por behavior:** solo `credit` lleva `statement_day`, política de corte, `payment_due_days`/`payment_day`, `credit_limit` y `reminder_days`, y genera statements, ciclos y MSI. `debit`/`prepaid` NO DEBEN llevar esos campos; en su lugar llevan `initial_balance` y `allow_overdraft`.
+- **TAR-03 · Método vinculado:** al alta, toda tarjeta crea automáticamente su `payment_method` vinculado (`card_id`), con `type` acorde al behavior (CAT-07). Desactivar la tarjeta desactiva su método (generaliza TDC-12).
+- **TAR-04 · Cargo no-crédito:** un gasto con tarjeta `debit`/`prepaid` es **salida de caja inmediata** en su fecha (como efectivo); NO DEBE asignarse a ningún statement ni ciclo (contrasta con TXN-06/TDC-05). Un ingreso o transferencia hacia su método entra igualmente en su fecha.
+- **TAR-05 · Saldo:** para `debit`/`prepaid`, `saldo = initial_balance + Σ ingresos + Σ transferencias entrantes − Σ gastos − Σ transferencias salientes` del método de la tarjeta, **calculado en SQL** (DSH-03), nunca un campo mutable. Un gasto que deje el saldo negativo se rechaza (422) salvo `allow_overdraft=true`. El saldo se reporta en la moneda de la tarjeta. `credit` no lleva saldo (su contraparte es la deuda, TDC-09).
+
+- **TDC-01 · Alta (tipo `credit`):** además de los campos comunes de tarjeta (TAR-01/03: alias, banco, red, `last4`), una tarjeta de crédito define su ciclo con `statement_day` (1-28 o `last`) y **a lo más uno** de: `payment_due_days` (1-30, típico 20) o `payment_day` (1-28 o `last`). Estos campos de ciclo son **opcionales al alta** (TDC-15): pueden completarse después por edición. Opcionales: `credit_limit`, color/ícono. NO DEBE almacenarse PAN completo, CVV ni fecha de expiración; solo `last4` (4 dígitos).
 - **TDC-02 · Día de corte:** si `statement_day=d`, el corte del mes M es `min(d, último_día(M))`. `statement_day=last` ⇒ último día del mes. Se permite 29/30 capturándolo como `last` o ajustando; la UI ofrece 1-28 y `last` para evitar ambigüedad.
 - **TDC-03 · Ciclo:** el ciclo que cierra en el corte C abarca `[corte_anterior + 1 día, C]`. Cada ciclo genera un `card_statement` con `period_start`, `period_end=C`, `due_date`.
 - **TDC-04 · Fecha límite:** `due_date = period_end + payment_due_days`; con `payment_day`: el primer `payment_day` estrictamente posterior a `period_end` (ajustado por TDC-02 si el mes es corto). Si `due_date` cae en fin de semana NO se ajusta en v1 (los bancos MX difieren; el usuario ve la fecha exacta que configuró).
@@ -67,10 +76,12 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 - **TDC-11 · Backfill:** al dar de alta una tarjeta se generan statements desde la fecha de la transacción más antigua que la use (o desde hoy si no hay), nunca a futuro: el statement `open` se materializa al vuelo y los futuros no existen hasta que abren.
 - **TDC-12 · Desactivación:** una tarjeta con MSI pendientes o statements no pagados PUEDE desactivarse (no acepta cargos nuevos) pero sus ciclos siguen cerrando y sus cuotas siguen cargándose hasta liquidar.
 - **TDC-13:** no se calculan intereses ni comisiones en v1 (se asume totalero). El usuario PUEDE capturar intereses/comisiones como cargos manuales con categoría "Comisiones e intereses" (seed al crear la primera tarjeta).
+- **TDC-14 · Deuda del corte anterior:** el usuario PUEDE capturar un `opening_balance` (lo que ya debe del estado de cuenta anterior) **tanto al alta como al editar** una TDC existente. Se materializa como un `card_statement` **cerrado** con `computed_total = opening_balance`, `period_end` en el corte inmediato anterior a hoy y `due_date` por TDC-04; entra a TDC-09 (a) y se liquida con un pago normal (TDC-10). Es **un solo corte** (el anterior): al re-capturar se reemplaza el monto del mismo statement (no se duplica). Requiere `statement_day` y términos de pago configurados (si no, 422). Si ese corte **ya tiene cargos itemizados** no se sobrepone un monto manual (409). Su `computed_total` NO se recalcula. El API expone además `next_payment` (monto + `due_date` del corte cerrado más próximo) para mostrar "qué pagar y cuándo".
+- **TDC-15 · Captura parcial y edición:** una TDC PUEDE guardarse sin todos los datos del ciclo (`statement_day`/términos opcionales) y completarse después. Toda tarjeta es **editable** (alias, banco, red, `last4`, moneda, color y, según behavior, los campos de ciclo/límite o saldo/sobregiro); el tipo (CAT-08) y su behavior son inmutables. Mientras una TDC no tenga `statement_day`, NO es "cycle-ready": sus cargos NO se asignan a ningún ciclo, el cierre la omite y no acepta pagos sin statement explícito. Al editar el alias se renombra su método de pago vinculado (CAT-07).
 
 ## 5. Meses sin intereses (MSI) — R4
 
-- **MSI-01 · Alta:** una compra MSI se captura como transacción expense normal (monto total, fecha, categoría) + plan: `months ∈ [2, 60]`, `credit_card_id` obligatorio (MSI solo existe en TDC).
+- **MSI-01 · Alta:** una compra MSI se captura como transacción expense normal (monto total, fecha, categoría) + plan: `months ∈ [2, 60]`, `credit_card_id` obligatorio (MSI solo existe en tarjetas de behavior `credit`; se rechaza en `debit`/`prepaid`).
 - **MSI-02 · Cuotas:** `monthly_amount = round(total / months, 2)` con `ROUND_FLOOR`; la **última cuota absorbe el residuo**: `last = total − monthly_amount × (months − 1)`. Invariante (test obligatorio): `Σ cuotas == total` exacto.
 - **MSI-03 · Doble contabilidad evitada:** la transacción de compra MSI NO entra a agregados de gasto mensual ni al `computed_total` de ningún statement por su monto total; lo que entra son sus **cuotas** (cada una en su ciclo). En reportes por categoría, cada cuota hereda la categoría y naturaleza de la compra original.
 - **MSI-04 · Calendario de cuotas:** la cuota 1 se carga en el statement al que TDC-05 asigne la fecha de compra; la cuota n en el n-ésimo corte siguiente. `estimated_charge_date = period_end` del statement correspondiente. Si los statements futuros no existen aún (TDC-11), la fecha se calcula proyectando cortes con TDC-02 y se reconcilia cuando el statement abre.
@@ -122,8 +133,8 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 
 ## 11. Patrimonio neto (PAT) — R12
 
-- **PAT-01:** `activos = Σ valor de portafolios (INV-05)`; `pasivos = Σ deuda total TDC (TDC-09: a+b+c)`. `patrimonio = activos − pasivos`. Job diario lo persiste en `net_worth_snapshots` (mismo horario que INV-05, después de él).
-- **PAT-02:** v1 no modela cuentas de efectivo/débito como activos (no hay saldos de cuentas bancarias). La UI lo declara explícitamente ("patrimonio = inversiones − deuda TDC") para no inducir a error. Modelar saldos de cuentas es candidato a R16 futuro.
+- **PAT-01:** `activos = Σ valor de portafolios (INV-05) + Σ saldo de tarjetas no-crédito (TAR-05)`; `pasivos = Σ deuda de tarjetas de crédito (TDC-09: a+b+c)`. `patrimonio = activos − pasivos`. Job diario lo persiste en `net_worth_snapshots` (mismo horario que INV-05, después de él); el `breakdown` separa inversiones, efectivo en tarjetas y deuda.
+- **PAT-02:** v1 modela como activo el saldo de tarjetas `debit`/`prepaid` (TAR-05) además de las inversiones. NO modela efectivo suelto ni cuentas bancarias sin una tarjeta registrada en la app. La UI lo declara explícitamente ("patrimonio = inversiones + saldos de tarjetas − deuda de crédito") para no inducir a error. Modelar saldos de efectivo/cuentas sin tarjeta es candidato a R16 futuro.
 
 ## 12. Importación CSV (IMP) — R13
 
@@ -150,8 +161,8 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 | Req | Reglas |
 |---|---|
 | R1 gastos | TXN-01…07, GLO-01/02 |
-| R2 catálogos | CAT-01…07 |
-| R3 TDC | TDC-01…13 |
+| R2 catálogos | CAT-01…08 |
+| R3 tarjetas | TAR-01…05, TDC-01…15, CAT-08 |
 | R4 MSI | MSI-01…09 |
 | R5 crypto | INV-01/02/03/03b/05/06 |
 | R6 dashboard | DSH-01…05 |
@@ -175,3 +186,5 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 6. **FX-03:** editar una transacción vieja no cambia su tasa persistida; un gasto USD del 2026-01-15 usa la tasa de esa fecha aunque hoy sea otra.
 7. **TDC-10:** pago mayor al statement ⇒ saldo a favor aplicado al siguiente cierre.
 8. **GLO-05/ESP-03:** un viewer no puede mutar nada (test de permisos por endpoint); un usuario sin membresía recibe 404 (no 403, para no filtrar existencia).
+9. **TAR-04/05/DSH-02:** un gasto de 500 con tarjeta de débito descuenta el saldo, NO toca ningún statement y cuenta como salida en su fecha; una nómina (income) hacia el método de la tarjeta sube el saldo. Gasto que excede el saldo sin `allow_overdraft` ⇒ 422; con `allow_overdraft=true` ⇒ permitido (saldo negativo).
+10. **PAT-01:** `patrimonio = inversiones + saldos de tarjetas no-crédito − deuda de crédito`; al cambiar un saldo (nuevo gasto/ingreso) el siguiente snapshot lo refleja.

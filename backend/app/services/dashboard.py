@@ -135,8 +135,10 @@ async def cash_flow_totals(
 ) -> dict[str, Decimal]:
     """DSH-04 vista flujo: sale el dinero cuando se paga, no cuando se compra.
 
-    Salidas = gastos sin TDC + pagos de tarjeta (transfers hacia métodos
-    credit_card, TDC-10/TXN-06). Entradas = income.
+    Salidas = gastos no diferidos (efectivo, débito y prepaid salen en su
+    fecha, TAR-04) + pagos de tarjeta de crédito (transfers hacia métodos
+    credit_card, TDC-10/TXN-06). Los cargos de crédito se difieren: solo entran
+    como flujo cuando se paga el statement. Entradas = income.
     """
     today = today_in_tz(space.timezone)
     income = await session.scalar(
@@ -147,7 +149,9 @@ async def cash_flow_totals(
     non_card_expense = await session.scalar(
         select(func.coalesce(func.sum(AMOUNT_BASE), 0)).where(
             *expense_predicates(space.id, start, end, today),
-            Transaction.credit_card_id.is_(None),
+            # TAR-04: only credit charges carry a statement and are deferred;
+            # debit/prepaid/cash spend has no statement and is immediate.
+            Transaction.statement_id.is_(None),
         )
     )
     card_payments = await session.scalar(
