@@ -90,6 +90,18 @@ async def update_rule(
     return rule
 
 
+@router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_rule(
+    db: DbSession, space_and_member: EditorSpace, rule_id: uuid.UUID
+) -> None:
+    """Physically deletes a recurring rule. Confirmed transactions are kept
+    with recurring_rule_id=NULL (FK SET NULL). Tombstones cascade-delete."""
+    space, _ = space_and_member
+    rule = await svc.get_rule(db, space.id, rule_id)
+    await db.delete(rule)
+    await db.commit()
+
+
 @router.post("/generate", response_model=dict)
 async def generate_now(db: DbSession, space_and_member: EditorSpace) -> dict[str, int]:
     """Manual trigger of the daily job for the active space (REC-02/05)."""

@@ -352,7 +352,6 @@ async def upcoming_commitments(
                 select(RecurringRule).where(
                     RecurringRule.space_id == space.id,
                     RecurringRule.is_active.is_(True),
-                    RecurringRule.type == TransactionType.expense,
                 )
             )
         )
@@ -368,6 +367,7 @@ async def upcoming_commitments(
                     "date": upcoming[0],
                     "description": rule.description,
                     "amount": rule.amount,
+                    "type": rule.type,
                     "ref_id": rule.id,
                     "is_overdue": False,
                 }

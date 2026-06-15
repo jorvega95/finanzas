@@ -157,6 +157,85 @@ async def test_rec01_weekly_and_end_date(client):
     assert dates == ["2026-05-20", "2026-05-27", "2026-06-03"]
 
 
+@freeze_time("2026-06-10 18:00:00")
+async def test_rec_income_create_and_confirm(client):
+    """Ingreso recurrente: instancia generada nace con needs_review=True (REC-03)
+    y al confirmar queda como transacción de tipo income normal."""
+    ctx = await bootstrap_space(client)
+    income_cat_id = ctx["categories"]["Nómina"]["id"]
+    method_id = ctx["methods"]["Débito"]["id"]
+
+    res = await client.post(
+        "/api/v1/recurring-rules",
+        headers=ctx["headers"],
+        json={
+            "type": "income",
+            "amount": "15000.00",
+            "currency": "MXN",
+            "description": "Nómina quincenal",
+            "category_id": income_cat_id,
+            "payment_method_id": method_id,
+            "frequency": "biweekly",
+            "start_date": "2026-05-28",
+        },
+    )
+    assert res.status_code == 201
+    assert res.json()["type"] == "income"
+
+    created = await generate(client, ctx)
+    assert created == 1  # may 28 (<=jun 10); jun 11 > jun 10 → no generada aún
+
+    res = await client.get("/api/v1/transactions?needs_review=true", headers=ctx["headers"])
+    items = res.json()["items"]
+    assert len(items) == 1
+    assert items[0]["type"] == "income"
+    assert items[0]["needs_review"] is True
+
+    # Confirmar: needs_review → False, tipo se conserva.
+    res = await client.post(
+        f"/api/v1/transactions/{items[0]['id']}/confirm", headers=ctx["headers"], json={}
+    )
+    assert res.status_code == 200
+    assert res.json()["needs_review"] is False
+    assert res.json()["type"] == "income"
+
+
+@freeze_time("2026-06-10 18:00:00")
+async def test_rec_delete_rule_physical(client):
+    """DELETE /recurring-rules/{id}: elimina la regla físicamente; las
+    transacciones ya confirmadas quedan intactas con recurring_rule_id=NULL."""
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/recurring-rules",
+        headers=ctx["headers"],
+        json=rule_payload(ctx, start_date="2026-04-15"),
+    )
+    rule_id = res.json()["id"]
+    await generate(client, ctx)  # genera abr 15, may 15
+
+    # Confirmar la primera instancia.
+    res = await client.get("/api/v1/transactions?needs_review=true", headers=ctx["headers"])
+    txn_id = res.json()["items"][0]["id"]
+    await client.post(
+        f"/api/v1/transactions/{txn_id}/confirm", headers=ctx["headers"], json={}
+    )
+
+    # Eliminar la regla.
+    res = await client.delete(f"/api/v1/recurring-rules/{rule_id}", headers=ctx["headers"])
+    assert res.status_code == 204
+
+    # La regla ya no existe.
+    res = await client.get(
+        f"/api/v1/recurring-rules?include_inactive=true", headers=ctx["headers"]
+    )
+    assert not any(r["id"] == rule_id for r in res.json())
+
+    # La transacción confirmada sigue existiendo.
+    res = await client.get(f"/api/v1/transactions/{txn_id}", headers=ctx["headers"])
+    assert res.status_code == 200
+    assert res.json()["recurring_rule_id"] is None  # FK seteada a NULL
+
+
 async def test_fx02_carry_forward_on_non_business_days(client, db_session, monkeypatch):
     """FX-02: día inhábil ⇒ se persiste la última tasa con fecha de hoy y flag."""
 

@@ -34,6 +34,17 @@ export interface RecurringRuleBody {
   amount_is_estimate?: boolean;
 }
 
+export interface RecurringRuleUpdate {
+  id: string;
+  amount?: string;
+  description?: string;
+  category_id?: string | null;
+  payment_method_id?: string | null;
+  end_date?: string | null;
+  max_occurrences?: number | null;
+  is_active?: boolean;
+}
+
 export function useRecurringRules(includeInactive = false) {
   return useQuery({
     queryKey: ["recurring-rules", includeInactive],
@@ -59,11 +70,20 @@ export function useCreateRecurringRule() {
 export function useUpdateRecurringRule() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; is_active?: boolean; amount?: string }) =>
+    mutationFn: ({ id, ...body }: RecurringRuleUpdate) =>
       api<RecurringRuleOut>(`/api/v1/recurring-rules/${id}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["recurring-rules"] }),
+  });
+}
+
+export function useDeleteRecurringRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<void>(`/api/v1/recurring-rules/${id}`, { method: "DELETE" }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["recurring-rules"] }),
   });
 }
