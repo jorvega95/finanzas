@@ -82,8 +82,8 @@ class Installment(Base):
     )
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    # MSI-04: period_end of the statement it charges into (projected with
-    # TDC-02 until the statement exists, then reconciled).
+    # MSI-04: max(purchase_date, period_start) del ciclo de esta cuota.
+    # Cuota 1 = purchase_date; cuotas 2..n = period_start de su ciclo.
     estimated_charge_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     statement_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("card_statements.id", ondelete="SET NULL")

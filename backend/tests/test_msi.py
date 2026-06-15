@@ -35,9 +35,10 @@ async def test_msi01_04_plan_creation_and_schedule(client):
     # MSI-02: 333.33 × 2 + 333.34.
     amounts = [i["amount"] for i in summary["installments"]]
     assert amounts == ["333.33", "333.33", "333.34"]
-    # MSI-04: cuota 1 en el corte de la compra (15-jun), luego 15-jul, 15-ago.
+    # MSI-04: cuota 1 = fecha de compra (10-jun); cuotas 2 y 3 = period_start
+    # de su ciclo (16-jun y 16-jul, primer día tras el corte del 15).
     dates = [i["estimated_charge_date"] for i in summary["installments"]]
-    assert dates == ["2026-06-15", "2026-07-15", "2026-08-15"]
+    assert dates == ["2026-06-10", "2026-06-16", "2026-07-16"]
 
     # MSI-01: validaciones.
     cash_txn = await client.post(
@@ -116,10 +117,10 @@ async def test_msi06_projection_month_by_card(client):
     await make_plan(client, ctx, txn["id"], 3)
 
     rows = (await client.get("/api/v1/installment-plans/projection", headers=ctx["headers"])).json()
+    # Cuotas: 10-jun, 16-jun, 16-jul → cuotas 1 y 2 caen en junio (mismo mes).
     assert [(r["month"], r["amount"]) for r in rows] == [
-        ("2026-06", "200.00"),
+        ("2026-06", "400.00"),
         ("2026-07", "200.00"),
-        ("2026-08", "200.00"),
     ]
     assert all(r["card_alias"] == "BBVA Azul" for r in rows)
 

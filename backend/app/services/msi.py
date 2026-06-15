@@ -40,12 +40,17 @@ def split_installments(total: Decimal, months: int) -> list[Decimal]:
 def installment_charge_dates(
     purchase_date: date, card_spec: cycles.CardCycleSpec, months: int
 ) -> list[date]:
-    """MSI-04: cuota 1 en el corte que TDC-05 asigna a la compra; cuota n en
-    el n-ésimo corte siguiente (proyección TDC-02)."""
-    _, first_cutoff = cycles.cycle_for_purchase(purchase_date, card_spec)
-    dates = [first_cutoff]
+    """MSI-04: estimated_charge_date = max(purchase_date, period_start) del
+    ciclo de cada cuota. La cuota 1 siempre cae en purchase_date (period_start
+    <= purchase_date por construcción de TDC-05); las cuotas 2..n en el
+    period_start de su ciclo."""
+    first_start, first_cutoff = cycles.cycle_for_purchase(purchase_date, card_spec)
+    dates = [max(purchase_date, first_start)]
+    current_cutoff = first_cutoff
     for _ in range(months - 1):
-        dates.append(cycles.next_cutoff(dates[-1], card_spec))
+        next_cut = cycles.next_cutoff(current_cutoff, card_spec)
+        start, current_cutoff = cycles.cycle_for_cutoff(next_cut, card_spec)
+        dates.append(max(purchase_date, start))
     return dates
 
 
