@@ -30,6 +30,7 @@ export interface TransactionFilters {
   date_to?: string;
   type?: string;
   category_id?: string;
+  payment_method_id?: string;
   needs_review?: boolean;
   limit?: number;
   offset?: number;

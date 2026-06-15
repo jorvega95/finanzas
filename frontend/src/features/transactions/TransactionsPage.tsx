@@ -68,6 +68,8 @@ export default function TransactionsPage() {
 
   const [filterMonth, setFilterMonth] = useState(todayISO().slice(0, 7));
   const [filterType, setFilterType] = useState("");
+  const [filterCategoryId, setFilterCategoryId] = useState("");
+  const [filterMethodId, setFilterMethodId] = useState("");
 
   const create = useCreateTransaction();
   const update = useUpdateTransaction();
@@ -133,7 +135,26 @@ export default function TransactionsPage() {
     };
   }, [filterMonth]);
 
-  const list = useTransactions({ ...monthFilters, type: filterType || undefined });
+  const filterCategories = useMemo(
+    () =>
+      (categories.data ?? []).filter((c) =>
+        filterType === "expense"
+          ? c.kind === "expense"
+          : filterType === "income"
+            ? c.kind === "income"
+            : filterType === "transfer"
+              ? false
+              : true,
+      ),
+    [categories.data, filterType],
+  );
+
+  const list = useTransactions({
+    ...monthFilters,
+    type: filterType || undefined,
+    category_id: filterCategoryId || undefined,
+    payment_method_id: filterMethodId || undefined,
+  });
   const tray = useTransactions({ needs_review: true });
 
   const visibleCategories = (categories.data ?? []).filter(
@@ -386,7 +407,7 @@ export default function TransactionsPage() {
       <section className="card p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold">Movimientos</h2>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <input
               type="month"
               className="input w-auto"
@@ -396,12 +417,37 @@ export default function TransactionsPage() {
             <select
               className="input w-auto"
               value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
+              onChange={(e) => {
+                setFilterType(e.target.value);
+                setFilterCategoryId("");
+              }}
             >
               <option value="">Todos</option>
               <option value="expense">Gastos</option>
               <option value="income">Ingresos</option>
               <option value="transfer">Transferencias</option>
+            </select>
+            {filterType !== "transfer" && (
+              <select
+                className="input w-auto"
+                value={filterCategoryId}
+                onChange={(e) => setFilterCategoryId(e.target.value)}
+              >
+                <option value="">Categoría</option>
+                {filterCategories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            )}
+            <select
+              className="input w-auto"
+              value={filterMethodId}
+              onChange={(e) => setFilterMethodId(e.target.value)}
+            >
+              <option value="">Método de pago</option>
+              {(methods.data ?? []).map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
             </select>
           </div>
         </div>
