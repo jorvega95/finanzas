@@ -52,7 +52,7 @@ async def main() -> None:
             new_dates = installment_charge_dates(txn.date, spec_for(card), plan.months)
 
             print(f"\nPlan {plan.id} - {txn.description} ({txn.date}, {plan.months}m):")
-            for inst, new_date in zip(installments, new_dates):
+            for inst, new_date in zip(installments, new_dates, strict=True):
                 old = inst.estimated_charge_date
                 inst.estimated_charge_date = new_date
                 print(f"  Cuota {inst.number}: {old} -> {new_date}")

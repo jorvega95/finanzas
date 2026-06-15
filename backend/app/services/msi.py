@@ -293,10 +293,14 @@ async def create_plan_from_current_installment(
     ):
         if current_is_charged:
             # Cuotas 1..N → paid (N ya viene en opening_balance); N+1 se ajusta después.
-            inst_status = InstallmentStatus.paid if number <= current_number else InstallmentStatus.pending
+            inst_status = (
+                InstallmentStatus.paid if number <= current_number else InstallmentStatus.pending
+            )
         else:
             # Cuotas 1..N-1 → paid; N se ajusta después; N+1..M → pending.
-            inst_status = InstallmentStatus.paid if number < current_number else InstallmentStatus.pending
+            inst_status = (
+                InstallmentStatus.paid if number < current_number else InstallmentStatus.pending
+            )
         inst = Installment(
             plan_id=plan.id,
             number=number,
