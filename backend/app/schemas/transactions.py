@@ -52,6 +52,8 @@ class TransactionBase(BaseModel):
     fx_rate_override: FxRate | None = None
     # TDC-05a: overrides cutoff_day_policy when date == cutoff; not persisted.
     cycle_hint: Literal["current", "next"] | None = None
+    # TXN-09: explicit statement to pay when payment_method_to is a credit card.
+    target_statement_id: uuid.UUID | None = None
 
 
 class TransactionCreate(TransactionBase):
@@ -77,6 +79,7 @@ class TransactionOut(BaseModel):
     payment_method_id: uuid.UUID | None
     payment_method_to_id: uuid.UUID | None
     card_id: uuid.UUID | None
+    statement_id: uuid.UUID | None  # TXN-09: set when transfer is a TDC payment
     expense_nature_override: ExpenseNature | None
     recurring_rule_id: uuid.UUID | None
     needs_review: bool

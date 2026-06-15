@@ -36,6 +36,7 @@ export interface CardOut {
   behavior: CardBehavior | null;
   debt: DebtSummary | null;
   balance: string | null; // TAR-05, debit/prepaid only
+  signed_balance: string | null; // TAR-06: +asset or -liability for PAT-01
   next_payment: { amount: string; due_date: string } | null; // TDC-14
   opening_balance: string | null; // TDC-14: synthetic previous-cut debt
 }

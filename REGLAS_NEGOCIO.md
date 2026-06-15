@@ -52,6 +52,8 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 - **TXN-05 · Edición/borrado:** editable por cualquier editor/owner del espacio. Si la transacción tiene plan MSI asociado, ver MSI-08. Si proviene de regla recurrente o import, editarla la desvincula de regeneraciones futuras (mantiene `recurring_rule_id`/`import_batch_id` para trazabilidad).
 - **TXN-06 · TDC:** una transacción con método de pago de tipo `credit_card` se asigna a un ciclo de facturación según TDC-05 y NO cuenta como flujo de salida hasta que se paga el statement (el gasto sí cuenta en reportes por categoría en su fecha; el flujo de caja lo refleja el pago — ver DSH-04).
 - **TXN-07 · Adjuntos (v2+):** preparar `attachment_url` (ticket/factura, Supabase Storage). No bloqueante para v1.
+- **TXN-08 · Balance en transferencias:** una transferencia cuyo `payment_method_id` (origen) pertenece a una tarjeta de behavior `debit`/`prepaid` se rechaza (422) si `amount > saldo_disponible`, salvo `allow_overdraft=true` en esa tarjeta. No aplica cuando el origen es efectivo, transferencia bancaria u otro método sin tarjeta vinculada (sin `card_id`).
+- **TXN-09 · Transferencia a TDC como pago:** si `payment_method_to_id` pertenece a una tarjeta de behavior `credit`, `create_transaction` enruta internamente como pago: abona `amount` a `paid_amount` del statement cerrado más antiguo con saldo pendiente; si no existe ninguno, abona al statement abierto del ciclo actual. El campo opcional `target_statement_id` en el request permite elegir el statement exacto. La transacción se crea siempre como `type=transfer` para trazabilidad (TXN-02). Aplica también al editar (update).
 
 ## 4. Tarjetas (TAR) y ciclos de crédito (TDC) — R3
 
@@ -62,6 +64,7 @@ Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas
 - **TAR-03 · Método vinculado:** al alta, toda tarjeta crea automáticamente su `payment_method` vinculado (`card_id`), con `type` acorde al behavior (CAT-07). Desactivar la tarjeta desactiva su método (generaliza TDC-12).
 - **TAR-04 · Cargo no-crédito:** un gasto con tarjeta `debit`/`prepaid` es **salida de caja inmediata** en su fecha (como efectivo); NO DEBE asignarse a ningún statement ni ciclo (contrasta con TXN-06/TDC-05). Un ingreso o transferencia hacia su método entra igualmente en su fecha.
 - **TAR-05 · Saldo:** para `debit`/`prepaid`, `saldo = initial_balance + Σ ingresos + Σ transferencias entrantes − Σ gastos − Σ transferencias salientes` del método de la tarjeta, **calculado en SQL** (DSH-03), nunca un campo mutable. Un gasto que deje el saldo negativo se rechaza (422) salvo `allow_overdraft=true`. El saldo se reporta en la moneda de la tarjeta. `credit` no lleva saldo (su contraparte es la deuda, TDC-09).
+- **TAR-06 · Saldo con signo (`signed_balance`):** campo calculado en `CardOut` que expone el balance neto desde la perspectiva de activos del patrimonio: `debit`/`prepaid` → `+card_balance()` (asset positivo); `credit` → `−(TDC-09: a+b+c)` (pasivo, número negativo representando la deuda total). Devuelve `null` si la TDC no tiene `statement_day` configurado (no es cycle-ready). Este campo es el único que DEBEN usar PAT-01 y el dashboard para cálculos de patrimonio; nunca mezclar con `computed_total` interno.
 
 - **TDC-01 · Alta (tipo `credit`):** además de los campos comunes de tarjeta (TAR-01/03: alias, banco, red, `last4`), una tarjeta de crédito define su ciclo con `statement_day` (1-28 o `last`) y **a lo más uno** de: `payment_due_days` (1-30, típico 20) o `payment_day` (1-28 o `last`). Estos campos de ciclo son **opcionales al alta** (TDC-15): pueden completarse después por edición. Opcionales: `credit_limit`, color/ícono. NO DEBE almacenarse PAN completo, CVV ni fecha de expiración; solo `last4` (4 dígitos).
 - **TDC-02 · Día de corte:** si `statement_day=d`, el corte del mes M es `min(d, último_día(M))`. `statement_day=last` ⇒ último día del mes. Se permite 29/30 capturándolo como `last` o ajustando; la UI ofrece 1-28 y `last` para evitar ambigüedad.
@@ -162,9 +165,9 @@ Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas
 
 | Req | Reglas |
 |---|---|
-| R1 gastos | TXN-01…07, GLO-01/02 |
+| R1 gastos | TXN-01…09, GLO-01/02 |
 | R2 catálogos | CAT-01…08 |
-| R3 tarjetas | TAR-01…05, TDC-01…15, CAT-08 |
+| R3 tarjetas | TAR-01…06, TDC-01…15, CAT-08 |
 | R4 MSI | MSI-01…10 |
 | R5 crypto | INV-01/02/03/03b/05/06 |
 | R6 dashboard | DSH-01…05 |

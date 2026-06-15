@@ -5,10 +5,12 @@ import {
   useCreateCategory,
   useCreatePaymentMethod,
   useDeleteCategory,
+  useDeletePaymentMethod,
   usePaymentMethods,
   useUpdateCategory,
   useUpdatePaymentMethod,
   type CategoryOut,
+  type PaymentMethodOut,
 } from "../../api/catalogs";
 import { ApiError } from "../../api/client";
 import Modal from "../../components/ui/Modal";
@@ -272,8 +274,51 @@ function PaymentMethodsSection() {
   const methods = usePaymentMethods(true);
   const createMethod = useCreatePaymentMethod();
   const updateMethod = useUpdatePaymentMethod();
+  const deleteMethod = useDeletePaymentMethod();
+
   const [name, setName] = useState("");
   const [type, setType] = useState<"cash" | "debit" | "transfer" | "other">("debit");
+
+  const [editingMethod, setEditingMethod] = useState<PaymentMethodOut | null>(null);
+  const [editName, setEditName] = useState("");
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
+
+  const nonCardMethods = (methods.data ?? []).filter((m) => m.card_id === null);
+
+  function openEditModal(m: PaymentMethodOut) {
+    setEditingMethod(m);
+    setEditName(m.name);
+  }
+
+  function closeEditModal() {
+    setEditingMethod(null);
+  }
+
+  function handleSaveEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingMethod) return;
+    updateMethod.mutate(
+      { id: editingMethod.id, ...(editName !== editingMethod.name && { name: editName }) },
+      { onSuccess: closeEditModal },
+    );
+  }
+
+  function handleDelete(m: PaymentMethodOut) {
+    setDeleteMessage(null);
+    deleteMethod.mutate(m.id, {
+      onError: (err) => {
+        if (err instanceof ApiError && err.status === 409) {
+          updateMethod.mutate(
+            { id: m.id, is_active: false },
+            {
+              onSuccess: () =>
+                setDeleteMessage("Tiene registros asociados — fue desactivado en su lugar."),
+            },
+          );
+        }
+      },
+    });
+  }
 
   return (
     <section className="card p-5">
@@ -306,27 +351,76 @@ function PaymentMethodsSection() {
           Agregar
         </button>
       </form>
-      <ErrorText error={createMethod.error ?? updateMethod.error} />
+      <ErrorText error={createMethod.error ?? deleteMethod.error} />
+      {deleteMessage && (
+        <p className="mb-2 text-sm text-amber-600 dark:text-amber-400">{deleteMessage}</p>
+      )}
       <ul className="space-y-1">
-        {(methods.data ?? []).map((m) => (
+        {nonCardMethods.map((m) => (
           <li
             key={m.id}
             className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
           >
             <span className={m.is_active ? "" : "line-through opacity-50"}>{m.name}</span>
-            <button
-              className="text-xs text-accent hover:underline"
-              onClick={() => updateMethod.mutate({ id: m.id, is_active: !m.is_active })}
-            >
-              {m.is_active ? "Desactivar" : "Reactivar"}
-            </button>
+            <span className="flex items-center gap-1">
+              <button
+                aria-label="Editar método de pago"
+                className="rounded p-1 text-ink-muted transition-colors hover:bg-slate-100 hover:text-accent dark:hover:bg-slate-700"
+                onClick={() => openEditModal(m)}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                  <path d="M13.586 3.586a2 2 0 1 1 2.828 2.828l-.793.793-2.828-2.828.793-.793ZM11.379 5.793 3 14.172V17h2.828l8.38-8.379-2.83-2.828Z" />
+                </svg>
+              </button>
+              {!m.is_active && (
+                <button
+                  className="text-xs text-accent hover:underline"
+                  onClick={() => updateMethod.mutate({ id: m.id, is_active: true })}
+                >
+                  Reactivar
+                </button>
+              )}
+              <button
+                aria-label="Eliminar método de pago"
+                className="rounded p-1 text-ink-muted transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                onClick={() => handleDelete(m)}
+                disabled={deleteMethod.isPending}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                  <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </span>
           </li>
         ))}
       </ul>
       <p className="mt-3 text-xs text-ink-muted dark:text-slate-500">
-        Los métodos de tarjeta de crédito se crean automáticamente al dar de alta una
-        tarjeta.
+        Los métodos de tarjeta de crédito y las tarjetas registradas se gestionan en la
+        sección de Tarjetas.
       </p>
+
+      <Modal open={editingMethod !== null} onClose={closeEditModal} title="Editar método de pago">
+        <form onSubmit={handleSaveEdit} className="space-y-4">
+          <div>
+            <label className="label">Nombre</label>
+            <input
+              className="input"
+              value={editName}
+              required
+              onChange={(e) => setEditName(e.target.value)}
+            />
+          </div>
+          <ErrorText error={updateMethod.error} />
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" className="btn-secondary" onClick={closeEditModal}>
+              Cancelar
+            </button>
+            <button type="submit" className="btn-primary" disabled={updateMethod.isPending}>
+              Guardar
+            </button>
+          </div>
+        </form>
+      </Modal>
     </section>
   );
 }

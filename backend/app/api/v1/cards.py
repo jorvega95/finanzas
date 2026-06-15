@@ -52,6 +52,7 @@ async def _card_with_debt(db: DbSession, space: Space, card: Card) -> CardWithDe
         out.opening_balance = await svc.get_opening_balance(db, space, card)  # TDC-14
     else:
         out.balance = await svc.card_balance(db, card)  # TAR-05
+    out.signed_balance = await svc.card_signed_balance(db, card)  # TAR-06
     return out
 
 

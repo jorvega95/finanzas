@@ -1,5 +1,5 @@
 // Registro de gastos (R1): captura rápida <10 s, bandeja "Por confirmar"
-// (REC-03) y lista con filtros (TXN-01..03).
+// (REC-03) y lista con filtros (TXN-01..03). TXN-08/TXN-09: validaciones y avisos.
 import { useMemo, useState, type FormEvent } from "react";
 import { useCategories, usePaymentMethods, type PaymentMethodOut } from "../../api/catalogs";
 import { useCards, type CardOut } from "../../api/cards";
@@ -183,6 +183,34 @@ export default function TransactionsPage() {
     [editDate, editMethodId, cards.data, methods.data],
   );
 
+  const transferFromBalance = useMemo(() => {
+    if (!methodId) return null;
+    const m = (methods.data ?? []).find((x) => x.id === methodId);
+    if (!m?.card_id) return null;
+    const card = (cards.data ?? []).find((c) => c.id === m.card_id);
+    if (!card || (card.behavior !== "debit" && card.behavior !== "prepaid")) return null;
+    return card.balance;
+  }, [methodId, methods.data, cards.data]);
+
+  const editTransferFromBalance = useMemo(() => {
+    if (!editMethodId) return null;
+    const m = (methods.data ?? []).find((x) => x.id === editMethodId);
+    if (!m?.card_id) return null;
+    const card = (cards.data ?? []).find((c) => c.id === m.card_id);
+    if (!card || (card.behavior !== "debit" && card.behavior !== "prepaid")) return null;
+    return card.balance;
+  }, [editMethodId, methods.data, cards.data]);
+
+  const showIncomeWarning = useMemo(() => {
+    if (type !== "income" || !methodId) return false;
+    return (methods.data ?? []).find((m) => m.id === methodId)?.type === "credit_card";
+  }, [type, methodId, methods.data]);
+
+  const showEditIncomeWarning = useMemo(() => {
+    if (editType !== "income" || !editMethodId) return false;
+    return (methods.data ?? []).find((m) => m.id === editMethodId)?.type === "credit_card";
+  }, [editType, editMethodId, methods.data]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
@@ -284,6 +312,11 @@ export default function TransactionsPage() {
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </select>
+            {type === "transfer" && transferFromBalance !== null && (
+              <p className="mt-1 text-xs text-ink-muted dark:text-slate-400">
+                Disponible: {formatMoney(transferFromBalance, activeSpace.base_currency)}
+              </p>
+            )}
           </div>
           {type === "transfer" && (
             <div>
@@ -352,6 +385,13 @@ export default function TransactionsPage() {
                 );
               })}
             </div>
+          </div>
+        )}
+        {showIncomeWarning && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+            <p className="text-amber-800 dark:text-amber-300">
+              Este ingreso se registrará como <strong>devolución/abono</strong> en el ciclo activo de la tarjeta y reducirá el total a pagar.
+            </p>
           </div>
         )}
         {formError && <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>}
@@ -635,6 +675,11 @@ export default function TransactionsPage() {
                       <option key={m.id} value={m.id}>{m.name}</option>
                     ))}
                   </select>
+                  {editTransferFromBalance !== null && (
+                    <p className="mt-1 text-xs text-ink-muted dark:text-slate-400">
+                      Disponible: {formatMoney(editTransferFromBalance, activeSpace.base_currency)}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="label">Hacia</label>
@@ -707,6 +752,13 @@ export default function TransactionsPage() {
                   );
                 })}
               </div>
+            </div>
+          )}
+          {showEditIncomeWarning && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+              <p className="text-amber-800 dark:text-amber-300">
+                Este ingreso se registrará como <strong>devolución/abono</strong> en el ciclo activo de la tarjeta y reducirá el total a pagar.
+              </p>
             </div>
           )}
 

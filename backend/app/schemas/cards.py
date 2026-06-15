@@ -102,6 +102,7 @@ class CardWithDebtOut(CardOut):
     behavior: CardBehavior | None = None
     debt: DebtSummary | None = None  # TDC-09, credit only
     balance: MoneyOut | None = None  # TAR-05, debit/prepaid only
+    signed_balance: MoneyOut | None = None  # TAR-06: +asset or -liability for PAT-01
     next_payment: NextPaymentOut | None = None  # TDC-14, credit only
     opening_balance: MoneyNonNeg | None = None  # TDC-14: synthetic previous-cut debt
 

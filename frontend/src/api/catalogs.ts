@@ -147,3 +147,12 @@ export function useUpdatePaymentMethod() {
     onSuccess: invalidate,
   });
 }
+
+export function useDeletePaymentMethod() {
+  const invalidate = useInvalidate(["payment-methods"]);
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<void>(`/api/v1/catalogs/payment-methods/${id}`, { method: "DELETE" }),
+    onSuccess: invalidate,
+  });
+}

@@ -740,40 +740,35 @@ async def close_due_statements(
     return closed
 
 
-# --- Payments (TDC-10) ----------------------------------------------------------
+# --- Payments (TDC-10 / TXN-09) -------------------------------------------------
 
 
-async def register_payment(
+async def apply_card_payment(
     session: AsyncSession,
     space: Space,
-    user_id: uuid.UUID,
     card: Card,
-    *,
-    amount: Decimal,
-    from_payment_method_id: uuid.UUID,
-    payment_date: date,
-    statement_id: uuid.UUID | None = None,
-) -> Transaction:
-    """TDC-10: a card payment is a transfer (TXN-02) into the card's method,
-    assigned to a statement. Excess stays as credit for the next close."""
-    from app.services.reminders import cancel_card_reminders
-    from app.services.transactions import TransactionInput, create_transaction
+    txn: Transaction,
+    target_statement_id: uuid.UUID | None = None,
+) -> None:
+    """TXN-09/TDC-10: assign txn to a statement and abono paid_amount.
 
-    if card.payment_method_id is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "La tarjeta no tiene método vinculado")
-    # TDC-15: a statement target requires a configured cut day.
-    if statement_id is None and not cycle_ready(card):
+    Resolves the statement: explicit target_statement_id → that one (validated);
+    else oldest unpaid closed statement; else open current cycle.
+    Called from create_transaction (TXN-09) and from register_payment (TDC-10).
+    Does NOT commit — caller is responsible."""
+    from app.services.reminders import cancel_card_reminders
+
+    if not cycle_ready(card):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Configura el día de corte de la tarjeta antes de registrar pagos",
         )
 
-    if statement_id is not None:
-        statement = await get_statement(session, space.id, statement_id)
+    if target_statement_id is not None:
+        statement = await get_statement(session, space.id, target_statement_id)
         if statement.credit_card_id != card.id:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Statement no encontrado")
     else:
-        # Default: oldest unpaid closed statement; fallback to the open one.
         candidate = await session.scalar(
             select(CardStatement)
             .where(
@@ -788,23 +783,11 @@ async def register_payment(
             candidate = await get_or_create_statement(session, card, cutoff)
         statement = candidate
 
-    txn = await create_transaction(
-        session,
-        space,
-        user_id,
-        TransactionInput(
-            type=TransactionType.transfer,
-            date=payment_date,
-            amount=amount,
-            currency=card.currency,
-            description=f"Pago {card.alias}",
-            payment_method_id=from_payment_method_id,
-            payment_method_to_id=card.payment_method_id,
-        ),
-    )
     txn.statement_id = statement.id
-    statement.paid_amount = statement.paid_amount + amount
+    statement.paid_amount = statement.paid_amount + txn.amount
     _update_payment_status(statement)
+    await session.flush()
+
     if statement.status == StatementStatus.paid:
         # MSI-05: cuotas of a paid statement become paid.
         installments = (
@@ -821,8 +804,59 @@ async def register_payment(
                 installment.status = InstallmentStatus.paid
         await _complete_plans_if_done(session, [i.plan_id for i in installments])
         await cancel_card_reminders(session, statement)  # REM-01
-    await session.commit()
-    await session.refresh(txn)
+
+
+async def revert_card_payment(
+    session: AsyncSession, space_id: uuid.UUID, txn: Transaction
+) -> None:
+    """Undo a previously applied TDC payment (TXN-09 update path).
+
+    When editing a transfer that was already applied to a statement, subtract
+    the old amount from paid_amount and re-evaluate the statement status."""
+    if txn.statement_id is None:
+        return
+    statement = await session.get(CardStatement, txn.statement_id)
+    if statement is None or statement.space_id != space_id:
+        return
+    statement.paid_amount = max(statement.paid_amount - txn.amount, ZERO)
+    _update_payment_status(statement)
+    txn.statement_id = None
+    await session.flush()
+
+
+async def register_payment(
+    session: AsyncSession,
+    space: Space,
+    user_id: uuid.UUID,
+    card: Card,
+    *,
+    amount: Decimal,
+    from_payment_method_id: uuid.UUID,
+    payment_date: date,
+    statement_id: uuid.UUID | None = None,
+) -> Transaction:
+    """TDC-10: a card payment is a transfer (TXN-02) into the card's method.
+    Delegates payment accounting to apply_card_payment via create_transaction."""
+    from app.services.transactions import TransactionInput, create_transaction
+
+    if card.payment_method_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "La tarjeta no tiene método vinculado")
+
+    txn = await create_transaction(
+        session,
+        space,
+        user_id,
+        TransactionInput(
+            type=TransactionType.transfer,
+            date=payment_date,
+            amount=amount,
+            currency=card.currency,
+            description=f"Pago {card.alias}",
+            payment_method_id=from_payment_method_id,
+            payment_method_to_id=card.payment_method_id,
+            target_statement_id=statement_id,
+        ),
+    )
     return txn
 
 
@@ -900,6 +934,24 @@ async def debt_summary(session: AsyncSession, card: Card) -> dict[str, Decimal]:
         "committed_msi": pending_msi,
         "total_debt": statement_balance + current_cycle + pending_msi,
     }
+
+
+# --- Signed balance (TAR-06) -----------------------------------------------------
+
+
+async def card_signed_balance(session: AsyncSession, card: Card) -> Decimal | None:
+    """TAR-06: asset-perspective balance with sign.
+
+    debit/prepaid → +card_balance() (positive asset)
+    credit        → -(total_debt) (negative liability), null if not cycle-ready
+    """
+    behavior = await card_behavior(session, card)
+    if behavior != CardBehavior.credit:
+        return await card_balance(session, card)
+    if not cycle_ready(card):
+        return None
+    summary = await debt_summary(session, card)
+    return -summary["total_debt"]
 
 
 # --- Reassignment (TDC-06) -------------------------------------------------------

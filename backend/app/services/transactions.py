@@ -1,4 +1,4 @@
-"""Transaction services. Implements TXN-01..TXN-06, FX-03, REC-03 (discard).
+"""Transaction services. Implements TXN-01..TXN-09, FX-03, REC-03 (discard).
 
 GLO-01: Decimal everywhere. GLO-02: pure dates. GLO-05: space-scoped.
 """
@@ -21,6 +21,7 @@ from app.models.catalogs import (
     CategoryKind,
     ExpenseNature,
     PaymentMethod,
+    PaymentMethodType,
 )
 from app.models.recurring import RecurringTombstone
 from app.models.spaces import Space
@@ -45,6 +46,7 @@ class TransactionInput:
     expense_nature_override: ExpenseNature | None = None
     fx_rate_override: Decimal | None = None
     cycle_hint: str | None = None  # TDC-05a: "current" | "next" | None
+    target_statement_id: uuid.UUID | None = None  # TXN-09: explicit statement for TDC payment
 
 
 async def _validate_category(
@@ -149,9 +151,15 @@ async def _validate_input(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Una transferencia no lleva categoría",
             )
-        await _validate_payment_method(session, space.id, data.payment_method_id)
+        from_method = await _validate_payment_method(session, space.id, data.payment_method_id)
         await _validate_payment_method(session, space.id, data.payment_method_to_id)
-        return _ResolvedCard()
+        # TXN-08: resolve the source card so _check_sufficient_funds can validate.
+        if from_method.card_id is None:
+            return _ResolvedCard()
+        from app.services.cards import card_behavior, get_card
+
+        src_card = await get_card(session, space.id, from_method.card_id)
+        return _ResolvedCard(card=src_card, behavior=await card_behavior(session, src_card))
 
     # TXN-01: expense/income require category + payment method.
     if data.category_id is None or data.payment_method_id is None:
@@ -181,15 +189,18 @@ async def _check_sufficient_funds(
     data: TransactionInput,
     exclude_txn_id: uuid.UUID | None = None,
 ) -> None:
-    """TAR-05: an expense on a debit/prepaid card cannot overdraw the balance
-    unless the card allows it."""
-    if (
-        data.type != TransactionType.expense
-        or resolved.card is None
-        or resolved.behavior == CardBehavior.credit
-        or resolved.card.allow_overdraft
-    ):
+    """TAR-05/TXN-08: a debit/prepaid card cannot be overdrawn on expenses or
+    transfers unless the card allows it."""
+    is_debit_expense = data.type == TransactionType.expense
+    is_debit_transfer_out = data.type == TransactionType.transfer
+
+    if not (is_debit_expense or is_debit_transfer_out):
         return
+    if resolved.card is None or resolved.behavior == CardBehavior.credit:
+        return
+    if resolved.card.allow_overdraft:
+        return
+
     from app.services.cards import card_balance
 
     available = await card_balance(session, resolved.card, exclude_txn_id=exclude_txn_id)
@@ -245,7 +256,7 @@ async def create_transaction(
     )
     session.add(txn)
     await session.flush()
-    from app.services.cards import assign_charge_to_statement, cycle_ready
+    from app.services.cards import apply_card_payment, assign_charge_to_statement, cycle_ready
 
     if (
         resolved.card is not None
@@ -255,6 +266,20 @@ async def create_transaction(
     ):
         # TXN-06/TDC-05: only credit charges belong to a billing cycle (TAR-04).
         await assign_charge_to_statement(session, resolved.card, txn, cycle_hint=data.cycle_hint)
+    elif data.type == TransactionType.transfer and data.payment_method_to_id is not None:
+        # TXN-09: transfer to a credit card method → apply as TDC payment.
+        dest_method = await session.get(PaymentMethod, data.payment_method_to_id)
+        if (
+            dest_method is not None
+            and dest_method.type == PaymentMethodType.credit_card
+            and dest_method.card_id is not None
+        ):
+            from app.services.cards import get_card
+
+            dest_card = await get_card(session, space.id, dest_method.card_id)
+            await apply_card_payment(
+                session, space, dest_card, txn, data.target_statement_id
+            )
     await session.commit()
     await session.refresh(txn)
     return txn
@@ -282,6 +307,10 @@ async def update_transaction(
     # TAR-05: the edited amount cannot overdraw the balance (excluding itself).
     await _check_sufficient_funds(session, resolved, data, exclude_txn_id=txn.id)
 
+    # Capture pre-update state needed for TXN-09 revert logic.
+    old_type = txn.type
+    old_statement_id_pre = txn.statement_id
+
     if data.fx_rate_override is not None:
         txn.fx_rate_to_base = data.fx_rate_override
     elif data.currency != txn.currency or data.date != txn.date:
@@ -302,28 +331,52 @@ async def update_transaction(
     txn.updated_by = updated_by
     txn.needs_review = False  # REC-03: adjusting counts as reviewing.
 
-    # TDC-05: re-resolve the cycle (date or method may have changed) and
-    # recompute any closed statement totals affected. Only credit charges (TAR-04).
+    # TDC-05 / TXN-09: handle statement assignment changes when type or method change.
     from app.services.cards import (
+        apply_card_payment,
         assign_charge_to_statement,
         cycle_ready,
+        get_card,
         recompute_statement_total,
+        revert_card_payment,
     )
 
-    old_statement_id = txn.statement_id
+    old_statement_id = old_statement_id_pre
+
+    # TXN-09 update path: if old txn was a TDC payment, revert it first.
+    was_tdc_payment = (
+        old_type == TransactionType.transfer and old_statement_id is not None
+    )
+    if was_tdc_payment:
+        await revert_card_payment(session, space.id, txn)
+
     if (
         resolved.card is not None
         and resolved.behavior == CardBehavior.credit
         and cycle_ready(resolved.card)  # TDC-15
         and data.type != TransactionType.transfer
     ):
+        # TDC-05: credit charge → assign/re-assign to billing cycle.
         await assign_charge_to_statement(session, resolved.card, txn, cycle_hint=data.cycle_hint)
-    elif txn.statement_id is not None and data.type != TransactionType.transfer:
+    elif data.type == TransactionType.transfer and data.payment_method_to_id is not None:
+        # TXN-09: transfer to credit card → apply as new payment.
+        dest_method = await session.get(PaymentMethod, data.payment_method_to_id)
+        if (
+            dest_method is not None
+            and dest_method.type == PaymentMethodType.credit_card
+            and dest_method.card_id is not None
+        ):
+            dest_card = await get_card(session, space.id, dest_method.card_id)
+            await apply_card_payment(session, space, dest_card, txn, data.target_statement_id)
+    elif txn.statement_id is not None:
+        # Method changed away from credit card: clear the statement link.
         txn.statement_id = None
+
     await session.flush()
-    if old_statement_id is not None and old_statement_id != txn.statement_id:
+    # Recompute totals for any charge statements that changed (TDC-05; not for payment statements).
+    if old_statement_id is not None and old_statement_id != txn.statement_id and not was_tdc_payment:
         await recompute_statement_total(session, old_statement_id)
-    if txn.statement_id is not None:
+    if txn.statement_id is not None and not was_tdc_payment:
         await recompute_statement_total(session, txn.statement_id)
 
     await session.commit()

@@ -234,6 +234,123 @@ async def test_glo03_delete_only_without_references(client):
     assert res.status_code == 204
 
 
+async def test_payment_method_update_name(client):
+    """PATCH actualiza el nombre de un método de pago."""
+    ctx = await bootstrap_space(client)
+    method_id = ctx["methods"]["Efectivo"]["id"]
+
+    res = await client.patch(
+        f"/api/v1/catalogs/payment-methods/{method_id}",
+        headers=ctx["headers"],
+        json={"name": "Efectivo MXN"},
+    )
+    assert res.status_code == 200
+    assert res.json()["name"] == "Efectivo MXN"
+
+
+async def test_payment_method_delete_no_refs(client):
+    """GLO-03: un método sin transacciones se elimina físicamente."""
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/catalogs/payment-methods",
+        headers=ctx["headers"],
+        json={"name": "Vales de despensa", "type": "prepaid"},
+    )
+    assert res.status_code == 201
+    method_id = res.json()["id"]
+
+    res = await client.delete(
+        f"/api/v1/catalogs/payment-methods/{method_id}",
+        headers=ctx["headers"],
+    )
+    assert res.status_code == 204
+
+    # Ya no aparece ni con include_inactive
+    methods = (
+        await client.get(
+            "/api/v1/catalogs/payment-methods?include_inactive=true",
+            headers=ctx["headers"],
+        )
+    ).json()
+    assert not any(m["id"] == method_id for m in methods)
+
+
+async def test_payment_method_delete_with_refs_returns_409(client):
+    """GLO-03: DELETE devuelve 409 cuando el método tiene transacciones."""
+    ctx = await bootstrap_space(client)
+    pm = ctx["methods"]["Débito"]
+    cat_id = ctx["categories"]["Comida"]["id"]
+
+    await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "expense",
+            "date": "2026-06-01",
+            "amount": "200.00",
+            "currency": "MXN",
+            "category_id": cat_id,
+            "payment_method_id": pm["id"],
+        },
+    )
+
+    res = await client.delete(
+        f"/api/v1/catalogs/payment-methods/{pm['id']}",
+        headers=ctx["headers"],
+    )
+    assert res.status_code == 409
+
+
+async def test_payment_method_deactivate_after_409(client):
+    """Flujo GLO-03: 409 en DELETE → cliente desactiva; el método queda inactivo."""
+    ctx = await bootstrap_space(client)
+    pm = ctx["methods"]["Transferencia"]
+    cat_id = ctx["categories"]["Servicios"]["id"]
+
+    await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "expense",
+            "date": "2026-06-01",
+            "amount": "150.00",
+            "currency": "MXN",
+            "category_id": cat_id,
+            "payment_method_id": pm["id"],
+        },
+    )
+
+    # DELETE rechazado
+    res = await client.delete(
+        f"/api/v1/catalogs/payment-methods/{pm['id']}",
+        headers=ctx["headers"],
+    )
+    assert res.status_code == 409
+
+    # El cliente desactiva en lugar de eliminar
+    res = await client.patch(
+        f"/api/v1/catalogs/payment-methods/{pm['id']}",
+        headers=ctx["headers"],
+        json={"is_active": False},
+    )
+    assert res.status_code == 200
+    assert res.json()["is_active"] is False
+
+    # Aparece inactivo con include_inactive; no aparece sin él
+    with_inactive = (
+        await client.get(
+            "/api/v1/catalogs/payment-methods?include_inactive=true",
+            headers=ctx["headers"],
+        )
+    ).json()
+    assert any(m["id"] == pm["id"] and not m["is_active"] for m in with_inactive)
+
+    without_inactive = (
+        await client.get("/api/v1/catalogs/payment-methods", headers=ctx["headers"])
+    ).json()
+    assert not any(m["id"] == pm["id"] for m in without_inactive)
+
+
 async def test_esp03_viewer_cannot_mutate_catalogs(client, db_session):
     """ESP-03/caso 8: viewer ve catálogos pero no puede crear/editar/borrar."""
     ctx = await bootstrap_space(client)

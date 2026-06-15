@@ -36,6 +36,7 @@ def _to_input(payload: TransactionCreate | TransactionUpdate) -> TransactionInpu
         expense_nature_override=payload.expense_nature_override,
         fx_rate_override=payload.fx_rate_override,
         cycle_hint=payload.cycle_hint,
+        target_statement_id=payload.target_statement_id,  # TXN-09
     )
 
 
