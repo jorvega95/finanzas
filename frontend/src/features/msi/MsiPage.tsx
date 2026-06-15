@@ -1,5 +1,5 @@
 // MSI: vista por plan y proyección global mes × tarjeta (MSI-06),
-// conversión de compras a MSI (MSI-01), alta retroactiva (MSI-10) y liquidación anticipada (MSI-07).
+// conversión de compras a MSI (MSI-01), registro por cuota en curso (MSI-10) y liquidación anticipada (MSI-07).
 import { useMemo, useState } from "react";
 import { useTransactions } from "../../api/transactions";
 import { usePaymentMethods } from "../../api/catalogs";
@@ -13,6 +13,7 @@ import {
 import { useCards } from "../../api/cards";
 import { useCategories } from "../../api/catalogs";
 import { formatMoney } from "../../lib/money";
+import { formatDate } from "../../lib/dates";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Activo",
@@ -61,7 +62,7 @@ function ConvertSection() {
             <option value="">Selecciona…</option>
             {candidates.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.date} · {t.description || "Compra"} · {formatMoney(t.amount, t.currency)}
+                {formatDate(t.date)} · {t.description || "Compra"} · {formatMoney(t.amount, t.currency)}
               </option>
             ))}
           </select>
@@ -94,12 +95,13 @@ function BackfillSection() {
 
   const [form, setForm] = useState({
     description: "",
-    amount: "",
+    monthly_amount: "",
     currency: "MXN",
     credit_card_id: "",
-    purchase_date: "",
-    months: "12",
+    current_number: "1",
+    total_months: "12",
     category_id: "",
+    current_is_charged: true,
   });
 
   const activeCards = (cards.data ?? []).filter((c) => c.is_active);
@@ -107,10 +109,10 @@ function BackfillSection() {
     (c) => c.kind === "expense" && c.is_active,
   );
 
-  function set(key: string, value: string) {
+  function set(key: string, value: string | boolean) {
     setForm((prev) => {
       const next = { ...prev, [key]: value };
-      if (key === "credit_card_id") {
+      if (key === "credit_card_id" && typeof value === "string") {
         const card = activeCards.find((c) => c.id === value);
         if (card) next.currency = card.currency;
       }
@@ -123,23 +125,25 @@ function BackfillSection() {
     create.mutate(
       {
         description: form.description,
-        amount: form.amount,
+        monthly_amount: form.monthly_amount,
         currency: form.currency,
         credit_card_id: form.credit_card_id,
-        purchase_date: form.purchase_date,
-        months: Number(form.months),
+        current_number: Number(form.current_number),
+        total_months: Number(form.total_months),
         category_id: form.category_id,
+        current_is_charged: form.current_is_charged,
       },
       {
         onSuccess: () =>
           setForm({
             description: "",
-            amount: "",
+            monthly_amount: "",
             currency: "MXN",
             credit_card_id: "",
-            purchase_date: "",
-            months: "12",
+            current_number: "1",
+            total_months: "12",
             category_id: "",
+            current_is_charged: true,
           }),
       },
     );
@@ -147,10 +151,10 @@ function BackfillSection() {
 
   return (
     <section className="card p-5">
-      <h2 className="mb-1 font-semibold">Registrar compra MSI antigua</h2>
+      <h2 className="mb-1 font-semibold">Registrar MSI existente</h2>
       <p className="mb-3 text-xs text-ink-muted dark:text-slate-400">
-        Registra una compra a meses que realizaste antes de usar el sistema. Las cuotas ya cobradas
-        se marcan automáticamente como pagadas.
+        Registra una compra a meses que ya tenías antes de usar el sistema. Ingresa el cobro que
+        aparece en tu estado de cuenta actual (ej. "Pago 6 de 12 · $2,692").
       </p>
       <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2">
@@ -159,27 +163,14 @@ function BackfillSection() {
             className="input"
             type="text"
             maxLength={200}
-            placeholder="Ej. Laptop, Refrigerador…"
+            placeholder="Ej. TV, Refrigerador, Laptop…"
             required
             value={form.description}
             onChange={(e) => set("description", e.target.value)}
           />
         </div>
         <div>
-          <label className="label">Monto total</label>
-          <input
-            className="input"
-            type="number"
-            min="0.01"
-            step="0.01"
-            placeholder="0.00"
-            required
-            value={form.amount}
-            onChange={(e) => set("amount", e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label">Tarjeta utilizada</label>
+          <label className="label">Tarjeta</label>
           <select
             className="input"
             required
@@ -195,25 +186,40 @@ function BackfillSection() {
           </select>
         </div>
         <div>
-          <label className="label">Fecha de compra</label>
+          <label className="label">Monto de la cuota ({form.currency})</label>
           <input
             className="input"
-            type="date"
+            type="number"
+            min="0.01"
+            step="0.01"
+            placeholder="0.00"
             required
-            value={form.purchase_date}
-            onChange={(e) => set("purchase_date", e.target.value)}
+            value={form.monthly_amount}
+            onChange={(e) => set("monthly_amount", e.target.value)}
           />
         </div>
         <div>
-          <label className="label">Número de meses</label>
+          <label className="label">Cuota actual (N)</label>
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={60}
+            required
+            value={form.current_number}
+            onChange={(e) => set("current_number", e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label">Total de meses (M)</label>
           <input
             className="input"
             type="number"
             min={2}
             max={60}
             required
-            value={form.months}
-            onChange={(e) => set("months", e.target.value)}
+            value={form.total_months}
+            onChange={(e) => set("total_months", e.target.value)}
           />
         </div>
         <div className="sm:col-span-2">
@@ -233,8 +239,27 @@ function BackfillSection() {
           </select>
         </div>
         <div className="sm:col-span-2">
+          <div className="flex items-center gap-2">
+            <input
+              id="current-is-charged"
+              type="checkbox"
+              className="h-4 w-4 rounded border-line accent-accent"
+              checked={form.current_is_charged}
+              onChange={(e) => set("current_is_charged", e.target.checked)}
+            />
+            <label htmlFor="current-is-charged" className="text-sm font-medium">
+              Esta cuota ya aparece en mi estado de cuenta anterior (ya cerrado)
+            </label>
+          </div>
+          <p className="mt-1 pl-6 text-xs text-ink-muted dark:text-slate-400">
+            {form.current_is_charged
+              ? "La cuota N quedará como cobrada (🧾) en el último período cerrado; las anteriores como pagadas."
+              : "La cuota N quedará como pendiente (⏳) en el período actualmente en curso; las anteriores como pagadas."}
+          </p>
+        </div>
+        <div className="sm:col-span-2">
           <button className="btn-primary" disabled={create.isPending}>
-            Registrar compra antigua
+            Registrar MSI existente
           </button>
         </div>
       </form>
@@ -265,7 +290,7 @@ export default function MsiPage() {
 
       {(plans.data ?? []).length === 0 ? (
         <div className="card grid h-40 place-items-center p-8 text-center text-sm text-ink-muted dark:text-slate-400">
-          Sin planes MSI. Convierte una compra con tarjeta o registra una compra antigua.
+          Sin planes MSI. Convierte una compra con tarjeta o registra un MSI existente.
         </div>
       ) : (
         (plans.data ?? []).map((summary) => {
@@ -296,7 +321,7 @@ export default function MsiPage() {
                     </span>
                   </span>
                   <span>
-                    último cobro: {summary.projected_payoff} · pago: {summary.projected_payment_date}
+                    último cobro: {formatDate(summary.projected_payoff)} · pago: {formatDate(summary.projected_payment_date)}
                   </span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
@@ -311,7 +336,7 @@ export default function MsiPage() {
                 <ul className="mt-2 grid grid-cols-2 gap-1 text-xs text-ink-muted dark:text-slate-400 md:grid-cols-3">
                   {summary.installments.map((i) => (
                     <li key={i.id}>
-                      #{i.number} · {i.estimated_charge_date} · {formatMoney(i.amount)} ·{" "}
+                      #{i.number} · {formatDate(i.estimated_charge_date)} · {formatMoney(i.amount)} ·{" "}
                       {i.status === "paid"
                         ? "✅"
                         : i.status === "charged"

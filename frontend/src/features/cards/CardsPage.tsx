@@ -16,6 +16,7 @@ import {
 } from "../../api/cards";
 import { useCardTypes, usePaymentMethods } from "../../api/catalogs";
 import { formatMoney } from "../../lib/money";
+import { formatDate } from "../../lib/dates";
 
 const STATUS_LABELS: Record<StatementOut["status"], string> = {
   open: "Abierto",
@@ -261,7 +262,7 @@ function PayForm({ card, statements }: { card: CardOut; statements: StatementOut
           <option value="">Más antiguo sin pagar</option>
           {payable.map((s) => (
             <option key={s.id} value={s.id}>
-              Corte {s.period_end}
+              Corte {formatDate(s.period_end)}
             </option>
           ))}
         </select>
@@ -490,7 +491,7 @@ function CardDetail({ card }: { card: CardOut }) {
         {(statements.data ?? []).map((s) => (
           <li key={s.id} className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-ink-muted dark:text-slate-400">
-              {s.period_start} → {s.period_end} · vence {s.due_date}
+              {formatDate(s.period_start)} → {formatDate(s.period_end)} · vence {formatDate(s.due_date)}
             </span>
             <span className="flex items-center gap-2">
               {formatMoney(s.computed_total, card.currency)}
@@ -620,7 +621,7 @@ export default function CardsPage() {
               {isCredit && card.next_payment && (
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm dark:bg-amber-950/40">
                   <span className="text-amber-800 dark:text-amber-200">
-                    Próximo pago · vence {card.next_payment.due_date}
+                    Próximo pago · vence {formatDate(card.next_payment.due_date)}
                   </span>
                   <span className="font-semibold">
                     {formatMoney(card.next_payment.amount, card.currency)}

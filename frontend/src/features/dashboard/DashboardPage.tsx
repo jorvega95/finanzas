@@ -26,6 +26,7 @@ import {
   useDeleteBudget,
 } from "../../api/dashboard";
 import { formatMoney } from "../../lib/money";
+import { formatDate } from "../../lib/dates";
 import { useSpace } from "../spaces/SpaceProvider";
 
 const COLORS = ["#0d9488", "#f59e0b", "#6366f1", "#ef4444", "#10b981", "#8b5cf6", "#f97316", "#06b6d4"];
@@ -303,7 +304,7 @@ export default function DashboardPage() {
                   </span>
                   <span className="text-right">
                     <span className="font-medium">{formatMoney(item.amount, currency)}</span>
-                    <span className="ml-2 text-xs text-ink-muted dark:text-slate-400">{item.date}</span>
+                    <span className="ml-2 text-xs text-ink-muted dark:text-slate-400">{formatDate(item.date)}</span>
                   </span>
                 </li>
               ))}

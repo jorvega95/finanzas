@@ -13,6 +13,7 @@ import {
   type PreviewRow,
 } from "../../api/imports";
 import { formatMoney } from "../../lib/money";
+import { formatDate } from "../../lib/dates";
 
 const BATCH_STATUS: Record<string, string> = {
   confirmed: "Importado",
@@ -228,7 +229,7 @@ export default function ImportSection() {
                         onChange={() => toggleRow(index)}
                       />
                     </td>
-                    <td className="p-2">{row.date ?? "—"}</td>
+                    <td className="p-2">{row.date ? formatDate(row.date) : "—"}</td>
                     <td className="max-w-48 truncate p-2">{row.description}</td>
                     <td className="p-2">{row.type === "income" ? "Ingreso" : row.type === "expense" ? "Gasto" : "—"}</td>
                     <td className="p-2">{row.amount ? formatMoney(row.amount, row.currency ?? "MXN") : "—"}</td>

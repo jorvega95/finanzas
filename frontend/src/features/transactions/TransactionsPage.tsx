@@ -13,6 +13,7 @@ import {
 } from "../../api/transactions";
 import { useSpace } from "../spaces/SpaceProvider";
 import { formatMoney } from "../../lib/money";
+import { formatDate } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
 
 type TxnType = "expense" | "income" | "transfer";
@@ -371,7 +372,7 @@ export default function TransactionsPage() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{t.description || "Recurrente"}</p>
                   <p className="text-xs text-ink-muted dark:text-slate-400">
-                    {t.date} · {formatMoney(t.amount, t.currency)}
+                    {formatDate(t.date)} · {formatMoney(t.amount, t.currency)}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -469,7 +470,7 @@ export default function TransactionsPage() {
                         : (t.category_id && byId.cats.get(t.category_id)) || "—")}
                   </p>
                   <p className="text-xs text-ink-muted dark:text-slate-400">
-                    {t.date}
+                    {formatDate(t.date)}
                     {t.category_id ? ` · ${byId.cats.get(t.category_id) ?? ""}` : ""}
                     {t.payment_method_id
                       ? ` · ${byId.pms.get(t.payment_method_id) ?? ""}`
@@ -535,7 +536,7 @@ export default function TransactionsPage() {
                     : (deletingTxn.category_id && byId.cats.get(deletingTxn.category_id)) || "—")}
               </p>
               <p className="mt-1 text-ink-muted dark:text-slate-400">
-                {TYPE_LABELS[deletingTxn.type as TxnType]} · {deletingTxn.date} ·{" "}
+                {TYPE_LABELS[deletingTxn.type as TxnType]} · {formatDate(deletingTxn.date)} ·{" "}
                 <span className="font-semibold text-ink dark:text-slate-200">
                   {deletingTxn.type === "income" ? "+" : deletingTxn.type === "expense" ? "−" : ""}
                   {formatMoney(deletingTxn.amount, deletingTxn.currency)}

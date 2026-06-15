@@ -21,6 +21,7 @@ import ImportSection from "./ImportSection";
 import MembersSection from "../spaces/MembersSection";
 import { useSpace } from "../spaces/SpaceProvider";
 import { formatMoney } from "../../lib/money";
+import { formatDate } from "../../lib/dates";
 
 const FREQ_LABELS: Record<string, string> = {
   weekly: "Semanal",
@@ -445,7 +446,7 @@ function RecurringSection() {
               </p>
               <p className="text-xs text-ink-muted dark:text-slate-400">
                 {FREQ_LABELS[r.frequency]} · {formatMoney(r.amount, r.currency)} · desde{" "}
-                {r.start_date}
+                {formatDate(r.start_date)}
               </p>
             </div>
             <button
