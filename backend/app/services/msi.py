@@ -1,4 +1,4 @@
-"""Planes MSI. Implementa MSI-01..MSI-09.
+"""Planes MSI. Implementa MSI-01..MSI-10.
 
 Invariante MSI-02 (test property-based obligatorio): sum(cuotas) == total exacto.
 """
@@ -104,6 +104,9 @@ async def create_plan_from_transaction(
 
     amounts = split_installments(txn.amount, months)
     charge_dates = installment_charge_dates(txn.date, spec_for(card), months)
+    # MSI-05: si la compra ya estaba en un statement (ciclo actual o pasado),
+    # la cuota 1 hereda ese statement y queda charged de inmediato.
+    old_statement_id = txn.statement_id
 
     plan = InstallmentPlan(
         space_id=space.id,
@@ -120,18 +123,20 @@ async def create_plan_from_transaction(
     for number, (amount, charge_date) in enumerate(
         zip(amounts, charge_dates, strict=True), start=1
     ):
+        is_first = number == 1 and old_statement_id is not None
         session.add(
             Installment(
                 plan_id=plan.id,
                 number=number,
                 amount=amount,
                 estimated_charge_date=charge_date,
+                statement_id=old_statement_id if is_first else None,
+                status=InstallmentStatus.charged if is_first else InstallmentStatus.pending,
             )
         )
     # MSI-03: la transacción-madre queda marcada y fuera de agregados; si ya
     # estaba asignada a un statement, se desasigna (las cuotas toman su lugar).
     txn.installment_plan_id = plan.id
-    old_statement_id = txn.statement_id
     txn.statement_id = None
     await session.flush()
     if old_statement_id is not None:
@@ -141,35 +146,74 @@ async def create_plan_from_transaction(
     return plan
 
 
-async def create_plan_backfill(
+def _project_installment_dates(
+    current_number: int,
+    total_months: int,
+    anchor_cutoff: date,
+    anchor_start: date,
+    spec: cycles.CardCycleSpec,
+) -> list[date]:
+    """Proyecta estimated_charge_dates para todas las cuotas desde el ciclo ancla.
+
+    Cuota current_number → anchor_start (period_start de su ciclo).
+    Cuotas anteriores: se itera hacia atrás un ciclo por cuota.
+    Cuotas posteriores: se itera hacia adelante un ciclo por cuota.
+    """
+    dates: list[date | None] = [None] * total_months
+    dates[current_number - 1] = anchor_start
+
+    # Forward: cuotas posteriores a la actual.
+    cutoff = anchor_cutoff
+    for i in range(current_number, total_months):
+        next_cut = cycles.next_cutoff(cutoff, spec)
+        start, cutoff = cycles.cycle_for_cutoff(next_cut, spec)
+        dates[i] = start
+
+    # Backward: cuotas anteriores a la actual.
+    cutoff = anchor_cutoff
+    for i in range(current_number - 2, -1, -1):
+        prev_cut = cycles.previous_cutoff(cutoff, spec)
+        start, cutoff = cycles.cycle_for_cutoff(prev_cut, spec)
+        dates[i] = start
+
+    return dates  # type: ignore[return-value]
+
+
+async def create_plan_from_current_installment(
     session: AsyncSession,
     space: Space,
     created_by: uuid.UUID,
     *,
     description: str,
-    amount: Decimal,
+    monthly_amount: Decimal,
     currency: str,
     card_id: uuid.UUID,
-    purchase_date: date,
-    months: int,
     category_id: uuid.UUID,
+    current_number: int,
+    total_months: int,
+    current_is_charged: bool,
 ) -> InstallmentPlan:
-    """MSI-10: crea un plan MSI retroactivo sin transacción previa.
+    """MSI-10: registra compra MSI anterior al sistema partiendo de la cuota en curso.
 
-    Las cuotas con estimated_charge_date <= hoy quedan paid (ya se pagaron);
-    las futuras quedan pending. Ninguna cuota retroactiva se asigna a statement.
+    Cuotas 1..N-1 → paid; cuota N → charged/pending según current_is_charged;
+    cuotas N+1..M → pending. Las fechas se proyectan con el corte vigente de la tarjeta.
     """
-    if not 2 <= months <= 60:
+    if not 2 <= total_months <= 60:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Meses fuera de rango [2, 60]")
-    if amount < CENT:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Monto inválido")
-    if amount < CENT * months:
+    if not 1 <= current_number <= total_months:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Monto demasiado pequeño para el número de meses",
+            "El número de cuota actual debe estar entre 1 y el total de meses",
         )
+    if monthly_amount < CENT:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Monto inválido")
 
     card = await get_card(session, space.id, card_id)
+    if await card_behavior(session, card) != CardBehavior.credit:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "MSI solo aplica a tarjetas de crédito",
+        )
     if currency != card.currency:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -181,20 +225,43 @@ async def create_plan_backfill(
             "La tarjeta no tiene método de pago asociado",
         )
 
+    spec = spec_for(card)
     today = _today_for_space(space)
-    amounts = split_installments(amount, months)
-    charge_dates = installment_charge_dates(purchase_date, spec_for(card), months)
 
+    # Determina el corte ancla de la cuota actual.
+    # coa = el corte que CIERRA el ciclo actual (period_end del ciclo en curso).
+    # charged → ancla en el ciclo actual (el que el usuario ve en su estado de cuenta).
+    # pending → ancla en el siguiente ciclo (el cargo aún no ha aparecido).
+    coa = cycles.cutoff_on_or_after(today, spec)
+    if current_is_charged:
+        anchor_cutoff = coa
+    else:
+        anchor_cutoff = cycles.next_cutoff(coa, spec)
+
+    anchor_start = cycles.cycle_for_cutoff(anchor_cutoff, spec)[0]
+    charge_dates = _project_installment_dates(
+        current_number=current_number,
+        total_months=total_months,
+        anchor_cutoff=anchor_cutoff,
+        anchor_start=anchor_start,
+        spec=spec,
+    )
+
+    # MSI-02: total_amount = monthly × total; split absorbe residuo en última cuota.
+    total_amount = (monthly_amount * total_months).quantize(CENT)
+    amounts = split_installments(total_amount, total_months)
+
+    txn_date = charge_dates[0]  # fecha estimada de la primera cuota como proxy de la compra
     txn = Transaction(
         space_id=space.id,
         type=TransactionType.expense,
-        date=purchase_date,
+        date=txn_date,
         description=description,
-        amount=amount,
+        amount=total_amount,
         currency=currency,
         category_id=category_id,
         payment_method_id=card.payment_method_id,
-        credit_card_id=card.id,
+        card_id=card.id,
         created_by=created_by,
     )
     session.add(txn)
@@ -204,10 +271,10 @@ async def create_plan_backfill(
         space_id=space.id,
         credit_card_id=card.id,
         transaction_id=txn.id,
-        total_amount=amount,
-        months=months,
+        total_amount=total_amount,
+        months=total_months,
         monthly_amount=amounts[0],
-        start_date=purchase_date,
+        start_date=txn_date,
         created_by=created_by,
     )
     session.add(plan)
@@ -216,9 +283,12 @@ async def create_plan_backfill(
     for number, (inst_amount, charge_date) in enumerate(
         zip(amounts, charge_dates, strict=True), start=1
     ):
-        inst_status = (
-            InstallmentStatus.paid if charge_date <= today else InstallmentStatus.pending
-        )
+        if number < current_number:
+            inst_status = InstallmentStatus.paid
+        elif number == current_number:
+            inst_status = InstallmentStatus.charged if current_is_charged else InstallmentStatus.pending
+        else:
+            inst_status = InstallmentStatus.pending
         session.add(
             Installment(
                 plan_id=plan.id,
@@ -289,14 +359,25 @@ def _today_for_space(space: Space) -> date:
 
 
 async def delete_plan_if_allowed(session: AsyncSession, plan: InstallmentPlan) -> None:
-    """MSI-08: borrar la compra borra el plan solo si todas las cuotas están
-    pending; si no, se bloquea."""
-    non_pending = [i for i in plan.installments if i.status not in (InstallmentStatus.pending,)]
-    if non_pending:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "El plan tiene cuotas cargadas o pagadas; liquida o ajusta en su lugar",
-        )
+    """MSI-08: borrar la compra borra el plan solo si ninguna cuota está en un
+    corte cerrado. Una cuota charged en statement OPEN todavía puede cancelarse
+    (el cargo aún no está impreso); si el corte ya cerró o la cuota está paid,
+    se bloquea."""
+    from app.models.cards import CardStatement, StatementStatus
+
+    for inst in plan.installments:
+        if inst.status == InstallmentStatus.paid:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "El plan tiene cuotas pagadas; liquida o ajusta en su lugar",
+            )
+        if inst.status == InstallmentStatus.charged and inst.statement_id is not None:
+            stmt = await session.get(CardStatement, inst.statement_id)
+            if stmt is not None and stmt.status != StatementStatus.open:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "El plan tiene cuotas en un corte cerrado; liquida o ajusta en su lugar",
+                )
     await session.delete(plan)
 
 
