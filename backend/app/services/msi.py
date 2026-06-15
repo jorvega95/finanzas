@@ -189,8 +189,13 @@ async def create_plan_from_current_installment(
 ) -> InstallmentPlan:
     """MSI-10: registra compra MSI anterior al sistema partiendo de la cuota en curso.
 
-    Cuotas 1..N-1 → paid; cuota N → charged/pending según current_is_charged;
-    cuotas N+1..M → pending. Las fechas se proyectan con el corte vigente de la tarjeta.
+    current_is_charged=True → cuota N ya está en el opening_balance del corte cerrado
+      (no hay que sumarla de nuevo): cuotas 1..N → paid; cuota N+1 → charged asignada
+      al statement abierto del ciclo en curso → aparece en Ciclo en curso.
+      Caso borde N==M: todas paid, plan status=completed al crearse.
+    current_is_charged=False → cuota N se cobrará en el ciclo actualmente abierto:
+      cuotas 1..N-1 → paid; cuota N → charged asignada al statement abierto → Ciclo en
+      curso; cuotas N+1..M → pending → MSI por venir.
     """
     if not 2 <= total_months <= 60:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Meses fuera de rango [2, 60]")
@@ -277,24 +282,43 @@ async def create_plan_from_current_installment(
     session.add(plan)
     await session.flush()
 
+    # Cuota que corresponde al ciclo en curso (la que entra en Ciclo en curso).
+    # charged=True → cuota N ya está en opening_balance (paid); la activa en el ciclo es N+1.
+    # charged=False → la activa en el ciclo es N.
+    active_number = current_number + 1 if current_is_charged else current_number
+
+    installments_created: list[Installment] = []
     for number, (inst_amount, charge_date) in enumerate(
         zip(amounts, charge_dates, strict=True), start=1
     ):
-        if number < current_number:
-            inst_status = InstallmentStatus.paid
-        elif number == current_number:
-            inst_status = InstallmentStatus.charged if current_is_charged else InstallmentStatus.pending
+        if current_is_charged:
+            # Cuotas 1..N → paid (N ya viene en opening_balance); N+1 se ajusta después.
+            inst_status = InstallmentStatus.paid if number <= current_number else InstallmentStatus.pending
         else:
-            inst_status = InstallmentStatus.pending
-        session.add(
-            Installment(
-                plan_id=plan.id,
-                number=number,
-                amount=inst_amount,
-                estimated_charge_date=charge_date,
-                status=inst_status,
-            )
+            # Cuotas 1..N-1 → paid; N se ajusta después; N+1..M → pending.
+            inst_status = InstallmentStatus.paid if number < current_number else InstallmentStatus.pending
+        inst = Installment(
+            plan_id=plan.id,
+            number=number,
+            amount=inst_amount,
+            estimated_charge_date=charge_date,
+            status=inst_status,
         )
+        session.add(inst)
+        installments_created.append(inst)
+
+    await session.flush()
+
+    if active_number <= total_months:
+        # Asignar la cuota activa al statement abierto del ciclo en curso.
+        active_inst = installments_created[active_number - 1]
+        active_cutoff = charge_dates[active_number - 1]
+        open_stmt = await get_or_create_statement(session, card, active_cutoff)
+        active_inst.statement_id = open_stmt.id
+        active_inst.status = InstallmentStatus.charged
+    elif current_is_charged:
+        # N == M y charged=True: todas las cuotas quedan paid → plan completado.
+        plan.status = PlanStatus.completed
 
     # MSI-03: la transacción-madre queda excluida de agregados via installment_plan_id.
     txn.installment_plan_id = plan.id

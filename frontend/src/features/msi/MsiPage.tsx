@@ -253,8 +253,8 @@ function BackfillSection() {
           </div>
           <p className="mt-1 pl-6 text-xs text-ink-muted dark:text-slate-400">
             {form.current_is_charged
-              ? "La cuota N quedará como cobrada (🧾) en el último período cerrado; las anteriores como pagadas."
-              : "La cuota N quedará como pendiente (⏳) en el período actualmente en curso; las anteriores como pagadas."}
+              ? `La cuota ${form.current_number} se marcará como pagada (✅) — ya viene en tu Pago pendiente. La cuota ${Number(form.current_number) + 1} entrará al ciclo en curso (🧾).`
+              : `La cuota ${form.current_number} entrará al ciclo en curso como cobrada (🧾); las anteriores como pagadas.`}
           </p>
         </div>
         <div className="sm:col-span-2">
