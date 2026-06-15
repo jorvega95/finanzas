@@ -68,7 +68,10 @@ export function useBudgets(month: string) {
 
 function useInvalidateBudgets() {
   const qc = useQueryClient();
-  return () => void qc.invalidateQueries({ queryKey: ["budgets"] });
+  return () =>
+    ["budgets", "transactions", "cards"].forEach(
+      (k) => void qc.invalidateQueries({ queryKey: [k] }),
+    );
 }
 
 export function useCreateBudget() {

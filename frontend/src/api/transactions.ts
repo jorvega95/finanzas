@@ -15,6 +15,7 @@ export interface TransactionOut {
   payment_method_id: string | null;
   payment_method_to_id: string | null;
   card_id: string | null;
+  statement_id: string | null; // TXN-09: set when transfer is a TDC payment
   expense_nature_override: string | null;
   recurring_rule_id: string | null;
   needs_review: boolean;
@@ -46,6 +47,7 @@ export interface TransactionBody {
   payment_method_id?: string | null;
   payment_method_to_id?: string | null;
   cycle_hint?: "current" | "next" | null; // TDC-05a
+  target_statement_id?: string | null; // TXN-09: explicit statement for TDC payment
 }
 
 function toQuery(filters: TransactionFilters): string {
@@ -66,7 +68,10 @@ export function useTransactions(filters: TransactionFilters) {
 
 function useInvalidateTransactions() {
   const qc = useQueryClient();
-  return () => void qc.invalidateQueries({ queryKey: ["transactions"] });
+  return () =>
+    ["transactions", "cards", "statements", "budgets"].forEach(
+      (k) => void qc.invalidateQueries({ queryKey: [k] }),
+    );
 }
 
 export function useCreateTransaction() {

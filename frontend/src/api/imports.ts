@@ -50,8 +50,16 @@ export function usePreviewImport() {
   });
 }
 
-export function useConfirmImport() {
+function useInvalidateImports() {
   const qc = useQueryClient();
+  return () =>
+    ["imports", "transactions", "cards", "statements", "budgets"].forEach(
+      (k) => void qc.invalidateQueries({ queryKey: [k] }),
+    );
+}
+
+export function useConfirmImport() {
+  const invalidate = useInvalidateImports();
   return useMutation({
     mutationFn: (body: {
       file_name: string;
@@ -64,10 +72,7 @@ export function useConfirmImport() {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["imports"] });
-      void qc.invalidateQueries({ queryKey: ["transactions"] });
-    },
+    onSuccess: invalidate,
   });
 }
 
@@ -79,16 +84,13 @@ export function useImportBatches() {
 }
 
 export function useRollbackBatch() {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateImports();
   return useMutation({
     mutationFn: (batchId: string) =>
       api<{ removed: number; kept_edited: number }>(
         `/api/v1/imports/${batchId}/rollback`,
         { method: "POST" },
       ),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["imports"] });
-      void qc.invalidateQueries({ queryKey: ["transactions"] });
-    },
+    onSuccess: invalidate,
   });
 }
