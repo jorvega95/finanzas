@@ -22,9 +22,7 @@ async def main() -> None:
         plans = (
             (
                 await session.execute(
-                    select(InstallmentPlan).options(
-                        selectinload(InstallmentPlan.installments)
-                    )
+                    select(InstallmentPlan).options(selectinload(InstallmentPlan.installments))
                 )
             )
             .scalars()
@@ -34,9 +32,7 @@ async def main() -> None:
 
         fixed = 0
         for plan in plans:
-            installments: list[Installment] = sorted(
-                plan.installments, key=lambda i: i.number
-            )
+            installments: list[Installment] = sorted(plan.installments, key=lambda i: i.number)
             if not installments:
                 continue
             if any(i.status != InstallmentStatus.pending for i in installments):

@@ -148,9 +148,7 @@ async def _statement_has_charges(session: AsyncSession, statement_id: uuid.UUID)
     return inst is not None
 
 
-async def get_opening_balance(
-    session: AsyncSession, space: Space, card: Card
-) -> Decimal | None:
+async def get_opening_balance(session: AsyncSession, space: Space, card: Card) -> Decimal | None:
     """TDC-14: return the computed_total of the synthetic opening-balance statement
     (previous period, no itemized charges), or None if no such statement exists."""
     if not (cycle_ready(card) and _payment_ready(card)):

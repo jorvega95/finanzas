@@ -311,8 +311,12 @@ async def test_tar05_edit_initial_balance(client):
     # Prepaid (tarjeta de regalo / vales) also supports initial_balance edits.
     prepaid_type_id = ctx["card_type_by_behavior"]["prepaid"]["id"]
     prepaid = await make_card(
-        client, ctx, prepaid_type_id,
-        alias="Vales Comida", initial_balance="500.00", last4="7777",
+        client,
+        ctx,
+        prepaid_type_id,
+        alias="Vales Comida",
+        initial_balance="500.00",
+        last4="7777",
     )
     res = await client.patch(
         f"/api/v1/cards/{prepaid['id']}",
@@ -324,6 +328,7 @@ async def test_tar05_edit_initial_balance(client):
 
     # Credit card must reject initial_balance (TAR-02 / service guard).
     from tests.test_cards import create_card as create_credit
+
     credit = await create_credit(client, ctx)
     res = await client.patch(
         f"/api/v1/cards/{credit['id']}",

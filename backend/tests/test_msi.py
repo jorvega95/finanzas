@@ -528,15 +528,11 @@ async def test_msi10_close_cycles_idempotent_after_backfill(client):
             "current_is_charged": False,
         },
     )
-    detail_before = (
-        await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])
-    ).json()
+    detail_before = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
     cycle_before = detail_before["debt"]["current_cycle_spend"]
 
     # Cerrar ciclos no debe cambiar el ciclo en curso (cuota 2 ya está charged).
     await close_cycles(client, ctx)
 
-    detail_after = (
-        await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])
-    ).json()
+    detail_after = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
     assert detail_after["debt"]["current_cycle_spend"] == cycle_before
