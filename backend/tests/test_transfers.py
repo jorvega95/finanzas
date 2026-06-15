@@ -6,7 +6,6 @@ from freezegun import freeze_time
 
 from tests.conftest import bootstrap_space
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -199,7 +198,11 @@ async def test_txn09_transfer_to_credit_applies_as_payment(client):
 
     # Transferir 600 desde débito hacia la TDC.
     res = await transfer(
-        client, ctx, debit["payment_method_id"], credit["payment_method_id"], "600.00",
+        client,
+        ctx,
+        debit["payment_method_id"],
+        credit["payment_method_id"],
+        "600.00",
         date="2026-06-20",
     )
     assert res.status_code == 201
@@ -221,7 +224,11 @@ async def test_txn09_full_payment_marks_statement_paid(client):
     await close_cycles(client, ctx)
 
     res = await transfer(
-        client, ctx, debit["payment_method_id"], credit["payment_method_id"], "800.00",
+        client,
+        ctx,
+        debit["payment_method_id"],
+        credit["payment_method_id"],
+        "800.00",
         date="2026-06-20",
     )
     assert res.status_code == 201
@@ -258,7 +265,11 @@ async def test_txn09_auto_selects_oldest_unpaid_statement(client):
 
     # Pago parcial → debe aplicar al más antiguo.
     res = await transfer(
-        client, ctx, debit["payment_method_id"], credit["payment_method_id"], "100.00",
+        client,
+        ctx,
+        debit["payment_method_id"],
+        credit["payment_method_id"],
+        "100.00",
         date="2026-06-20",
     )
     assert res.status_code == 201
@@ -290,7 +301,11 @@ async def test_txn09_target_statement_id_overrides_auto_select(client):
 
     # Pagamos el ciclo B explícitamente, dejando el ciclo A sin tocar.
     res = await transfer(
-        client, ctx, debit["payment_method_id"], credit["payment_method_id"], "200.00",
+        client,
+        ctx,
+        debit["payment_method_id"],
+        credit["payment_method_id"],
+        "200.00",
         date="2026-06-20",
         target_statement_id=newest_closed["id"],
     )
@@ -336,7 +351,6 @@ async def test_tar06_debit_signed_balance_is_positive(client):
     """TAR-06: tarjeta de débito — signed_balance = +saldo disponible."""
     ctx = await bootstrap_space(client)
     debit = await make_debit(client, ctx, initial_balance="1000.00")
-    cash = ctx["methods"]["Efectivo"]["id"]
 
     # Gasto de 200 → saldo = 800.
     await client.post(

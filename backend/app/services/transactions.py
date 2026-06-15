@@ -277,9 +277,7 @@ async def create_transaction(
             from app.services.cards import get_card
 
             dest_card = await get_card(session, space.id, dest_method.card_id)
-            await apply_card_payment(
-                session, space, dest_card, txn, data.target_statement_id
-            )
+            await apply_card_payment(session, space, dest_card, txn, data.target_statement_id)
     await session.commit()
     await session.refresh(txn)
     return txn
@@ -344,9 +342,7 @@ async def update_transaction(
     old_statement_id = old_statement_id_pre
 
     # TXN-09 update path: if old txn was a TDC payment, revert it first.
-    was_tdc_payment = (
-        old_type == TransactionType.transfer and old_statement_id is not None
-    )
+    was_tdc_payment = old_type == TransactionType.transfer and old_statement_id is not None
     if was_tdc_payment:
         await revert_card_payment(session, space.id, txn)
 
@@ -374,7 +370,9 @@ async def update_transaction(
 
     await session.flush()
     # Recompute totals for any charge statements that changed (TDC-05; not for payment statements).
-    if old_statement_id is not None and old_statement_id != txn.statement_id and not was_tdc_payment:
+    old_stmt_changed = old_statement_id is not None and old_statement_id != txn.statement_id
+    if old_stmt_changed and not was_tdc_payment:
+        assert old_statement_id is not None  # narrowed by old_stmt_changed
         await recompute_statement_total(session, old_statement_id)
     if txn.statement_id is not None and not was_tdc_payment:
         await recompute_statement_total(session, txn.statement_id)

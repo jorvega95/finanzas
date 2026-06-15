@@ -806,9 +806,7 @@ async def apply_card_payment(
         await cancel_card_reminders(session, statement)  # REM-01
 
 
-async def revert_card_payment(
-    session: AsyncSession, space_id: uuid.UUID, txn: Transaction
-) -> None:
+async def revert_card_payment(session: AsyncSession, space_id: uuid.UUID, txn: Transaction) -> None:
     """Undo a previously applied TDC payment (TXN-09 update path).
 
     When editing a transfer that was already applied to a statement, subtract
