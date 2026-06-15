@@ -44,6 +44,7 @@ class TransactionInput:
     payment_method_to_id: uuid.UUID | None = None
     expense_nature_override: ExpenseNature | None = None
     fx_rate_override: Decimal | None = None
+    cycle_hint: str | None = None  # TDC-05a: "current" | "next" | None
 
 
 async def _validate_category(
@@ -253,7 +254,7 @@ async def create_transaction(
         and data.type != TransactionType.transfer
     ):
         # TXN-06/TDC-05: only credit charges belong to a billing cycle (TAR-04).
-        await assign_charge_to_statement(session, resolved.card, txn)
+        await assign_charge_to_statement(session, resolved.card, txn, cycle_hint=data.cycle_hint)
     await session.commit()
     await session.refresh(txn)
     return txn
@@ -316,7 +317,7 @@ async def update_transaction(
         and cycle_ready(resolved.card)  # TDC-15
         and data.type != TransactionType.transfer
     ):
-        await assign_charge_to_statement(session, resolved.card, txn)
+        await assign_charge_to_statement(session, resolved.card, txn, cycle_hint=data.cycle_hint)
     elif txn.statement_id is not None and data.type != TransactionType.transfer:
         txn.statement_id = None
     await session.flush()

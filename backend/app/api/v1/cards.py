@@ -11,6 +11,7 @@ from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
 from app.models.cards import Card, CardStatement, StatementStatus
 from app.models.catalogs import CardBehavior
 from app.models.reminders import Reminder, ReminderChannel
+from app.models.spaces import Space
 from app.schemas.cards import (
     CardCreate,
     CardOut,
@@ -39,7 +40,7 @@ def _statement_out(statement: CardStatement, today: dt.date) -> StatementOut:
     return out
 
 
-async def _card_with_debt(db: DbSession, card: Card) -> CardWithDebtOut:
+async def _card_with_debt(db: DbSession, space: Space, card: Card) -> CardWithDebtOut:
     out = CardWithDebtOut.model_validate(card)
     out.behavior = await svc.card_behavior(db, card)
     if out.behavior == CardBehavior.credit:
@@ -48,6 +49,7 @@ async def _card_with_debt(db: DbSession, card: Card) -> CardWithDebtOut:
         if nxt is not None:
             amount, due_date = nxt
             out.next_payment = NextPaymentOut(amount=amount, due_date=due_date)
+        out.opening_balance = await svc.get_opening_balance(db, space, card)  # TDC-14
     else:
         out.balance = await svc.card_balance(db, card)  # TAR-05
     return out
@@ -62,7 +64,7 @@ async def list_cards(
     if not include_inactive:
         stmt = stmt.where(Card.is_active.is_(True))
     cards = (await db.execute(stmt.order_by(Card.alias))).scalars().all()
-    return [await _card_with_debt(db, card) for card in cards]
+    return [await _card_with_debt(db, space, card) for card in cards]
 
 
 @router.post("", response_model=CardOut, status_code=status.HTTP_201_CREATED)
@@ -99,7 +101,7 @@ async def get_card(
 ) -> CardWithDebtOut:
     space, _ = space_and_member
     card = await svc.get_card(db, space.id, card_id)
-    return await _card_with_debt(db, card)
+    return await _card_with_debt(db, space, card)
 
 
 @router.patch("/{card_id}", response_model=CardWithDebtOut)
@@ -121,7 +123,7 @@ async def update_card(
     if changes:
         await svc.update_card(db, space, card, changes)
     await db.refresh(card)
-    return await _card_with_debt(db, card)
+    return await _card_with_debt(db, space, card)
 
 
 @router.get("/{card_id}/statements", response_model=list[StatementOut])

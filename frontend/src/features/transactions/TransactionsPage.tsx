@@ -1,7 +1,8 @@
 // Registro de gastos (R1): captura rápida <10 s, bandeja "Por confirmar"
 // (REC-03) y lista con filtros (TXN-01..03).
 import { useMemo, useState, type FormEvent } from "react";
-import { useCategories, usePaymentMethods } from "../../api/catalogs";
+import { useCategories, usePaymentMethods, type PaymentMethodOut } from "../../api/catalogs";
+import { useCards, type CardOut } from "../../api/cards";
 import {
   useConfirmTransaction,
   useCreateTransaction,
@@ -29,10 +30,30 @@ function todayISO(): string {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
+function detectCutoffCollision(
+  txnDate: string,
+  methodId: string,
+  cardsData: CardOut[],
+  methodsData: PaymentMethodOut[],
+): { defaultHint: "current" | "next" } | null {
+  if (!txnDate || !methodId) return null;
+  const method = methodsData.find((m) => m.id === methodId);
+  if (!method?.card_id) return null;
+  const card = cardsData.find((c) => c.id === method.card_id);
+  if (!card || card.behavior !== "credit" || !card.statement_day) return null;
+  const [year, month, day] = txnDate.split("-").map(Number);
+  const cutoffDay = card.statement_day_is_last
+    ? new Date(year, month, 0).getDate()
+    : card.statement_day;
+  if (day !== cutoffDay) return null;
+  return { defaultHint: card.cutoff_day_policy === "next_cycle" ? "next" : "current" };
+}
+
 export default function TransactionsPage() {
   const { activeSpace } = useSpace();
   const categories = useCategories();
   const methods = usePaymentMethods();
+  const cards = useCards();
 
   const [type, setType] = useState<TxnType>("expense");
   const [amount, setAmount] = useState("");
@@ -43,6 +64,7 @@ export default function TransactionsPage() {
   const [description, setDescription] = useState("");
   const [currency, setCurrency] = useState(activeSpace.base_currency);
   const [formError, setFormError] = useState<string | null>(null);
+  const [cycleHint, setCycleHint] = useState<"current" | "next" | null>(null);
 
   const [filterMonth, setFilterMonth] = useState(todayISO().slice(0, 7));
   const [filterType, setFilterType] = useState("");
@@ -63,6 +85,7 @@ export default function TransactionsPage() {
   const [editDescription, setEditDescription] = useState("");
   const [editCurrency, setEditCurrency] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
+  const [editCycleHint, setEditCycleHint] = useState<"current" | "next" | null>(null);
 
   function openEditModal(txn: TransactionOut) {
     setEditingTxn(txn);
@@ -75,6 +98,7 @@ export default function TransactionsPage() {
     setEditDescription(txn.description);
     setEditCurrency(txn.currency);
     setEditError(null);
+    setEditCycleHint(null);
   }
 
   async function handleUpdate(e: FormEvent) {
@@ -92,6 +116,7 @@ export default function TransactionsPage() {
         category_id: editType === "transfer" ? null : editCategoryId || null,
         payment_method_id: editMethodId || null,
         payment_method_to_id: editType === "transfer" ? editMethodToId || null : null,
+        cycle_hint: editCollision ? (editCycleHint ?? editCollision.defaultHint) : undefined,
       });
       setEditingTxn(null);
     } catch (err) {
@@ -127,6 +152,15 @@ export default function TransactionsPage() {
     return { cats, pms };
   }, [categories.data, methods.data]);
 
+  const collision = useMemo(
+    () => detectCutoffCollision(date, methodId, cards.data ?? [], methods.data ?? []),
+    [date, methodId, cards.data, methods.data],
+  );
+  const editCollision = useMemo(
+    () => detectCutoffCollision(editDate, editMethodId, cards.data ?? [], methods.data ?? []),
+    [editDate, editMethodId, cards.data, methods.data],
+  );
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
@@ -140,9 +174,11 @@ export default function TransactionsPage() {
         category_id: type === "transfer" ? null : categoryId || null,
         payment_method_id: methodId || null,
         payment_method_to_id: type === "transfer" ? methodToId || null : null,
+        cycle_hint: collision ? (cycleHint ?? collision.defaultHint) : undefined,
       });
       setAmount("");
       setDescription("");
+      setCycleHint(null);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Error al guardar");
     }
@@ -190,7 +226,7 @@ export default function TransactionsPage() {
               className="input"
               required
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => { setDate(e.target.value); setCycleHint(null); }}
             />
           </div>
           {type !== "transfer" && (
@@ -219,7 +255,7 @@ export default function TransactionsPage() {
               className="input"
               required
               value={methodId}
-              onChange={(e) => setMethodId(e.target.value)}
+              onChange={(e) => { setMethodId(e.target.value); setCycleHint(null); }}
             >
               <option value="">Selecciona…</option>
               {(methods.data ?? []).map((m) => (
@@ -274,6 +310,28 @@ export default function TransactionsPage() {
             </button>
           </div>
         </div>
+        {collision && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+            <p className="mb-2 font-medium text-amber-800 dark:text-amber-300">
+              Este cargo cae el día de corte. ¿A qué ciclo pertenece?
+            </p>
+            <div className="flex gap-2">
+              {(["current", "next"] as const).map((val) => {
+                const effective = cycleHint ?? collision.defaultHint;
+                return (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setCycleHint(val)}
+                    className={effective === val ? "btn-primary px-3 py-1.5" : "btn-secondary px-3 py-1.5"}
+                  >
+                    {val === "current" ? "Ciclo actual (cierra hoy)" : "Siguiente ciclo"}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {formError && <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>}
       </form>
 
@@ -512,7 +570,7 @@ export default function TransactionsPage() {
                 className="input"
                 required
                 value={editDate}
-                onChange={(e) => setEditDate(e.target.value)}
+                onChange={(e) => { setEditDate(e.target.value); setEditCycleHint(null); }}
               />
             </div>
             {editType === "transfer" ? (
@@ -523,7 +581,7 @@ export default function TransactionsPage() {
                     className="input"
                     required
                     value={editMethodId}
-                    onChange={(e) => setEditMethodId(e.target.value)}
+                    onChange={(e) => { setEditMethodId(e.target.value); setEditCycleHint(null); }}
                   >
                     <option value="">Selecciona…</option>
                     {(methods.data ?? []).map((m) => (
@@ -570,7 +628,7 @@ export default function TransactionsPage() {
                     className="input"
                     required
                     value={editMethodId}
-                    onChange={(e) => setEditMethodId(e.target.value)}
+                    onChange={(e) => { setEditMethodId(e.target.value); setEditCycleHint(null); }}
                   >
                     <option value="">Selecciona…</option>
                     {(methods.data ?? []).map((m) => (
@@ -581,6 +639,29 @@ export default function TransactionsPage() {
               </>
             )}
           </div>
+
+          {editCollision && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+              <p className="mb-2 font-medium text-amber-800 dark:text-amber-300">
+                Este cargo cae el día de corte. ¿A qué ciclo pertenece?
+              </p>
+              <div className="flex gap-2">
+                {(["current", "next"] as const).map((val) => {
+                  const effective = editCycleHint ?? editCollision.defaultHint;
+                  return (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setEditCycleHint(val)}
+                      className={effective === val ? "btn-primary px-3 py-1.5" : "btn-secondary px-3 py-1.5"}
+                    >
+                      {val === "current" ? "Ciclo actual (cierra hoy)" : "Siguiente ciclo"}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Fila 3 — Descripción · Moneda */}
           <div className="grid grid-cols-4 gap-3">

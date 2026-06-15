@@ -37,6 +37,7 @@ export interface CardOut {
   debt: DebtSummary | null;
   balance: string | null; // TAR-05, debit/prepaid only
   next_payment: { amount: string; due_date: string } | null; // TDC-14
+  opening_balance: string | null; // TDC-14: synthetic previous-cut debt
 }
 
 export interface StatementOut {

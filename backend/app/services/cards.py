@@ -148,9 +148,33 @@ async def _statement_has_charges(session: AsyncSession, statement_id: uuid.UUID)
     return inst is not None
 
 
+async def get_opening_balance(
+    session: AsyncSession, space: Space, card: Card
+) -> Decimal | None:
+    """TDC-14: return the computed_total of the synthetic opening-balance statement
+    (previous period, no itemized charges), or None if no such statement exists."""
+    if not (cycle_ready(card) and _payment_ready(card)):
+        return None
+    spec = spec_for(card)
+    today = today_in_tz(space.timezone)
+    opening_cutoff = cycles.previous_cutoff(cycles.cutoff_on_or_after(today, spec), spec)
+    _, period_end = cycles.cycle_for_cutoff(opening_cutoff, spec)
+    existing = await session.scalar(
+        select(CardStatement).where(
+            CardStatement.credit_card_id == card.id,
+            CardStatement.period_end == period_end,
+        )
+    )
+    if existing is None:
+        return None
+    if await _statement_has_charges(session, existing.id):
+        return None
+    return existing.computed_total
+
+
 async def set_opening_balance(
     session: AsyncSession, space: Space, card: Card, amount: Decimal
-) -> CardStatement:
+) -> CardStatement | None:
     """TDC-14: record the pending debt from the previous cut as a closed
     statement (due at the next payment date) so it enters TDC-09 (saldo al
     corte) and is paid via TDC-10. Create-or-update on the previous cut; never
@@ -171,6 +195,8 @@ async def set_opening_balance(
             CardStatement.period_end == period_end,
         )
     )
+    if existing is None and amount == ZERO:
+        return None  # Nothing to zero out; skip creating a zero-balance statement.
     if existing is not None:
         if await _statement_has_charges(session, existing.id):
             raise HTTPException(
@@ -423,7 +449,7 @@ async def update_card(
                 "Solo las tarjetas de crédito llevan deuda del corte anterior",
             )
         amount = changes["opening_balance"]
-        if isinstance(amount, Decimal) and amount > ZERO:
+        if isinstance(amount, Decimal) and amount >= ZERO:
             await set_opening_balance(session, space, card, amount)
 
     await session.commit()
@@ -527,10 +553,26 @@ async def get_or_create_statement(session: AsyncSession, card: Card, cutoff: dat
 
 
 async def assign_charge_to_statement(
-    session: AsyncSession, card: Card, txn: Transaction
+    session: AsyncSession,
+    card: Card,
+    txn: Transaction,
+    cycle_hint: str | None = None,
 ) -> CardStatement:
-    """TDC-05/TXN-06: assign a card charge to its billing cycle."""
-    _, cutoff = cycles.cycle_for_purchase(txn.date, spec_for(card))
+    """TDC-05/TXN-06: assign a card charge to its billing cycle.
+
+    TDC-05a: if cycle_hint ('current'|'next') is provided and the transaction
+    date falls exactly on the cutoff day, it overrides cutoff_day_policy.
+    """
+    spec = spec_for(card)
+    if cycle_hint is not None:
+        override = "include" if cycle_hint == "current" else "next_cycle"
+        spec = cycles.CardCycleSpec(
+            statement_day=spec.statement_day,
+            cutoff_day_policy=override,
+            payment_due_days=spec.payment_due_days,
+            payment_day=spec.payment_day,
+        )
+    _, cutoff = cycles.cycle_for_purchase(txn.date, spec)
     statement = await get_or_create_statement(session, card, cutoff)
     txn.statement_id = statement.id
     return statement

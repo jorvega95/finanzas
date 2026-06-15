@@ -6,6 +6,52 @@ algún test (de esta fase o anteriores) falla.**
 
 ---
 
+## Bugfix + Feature: TDC-05a cycle_hint (2026-06-14)
+
+### Problema raíz
+
+BBVA Azul (día de corte 3, `cutoff_day_policy: include`) asignó una compra de
+Farmacia Guadalajara del 3-jun al ciclo anterior (cierre 3-may) en lugar del
+ciclo actual (cierre 3-jun). Root cause: BBVA pone los cargos del día de corte
+en el siguiente ciclo (`next_cycle`), pero la tarjeta estaba configurada con
+`include`. El sistema no daba oportunidad al usuario de corregirlo al momento de
+capturar el gasto.
+
+### Solución: nueva regla TDC-05a
+
+Se añade `cycle_hint: "current" | "next"` como parámetro no persistido en los
+endpoints `POST /api/v1/transactions` y `PUT /api/v1/transactions/{id}`. Cuando
+la fecha del cargo cae exactamente en el día de corte de la tarjeta, el frontend
+muestra un selector inline; el backend usa ese valor para anular
+`cutoff_day_policy` solo para esa transacción.
+
+### Cambios
+
+**Backend**
+- `REGLAS_NEGOCIO.md`: nueva regla TDC-05a documentada
+- `app/schemas/transactions.py`: `cycle_hint: Literal["current", "next"] | None`
+  en `TransactionBase` (cubre create y update)
+- `app/services/transactions.py`: `TransactionInput.cycle_hint`; pasado a
+  `assign_charge_to_statement` en create y update
+- `app/services/cards.py:assign_charge_to_statement`: acepta `cycle_hint`;
+  crea nuevo `CardCycleSpec` con policy sobrescrita cuando aplica
+- `app/api/v1/transactions.py:_to_input()`: propaga `cycle_hint`
+- `tests/test_cycle_hint.py`: 4 tests de integración (hint=next/current,
+  hint ignorado fuera del día de corte, edición que mueve el ciclo)
+
+**Frontend**
+- `api/transactions.ts`: `cycle_hint` en `TransactionBody`
+- `features/transactions/TransactionsPage.tsx`:
+  - `detectCutoffCollision()`: función pura que detecta si la fecha+método
+    seleccionado corresponde al día de corte de una TDC
+  - Selector de ciclo inline (amber) en formulario de creación
+  - Mismo selector en modal de edición
+  - Pre-selección automática según `cutoff_day_policy` de la tarjeta
+
+**Tests**: 112/112 ✅ (4 nuevos en `test_cycle_hint.py`)
+
+---
+
 ## Iteración 0 — Fase 0: Fundación (2026-06-10)
 
 **Objetivo (PLAN §6 Fase 0):** login + espacio personal al registrarse, modelo

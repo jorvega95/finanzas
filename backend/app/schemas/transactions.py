@@ -6,7 +6,7 @@ GLO-01: amounts travel as strings in JSON (Decimal-safe, never float).
 import uuid
 from datetime import date
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
 
@@ -50,6 +50,8 @@ class TransactionBase(BaseModel):
     expense_nature_override: ExpenseNature | None = None
     # FX-03: optional manual override of the frozen rate.
     fx_rate_override: FxRate | None = None
+    # TDC-05a: overrides cutoff_day_policy when date == cutoff; not persisted.
+    cycle_hint: Literal["current", "next"] | None = None
 
 
 class TransactionCreate(TransactionBase):

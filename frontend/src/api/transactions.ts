@@ -44,6 +44,7 @@ export interface TransactionBody {
   category_id?: string | null;
   payment_method_id?: string | null;
   payment_method_to_id?: string | null;
+  cycle_hint?: "current" | "next" | null; // TDC-05a
 }
 
 function toQuery(filters: TransactionFilters): string {

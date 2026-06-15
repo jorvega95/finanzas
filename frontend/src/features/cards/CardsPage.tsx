@@ -292,7 +292,8 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
     card.payment_day_is_last ? "last" : card.payment_day != null ? String(card.payment_day) : "",
   );
   const [limit, setLimit] = useState(card.credit_limit ?? "");
-  const [openingBalance, setOpeningBalance] = useState("");
+  const [openingBalance, setOpeningBalance] = useState(card.opening_balance ?? "");
+  const [initialBalance, setInitialBalance] = useState(card.initial_balance ?? "0");
   const [allowOverdraft, setAllowOverdraft] = useState(card.allow_overdraft);
 
   function handleSubmit(e: FormEvent) {
@@ -315,6 +316,7 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
       body.credit_limit = limit || null;
       if (openingBalance) body.opening_balance = openingBalance; // TDC-14
     } else {
+      body.initial_balance = initialBalance || "0";
       body.allow_overdraft = allowOverdraft;
     }
     update.mutate({ cardId: card.id, ...body }, { onSuccess: onDone });
@@ -436,14 +438,30 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
           </div>
         </>
       ) : (
-        <label className="flex items-end gap-2 pb-2 text-sm">
-          <input
-            type="checkbox"
-            checked={allowOverdraft}
-            onChange={(e) => setAllowOverdraft(e.target.checked)}
-          />
-          Permitir sobregiro
-        </label>
+        <>
+          <div className="col-span-2">
+            <label className="label">Saldo inicial</label>
+            <input
+              className="input"
+              inputMode="decimal"
+              pattern="^\d+(\.\d{1,2})?$"
+              placeholder="0.00"
+              value={initialBalance}
+              onChange={(e) => setInitialBalance(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-ink-muted dark:text-slate-400">
+              Modificar el saldo inicial recalcula el saldo disponible actual.
+            </p>
+          </div>
+          <label className="flex items-end gap-2 pb-2 text-sm">
+            <input
+              type="checkbox"
+              checked={allowOverdraft}
+              onChange={(e) => setAllowOverdraft(e.target.checked)}
+            />
+            Permitir sobregiro
+          </label>
+        </>
       )}
 
       <div className="col-span-2 flex items-end gap-2 md:col-span-4">

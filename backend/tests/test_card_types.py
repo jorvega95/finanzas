@@ -270,6 +270,69 @@ async def test_msi_rejected_on_non_credit_card(client):
     assert res.status_code == 422
 
 
+# --- TAR-05: editing initial_balance -----------------------------------------
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tar05_edit_initial_balance(client):
+    """TAR-05: editing initial_balance shifts the computed balance by the delta.
+    Covers debit, prepaid, zero edge case, and credit rejection."""
+    ctx = await bootstrap_space(client)
+
+    # Debit: initial=1000, spend=200, earn=300 → balance=1100.
+    card = await make_debit(client, ctx, initial_balance="1000.00")
+    method = card["payment_method_id"]
+    await spend(client, ctx, method, "200.00")
+    await earn(client, ctx, method, "300.00")
+
+    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    assert detail["balance"] == "1100.00"  # 1000 − 200 + 300
+
+    # Edit initial_balance to 2000 → balance = 2000 − 200 + 300 = 2100.
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}",
+        headers=ctx["headers"],
+        json={"initial_balance": "2000.00"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["balance"] == "2100.00"
+    assert res.json()["initial_balance"] == "2000.00"
+
+    # Edit initial_balance to 0 → balance = 0 − 200 + 300 = 100.
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}",
+        headers=ctx["headers"],
+        json={"initial_balance": "0"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["balance"] == "100.00"
+    assert res.json()["initial_balance"] == "0.00"
+
+    # Prepaid (tarjeta de regalo / vales) also supports initial_balance edits.
+    prepaid_type_id = ctx["card_type_by_behavior"]["prepaid"]["id"]
+    prepaid = await make_card(
+        client, ctx, prepaid_type_id,
+        alias="Vales Comida", initial_balance="500.00", last4="7777",
+    )
+    res = await client.patch(
+        f"/api/v1/cards/{prepaid['id']}",
+        headers=ctx["headers"],
+        json={"initial_balance": "800.00"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["balance"] == "800.00"
+
+    # Credit card must reject initial_balance (TAR-02 / service guard).
+    from tests.test_cards import create_card as create_credit
+    credit = await create_credit(client, ctx)
+    res = await client.patch(
+        f"/api/v1/cards/{credit['id']}",
+        headers=ctx["headers"],
+        json={"initial_balance": "500.00"},
+    )
+    assert res.status_code == 422
+
+
 # --- PAT-01/02: net worth includes non-credit balances -----------------------
 
 

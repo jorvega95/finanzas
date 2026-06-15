@@ -27,7 +27,7 @@ class CardCreate(BaseModel):
     payment_day: int | str | None = None  # 1-28 | "last" (TDC-04)
     credit_limit: Money | None = None
     reminder_days: list[int] | None = None  # REM-01, default [3, 1]
-    opening_balance: Money | None = None  # TDC-14: deuda del corte anterior
+    opening_balance: MoneyNonNeg | None = None  # TDC-14: deuda del corte anterior
     # TAR-05 non-credit fields. Opening balance may be zero.
     initial_balance: MoneyNonNeg | None = None
     allow_overdraft: bool = False
@@ -50,7 +50,7 @@ class CardUpdate(BaseModel):
     payment_day: int | str | None = None
     credit_limit: Money | None = None
     reminder_days: list[int] | None = None
-    opening_balance: Money | None = None  # TDC-14: deuda del corte anterior
+    opening_balance: MoneyNonNeg | None = None  # TDC-14: deuda del corte anterior
     # Non-credit (TAR-05):
     initial_balance: MoneyNonNeg | None = None
     allow_overdraft: bool | None = None
@@ -103,6 +103,7 @@ class CardWithDebtOut(CardOut):
     debt: DebtSummary | None = None  # TDC-09, credit only
     balance: MoneyOut | None = None  # TAR-05, debit/prepaid only
     next_payment: NextPaymentOut | None = None  # TDC-14, credit only
+    opening_balance: MoneyNonNeg | None = None  # TDC-14: synthetic previous-cut debt
 
 
 class StatementOut(BaseModel):

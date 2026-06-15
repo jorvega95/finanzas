@@ -35,6 +35,7 @@ def _to_input(payload: TransactionCreate | TransactionUpdate) -> TransactionInpu
         payment_method_to_id=payload.payment_method_to_id,
         expense_nature_override=payload.expense_nature_override,
         fx_rate_override=payload.fx_rate_override,
+        cycle_hint=payload.cycle_hint,
     )
 
 
