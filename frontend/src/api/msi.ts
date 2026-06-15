@@ -1,4 +1,4 @@
-// Planes MSI (MSI-01..08).
+// Planes MSI (MSI-01..10).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 
@@ -31,7 +31,18 @@ export interface PlanSummaryOut {
   pending_count: number;
   remaining_amount: string;
   projected_payoff: string;
+  projected_payment_date: string;
   installments: InstallmentOut[];
+}
+
+export interface BackfillCreate {
+  description: string;
+  amount: string;
+  currency: string;
+  credit_card_id: string;
+  purchase_date: string;
+  months: number;
+  category_id: string;
 }
 
 export interface ProjectionRow {
@@ -80,6 +91,18 @@ export function useSettleMsiPlan() {
   return useMutation({
     mutationFn: (planId: string) =>
       api<PlanOut>(`/api/v1/installment-plans/${planId}/settle`, { method: "POST" }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useCreateMsiBackfill() {
+  const invalidate = useInvalidateMsi();
+  return useMutation({
+    mutationFn: (body: BackfillCreate) =>
+      api<PlanOut>("/api/v1/installment-plans/backfill", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: invalidate,
   });
 }

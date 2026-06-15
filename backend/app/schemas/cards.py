@@ -137,6 +137,18 @@ class PlanCreate(BaseModel):
     months: int = Field(ge=2, le=60)
 
 
+class PlanBackfillCreate(BaseModel):
+    """MSI-10: registro retroactivo de compra MSI realizada antes de usar el sistema."""
+
+    description: str = Field(default="", max_length=200)
+    amount: Money
+    currency: str = Field(default="MXN", pattern="^[A-Z]{3}$")
+    credit_card_id: uuid.UUID
+    purchase_date: dt.date
+    months: int = Field(ge=2, le=60)
+    category_id: uuid.UUID
+
+
 class InstallmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -172,6 +184,7 @@ class PlanSummaryOut(BaseModel):
     pending_count: int
     remaining_amount: MoneyOut
     projected_payoff: dt.date
+    projected_payment_date: dt.date
     installments: list[InstallmentOut]
 
 

@@ -1,14 +1,17 @@
 // MSI: vista por plan y proyección global mes × tarjeta (MSI-06),
-// conversión de compras a MSI (MSI-01) y liquidación anticipada (MSI-07).
+// conversión de compras a MSI (MSI-01), alta retroactiva (MSI-10) y liquidación anticipada (MSI-07).
 import { useMemo, useState } from "react";
 import { useTransactions } from "../../api/transactions";
 import { usePaymentMethods } from "../../api/catalogs";
 import {
   useCreateMsiPlan,
+  useCreateMsiBackfill,
   useMsiPlans,
   useMsiProjection,
   useSettleMsiPlan,
 } from "../../api/msi";
+import { useCards } from "../../api/cards";
+import { useCategories } from "../../api/catalogs";
 import { formatMoney } from "../../lib/money";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -40,7 +43,7 @@ function ConvertSection() {
     <section className="card p-5">
       <h2 className="mb-1 font-semibold">Convertir compra a MSI</h2>
       <p className="mb-3 text-xs text-ink-muted dark:text-slate-400">
-        Elige una compra hecha con tarjeta y el número de meses.
+        Elige una compra ya registrada con tarjeta y el número de meses.
       </p>
       <form
         onSubmit={(e) => {
@@ -84,6 +87,164 @@ function ConvertSection() {
   );
 }
 
+function BackfillSection() {
+  const cards = useCards();
+  const categories = useCategories();
+  const create = useCreateMsiBackfill();
+
+  const [form, setForm] = useState({
+    description: "",
+    amount: "",
+    currency: "MXN",
+    credit_card_id: "",
+    purchase_date: "",
+    months: "12",
+    category_id: "",
+  });
+
+  const activeCards = (cards.data ?? []).filter((c) => c.is_active);
+  const expenseCategories = (categories.data ?? []).filter(
+    (c) => c.kind === "expense" && c.is_active,
+  );
+
+  function set(key: string, value: string) {
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === "credit_card_id") {
+        const card = activeCards.find((c) => c.id === value);
+        if (card) next.currency = card.currency;
+      }
+      return next;
+    });
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    create.mutate(
+      {
+        description: form.description,
+        amount: form.amount,
+        currency: form.currency,
+        credit_card_id: form.credit_card_id,
+        purchase_date: form.purchase_date,
+        months: Number(form.months),
+        category_id: form.category_id,
+      },
+      {
+        onSuccess: () =>
+          setForm({
+            description: "",
+            amount: "",
+            currency: "MXN",
+            credit_card_id: "",
+            purchase_date: "",
+            months: "12",
+            category_id: "",
+          }),
+      },
+    );
+  }
+
+  return (
+    <section className="card p-5">
+      <h2 className="mb-1 font-semibold">Registrar compra MSI antigua</h2>
+      <p className="mb-3 text-xs text-ink-muted dark:text-slate-400">
+        Registra una compra a meses que realizaste antes de usar el sistema. Las cuotas ya cobradas
+        se marcan automáticamente como pagadas.
+      </p>
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <label className="label">Descripción</label>
+          <input
+            className="input"
+            type="text"
+            maxLength={200}
+            placeholder="Ej. Laptop, Refrigerador…"
+            required
+            value={form.description}
+            onChange={(e) => set("description", e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label">Monto total</label>
+          <input
+            className="input"
+            type="number"
+            min="0.01"
+            step="0.01"
+            placeholder="0.00"
+            required
+            value={form.amount}
+            onChange={(e) => set("amount", e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label">Tarjeta utilizada</label>
+          <select
+            className="input"
+            required
+            value={form.credit_card_id}
+            onChange={(e) => set("credit_card_id", e.target.value)}
+          >
+            <option value="">Selecciona tarjeta…</option>
+            {activeCards.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.alias} ({c.currency})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Fecha de compra</label>
+          <input
+            className="input"
+            type="date"
+            required
+            value={form.purchase_date}
+            onChange={(e) => set("purchase_date", e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label">Número de meses</label>
+          <input
+            className="input"
+            type="number"
+            min={2}
+            max={60}
+            required
+            value={form.months}
+            onChange={(e) => set("months", e.target.value)}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label">Categoría</label>
+          <select
+            className="input"
+            required
+            value={form.category_id}
+            onChange={(e) => set("category_id", e.target.value)}
+          >
+            <option value="">Selecciona categoría…</option>
+            {expenseCategories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="sm:col-span-2">
+          <button className="btn-primary" disabled={create.isPending}>
+            Registrar compra antigua
+          </button>
+        </div>
+      </form>
+      {create.error && (
+        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{create.error.message}</p>
+      )}
+    </section>
+  );
+}
+
 export default function MsiPage() {
   const plans = useMsiPlans();
   const projection = useMsiProjection();
@@ -100,10 +261,11 @@ export default function MsiPage() {
       <h1 className="text-xl font-semibold">Meses sin intereses</h1>
 
       <ConvertSection />
+      <BackfillSection />
 
       {(plans.data ?? []).length === 0 ? (
         <div className="card grid h-40 place-items-center p-8 text-center text-sm text-ink-muted dark:text-slate-400">
-          Sin planes MSI. Convierte una compra con tarjeta arriba.
+          Sin planes MSI. Convierte una compra con tarjeta o registra una compra antigua.
         </div>
       ) : (
         (plans.data ?? []).map((summary) => {
@@ -128,9 +290,14 @@ export default function MsiPage() {
               <div className="mt-3">
                 <div className="mb-1 flex justify-between text-xs text-ink-muted dark:text-slate-400">
                   <span>
-                    {done} de {total} cuotas · restan {formatMoney(summary.remaining_amount)}
+                    {done} de {total} cuotas · restan{" "}
+                    <span className="font-medium text-ink dark:text-white">
+                      {formatMoney(summary.remaining_amount)}
+                    </span>
                   </span>
-                  <span>liquidas el {summary.projected_payoff}</span>
+                  <span>
+                    último cobro: {summary.projected_payoff} · pago: {summary.projected_payment_date}
+                  </span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
                   <div

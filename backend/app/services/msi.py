@@ -141,6 +141,101 @@ async def create_plan_from_transaction(
     return plan
 
 
+async def create_plan_backfill(
+    session: AsyncSession,
+    space: Space,
+    created_by: uuid.UUID,
+    *,
+    description: str,
+    amount: Decimal,
+    currency: str,
+    card_id: uuid.UUID,
+    purchase_date: date,
+    months: int,
+    category_id: uuid.UUID,
+) -> InstallmentPlan:
+    """MSI-10: crea un plan MSI retroactivo sin transacción previa.
+
+    Las cuotas con estimated_charge_date <= hoy quedan paid (ya se pagaron);
+    las futuras quedan pending. Ninguna cuota retroactiva se asigna a statement.
+    """
+    if not 2 <= months <= 60:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Meses fuera de rango [2, 60]")
+    if amount < CENT:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Monto inválido")
+    if amount < CENT * months:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Monto demasiado pequeño para el número de meses",
+        )
+
+    card = await get_card(session, space.id, card_id)
+    if currency != card.currency:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Compras MSI en moneda distinta a la de la tarjeta no se soportan",
+        )
+    if card.payment_method_id is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "La tarjeta no tiene método de pago asociado",
+        )
+
+    today = _today_for_space(space)
+    amounts = split_installments(amount, months)
+    charge_dates = installment_charge_dates(purchase_date, spec_for(card), months)
+
+    txn = Transaction(
+        space_id=space.id,
+        type=TransactionType.expense,
+        date=purchase_date,
+        description=description,
+        amount=amount,
+        currency=currency,
+        category_id=category_id,
+        payment_method_id=card.payment_method_id,
+        credit_card_id=card.id,
+        created_by=created_by,
+    )
+    session.add(txn)
+    await session.flush()
+
+    plan = InstallmentPlan(
+        space_id=space.id,
+        credit_card_id=card.id,
+        transaction_id=txn.id,
+        total_amount=amount,
+        months=months,
+        monthly_amount=amounts[0],
+        start_date=purchase_date,
+        created_by=created_by,
+    )
+    session.add(plan)
+    await session.flush()
+
+    for number, (inst_amount, charge_date) in enumerate(
+        zip(amounts, charge_dates, strict=True), start=1
+    ):
+        inst_status = (
+            InstallmentStatus.paid if charge_date <= today else InstallmentStatus.pending
+        )
+        session.add(
+            Installment(
+                plan_id=plan.id,
+                number=number,
+                amount=inst_amount,
+                estimated_charge_date=charge_date,
+                status=inst_status,
+            )
+        )
+
+    # MSI-03: la transacción-madre queda excluida de agregados via installment_plan_id.
+    txn.installment_plan_id = plan.id
+    await session.commit()
+    await session.refresh(plan)
+    return plan
+
+
 async def settle_plan_early(
     session: AsyncSession, space: Space, user_id: uuid.UUID, plan_id: uuid.UUID
 ) -> InstallmentPlan:
@@ -233,7 +328,7 @@ async def plans_summary(session: AsyncSession, space_id: uuid.UUID) -> list[dict
                 for i in installments
                 if i.status not in (InstallmentStatus.paid, InstallmentStatus.canceled)
             ),
-            Decimal("0"),
+            Decimal("0.00"),
         )
         result.append(
             {

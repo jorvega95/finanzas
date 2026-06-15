@@ -1,4 +1,4 @@
-"""Router: MSI plans. Implements MSI-01..MSI-08."""
+"""Router: MSI plans. Implements MSI-01..MSI-10."""
 
 import uuid
 
@@ -10,12 +10,15 @@ from app.models.cards import Card
 from app.models.transactions import Transaction
 from app.schemas.cards import (
     InstallmentOut,
+    PlanBackfillCreate,
     PlanCreate,
     PlanOut,
     PlanSummaryOut,
     ProjectionRow,
 )
 from app.services import msi as svc
+from app.services.billing_cycles import due_date_for
+from app.services.cards import spec_for
 
 router = APIRouter(prefix="/installment-plans", tags=["installments"])
 
@@ -42,6 +45,12 @@ async def list_plans(db: DbSession, space_and_member: ActiveSpace) -> list[PlanS
         plan = item["plan"]
         txn = await db.get(Transaction, plan.transaction_id)
         card = await db.get(Card, plan.credit_card_id)
+        payoff = item["projected_payoff"]
+        # MSI-06: projected_payment_date = due_date del statement del último corte (TDC-04).
+        if card is not None:
+            projected_payment_date = due_date_for(payoff, spec_for(card))
+        else:
+            projected_payment_date = payoff
         out.append(
             PlanSummaryOut(
                 plan=PlanOut.model_validate(plan),
@@ -51,11 +60,33 @@ async def list_plans(db: DbSession, space_and_member: ActiveSpace) -> list[PlanS
                 charged_count=item["charged_count"],
                 pending_count=item["pending_count"],
                 remaining_amount=item["remaining_amount"],
-                projected_payoff=item["projected_payoff"],
+                projected_payoff=payoff,
+                projected_payment_date=projected_payment_date,
                 installments=[InstallmentOut.model_validate(i) for i in plan.installments],
             )
         )
     return out
+
+
+@router.post("/backfill", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
+async def create_plan_backfill(
+    db: DbSession, space_and_member: EditorSpace, user: CurrentUser, payload: PlanBackfillCreate
+) -> PlanOut:
+    """MSI-10: alta retroactiva de compra MSI realizada antes de usar el sistema."""
+    space, _ = space_and_member
+    plan = await svc.create_plan_backfill(
+        db,
+        space,
+        user.id,
+        description=payload.description,
+        amount=payload.amount,
+        currency=payload.currency,
+        card_id=payload.credit_card_id,
+        purchase_date=payload.purchase_date,
+        months=payload.months,
+        category_id=payload.category_id,
+    )
+    return PlanOut.model_validate(plan)
 
 
 @router.get("/projection", response_model=list[ProjectionRow])
