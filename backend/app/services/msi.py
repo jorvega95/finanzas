@@ -40,17 +40,14 @@ def split_installments(total: Decimal, months: int) -> list[Decimal]:
 def installment_charge_dates(
     purchase_date: date, card_spec: cycles.CardCycleSpec, months: int
 ) -> list[date]:
-    """MSI-04: estimated_charge_date = max(purchase_date, period_start) del
-    ciclo de cada cuota. La cuota 1 siempre cae en purchase_date (period_start
-    <= purchase_date por construcción de TDC-05); las cuotas 2..n en el
-    period_start de su ciclo."""
-    first_start, first_cutoff = cycles.cycle_for_purchase(purchase_date, card_spec)
-    dates = [max(purchase_date, first_start)]
-    current_cutoff = first_cutoff
+    """MSI-04: estimated_charge_date = period_end (día de corte) del ciclo de
+    cada cuota, que es cuando el banco imprime el cargo en el estado de cuenta."""
+    _, first_cutoff = cycles.cycle_for_purchase(purchase_date, card_spec)
+    dates = [first_cutoff]
+    cutoff = first_cutoff
     for _ in range(months - 1):
-        next_cut = cycles.next_cutoff(current_cutoff, card_spec)
-        start, current_cutoff = cycles.cycle_for_cutoff(next_cut, card_spec)
-        dates.append(max(purchase_date, start))
+        cutoff = cycles.next_cutoff(cutoff, card_spec)
+        dates.append(cutoff)
     return dates
 
 
@@ -150,31 +147,28 @@ def _project_installment_dates(
     current_number: int,
     total_months: int,
     anchor_cutoff: date,
-    anchor_start: date,
     spec: cycles.CardCycleSpec,
 ) -> list[date]:
-    """Proyecta estimated_charge_dates para todas las cuotas desde el ciclo ancla.
+    """Proyecta period_end (día de corte) de cada cuota desde el ciclo ancla.
 
-    Cuota current_number → anchor_start (period_start de su ciclo).
-    Cuotas anteriores: se itera hacia atrás un ciclo por cuota.
-    Cuotas posteriores: se itera hacia adelante un ciclo por cuota.
+    Cuota current_number → anchor_cutoff (period_end de su ciclo).
+    Cuotas anteriores: itera hacia atrás un corte por cuota.
+    Cuotas posteriores: itera hacia adelante un corte por cuota.
     """
     dates: list[date | None] = [None] * total_months
-    dates[current_number - 1] = anchor_start
+    dates[current_number - 1] = anchor_cutoff
 
     # Forward: cuotas posteriores a la actual.
     cutoff = anchor_cutoff
     for i in range(current_number, total_months):
-        next_cut = cycles.next_cutoff(cutoff, spec)
-        start, cutoff = cycles.cycle_for_cutoff(next_cut, spec)
-        dates[i] = start
+        cutoff = cycles.next_cutoff(cutoff, spec)
+        dates[i] = cutoff
 
     # Backward: cuotas anteriores a la actual.
     cutoff = anchor_cutoff
     for i in range(current_number - 2, -1, -1):
-        prev_cut = cycles.previous_cutoff(cutoff, spec)
-        start, cutoff = cycles.cycle_for_cutoff(prev_cut, spec)
-        dates[i] = start
+        cutoff = cycles.previous_cutoff(cutoff, spec)
+        dates[i] = cutoff
 
     return dates  # type: ignore[return-value]
 
@@ -229,21 +223,24 @@ async def create_plan_from_current_installment(
     today = _today_for_space(space)
 
     # Determina el corte ancla de la cuota actual.
-    # coa = el corte que CIERRA el ciclo actual (period_end del ciclo en curso).
-    # charged → ancla en el ciclo actual (el que el usuario ve en su estado de cuenta).
-    # pending → ancla en el siguiente ciclo (el cargo aún no ha aparecido).
+    # coa = primer corte >= hoy (puede ser hoy mismo si hoy es día de corte).
+    #
+    # charged → la cuota ya apareció en el ÚLTIMO estado de cuenta cerrado:
+    #   - si hoy es día de corte: ese corte (acaba de cerrar hoy) es el ancla.
+    #   - si hoy está entre cortes: el corte anterior (el más recientemente cerrado).
+    # pending → la cuota se cobrará en el ciclo ACTUALMENTE ABIERTO:
+    #   - si hoy es día de corte: el ciclo que abre mañana (cierra al próximo corte).
+    #   - si hoy está entre cortes: el ciclo que cierra en coa.
     coa = cycles.cutoff_on_or_after(today, spec)
     if current_is_charged:
-        anchor_cutoff = coa
+        anchor_cutoff = coa if coa == today else cycles.previous_cutoff(coa, spec)
     else:
-        anchor_cutoff = cycles.next_cutoff(coa, spec)
+        anchor_cutoff = cycles.next_cutoff(coa, spec) if coa == today else coa
 
-    anchor_start = cycles.cycle_for_cutoff(anchor_cutoff, spec)[0]
     charge_dates = _project_installment_dates(
         current_number=current_number,
         total_months=total_months,
         anchor_cutoff=anchor_cutoff,
-        anchor_start=anchor_start,
         spec=spec,
     )
 

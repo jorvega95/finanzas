@@ -137,16 +137,17 @@ class PlanCreate(BaseModel):
     months: int = Field(ge=2, le=60)
 
 
-class PlanBackfillCreate(BaseModel):
-    """MSI-10: registro retroactivo de compra MSI realizada antes de usar el sistema."""
+class PlanCurrentInstallmentCreate(BaseModel):
+    """MSI-10: registro de cuota en curso para compras MSI anteriores al sistema."""
 
     description: str = Field(default="", max_length=200)
-    amount: Money
+    monthly_amount: Money
     currency: str = Field(default="MXN", pattern="^[A-Z]{3}$")
     credit_card_id: uuid.UUID
-    purchase_date: dt.date
-    months: int = Field(ge=2, le=60)
+    current_number: int = Field(ge=1, le=60)
+    total_months: int = Field(ge=2, le=60)
     category_id: uuid.UUID
+    current_is_charged: bool = True
 
 
 class InstallmentOut(BaseModel):

@@ -35,14 +35,15 @@ export interface PlanSummaryOut {
   installments: InstallmentOut[];
 }
 
-export interface BackfillCreate {
+export interface CurrentInstallmentCreate {
   description: string;
-  amount: string;
+  monthly_amount: string;
   currency: string;
   credit_card_id: string;
-  purchase_date: string;
-  months: number;
+  current_number: number;
+  total_months: number;
   category_id: string;
+  current_is_charged: boolean;
 }
 
 export interface ProjectionRow {
@@ -98,7 +99,7 @@ export function useSettleMsiPlan() {
 export function useCreateMsiBackfill() {
   const invalidate = useInvalidateMsi();
   return useMutation({
-    mutationFn: (body: BackfillCreate) =>
+    mutationFn: (body: CurrentInstallmentCreate) =>
       api<PlanOut>("/api/v1/installment-plans/backfill", {
         method: "POST",
         body: JSON.stringify(body),

@@ -29,16 +29,19 @@ async def test_msi01_04_plan_creation_and_schedule(client):
     assert len(plans) == 1
     summary = plans[0]
     assert summary["description"] == "TV"
-    assert summary["pending_count"] == 3
+    # MSI-05: cuota 1 ya en statement → charged de inmediato; 2 y 3 pendientes.
+    assert summary["charged_count"] == 1
+    assert summary["pending_count"] == 2
     assert summary["remaining_amount"] == "1000.00"
 
     # MSI-02: 333.33 × 2 + 333.34.
     amounts = [i["amount"] for i in summary["installments"]]
     assert amounts == ["333.33", "333.33", "333.34"]
-    # MSI-04: cuota 1 = fecha de compra (10-jun); cuotas 2 y 3 = period_start
-    # de su ciclo (16-jun y 16-jul, primer día tras el corte del 15).
+    # MSI-04: estimated_charge_date = period_end (día de corte) del ciclo de cada cuota.
+    # Cuota 1 → corte del 15-jun (ciclo al que se asigna la compra del 10-jun).
+    # Cuota 2 → corte del 15-jul; cuota 3 → corte del 15-ago.
     dates = [i["estimated_charge_date"] for i in summary["installments"]]
-    assert dates == ["2026-06-10", "2026-06-16", "2026-07-16"]
+    assert dates == ["2026-06-15", "2026-07-15", "2026-08-15"]
 
     # MSI-01: validaciones.
     cash_txn = await client.post(
@@ -117,10 +120,11 @@ async def test_msi06_projection_month_by_card(client):
     await make_plan(client, ctx, txn["id"], 3)
 
     rows = (await client.get("/api/v1/installment-plans/projection", headers=ctx["headers"])).json()
-    # Cuotas: 10-jun, 16-jun, 16-jul → cuotas 1 y 2 caen en junio (mismo mes).
+    # Cuota 1 (period_end=15-jun) queda charged en statement → no aparece en proyección.
+    # Cuota 2 (period_end=15-jul) y cuota 3 (period_end=15-ago) se proyectan.
     assert [(r["month"], r["amount"]) for r in rows] == [
-        ("2026-06", "400.00"),
         ("2026-07", "200.00"),
+        ("2026-08", "200.00"),
     ]
     assert all(r["card_alias"] == "BBVA Azul" for r in rows)
 
@@ -170,134 +174,166 @@ async def test_msi08_delete_purchase_rules(client):
     assert res.status_code == 409
 
 
-@freeze_time("2026-06-20 18:00:00")
-async def test_msi10_backfill_retroactive(client):
-    """MSI-10: alta retroactiva marca cuotas pasadas como paid y deja pendientes las futuras."""
+@freeze_time("2026-06-15 18:00:00")
+async def test_msi10_register_current_installment(client):
+    """MSI-10: cuota 6/12 charged → 5 paid, 1 charged, 6 pending."""
     ctx = await bootstrap_space(client)
-    card = await create_card(client, ctx)
+    card = await create_card(client, ctx)  # corte día 15
 
-    # Compra retroactiva: 6 meses desde 2026-01-10 (corte el 15 de cada mes).
-    # Cuotas 1..5 (ene-may) ya pasaron (estimated_charge_date <= 2026-06-20).
-    # Cuota 6 (2026-06-15) también ya pasó.
-    # Con fecha de compra 2026-01-10 y corte el 15:
-    #   cuota 1 → 2026-01-15, cuota 2 → 2026-02-15, ..., cuota 6 → 2026-06-15
-    #   Hoy es 2026-06-20, todas ya pasaron → todas paid.
+    # Hoy es 2026-06-15 (día de corte).
+    # anchor_cutoff = 2026-06-15, anchor_start = 2026-05-16.
+    # Cuota 6: 2026-05-16 (charged).
+    # Cuotas 5..1 hacia atrás: 2026-04-16, 2026-03-16, 2026-02-16, 2026-01-16, 2025-12-16.
+    # Cuotas 7..12 hacia adelante: 2026-06-16 ... 2026-11-16.
     res = await client.post(
         "/api/v1/installment-plans/backfill",
         headers=ctx["headers"],
         json={
-            "description": "Laptop vieja",
-            "amount": "6000.00",
+            "description": "Smart TV",
+            "monthly_amount": "2692.00",
             "currency": "MXN",
             "credit_card_id": card["id"],
-            "purchase_date": "2026-01-10",
-            "months": 6,
-            "category_id": ctx["categories"]["Electrónica"]["id"]
-            if "Electrónica" in ctx["categories"]
-            else ctx["categories"]["Otros"]["id"],
+            "current_number": 6,
+            "total_months": 12,
+            "category_id": ctx["categories"]["Otros"]["id"],
+            "current_is_charged": True,
         },
     )
     assert res.status_code == 201, res.text
     plan = res.json()
     assert plan["status"] == "active"
+    assert plan["total_amount"] == "32304.00"
 
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
     assert len(plans) == 1
     summary = plans[0]
-    assert summary["description"] == "Laptop vieja"
-    assert summary["paid_count"] == 6
-    assert summary["pending_count"] == 0
-    assert summary["remaining_amount"] == "0.00"
-    assert all(i["status"] == "paid" for i in summary["installments"])
-    # MSI-06: projected_payment_date debe ser posterior al último corte (due_date).
+    assert summary["description"] == "Smart TV"
+    assert summary["paid_count"] == 5
+    assert summary["charged_count"] == 1
+    assert summary["pending_count"] == 6
+    # remaining = charged(1) + pending(6) = 7 × 2692.00
+    assert summary["remaining_amount"] == "18844.00"
+    # MSI-02: Σ cuotas == 32304.00
+    amounts = [float(i["amount"]) for i in summary["installments"]]
+    assert abs(sum(amounts) - 32304.0) < 0.01
+
+    dates = [i["estimated_charge_date"] for i in summary["installments"]]
+    # period_end (día de corte) de cada ciclo, proyectando desde anchor_cutoff=15-jun.
+    assert dates[0] == "2026-01-15"  # cuota 1 (paid, 5 ciclos atrás del ancla)
+    assert dates[5] == "2026-06-15"  # cuota 6 (charged, anchor_cutoff)
+    assert dates[6] == "2026-07-15"  # cuota 7 (pending)
+    assert dates[11] == "2026-12-15"  # cuota 12 (última)
+    # MSI-06: projected_payment_date posterior al último cobro.
     assert summary["projected_payment_date"] > summary["projected_payoff"]
 
 
-@freeze_time("2026-06-20 18:00:00")
-async def test_msi10_backfill_partial_retroactive(client):
-    """MSI-10: compra retroactiva con cuotas pasadas y futuras mezcladas."""
+@freeze_time("2026-06-15 18:00:00")
+async def test_msi10_pending_current_installment(client):
+    """MSI-10: cuota actual marcada pending → cuotas previas paid, ninguna charged."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
 
-    # Compra 2026-04-10 a 12 meses (corte el 15).
-    # Cuotas abr, may, jun (1..3) ya pasaron; jul..mar'27 (4..12) son futuras.
+    # current_is_charged=False: anchor_cutoff = next_cutoff(2026-06-15) = 2026-07-15.
+    # anchor_start = 2026-06-16. Cuota 2: 2026-06-16 (pending).
+    # Cuota 1 (backward): period_start del ciclo anterior = 2026-05-16 (paid).
+    # Cuotas 3..6 (forward): 2026-07-16, 2026-08-16, 2026-09-16, 2026-10-16.
     res = await client.post(
         "/api/v1/installment-plans/backfill",
         headers=ctx["headers"],
         json={
             "description": "Refrigerador",
-            "amount": "12000.00",
+            "monthly_amount": "2505.00",
             "currency": "MXN",
             "credit_card_id": card["id"],
-            "purchase_date": "2026-04-10",
-            "months": 12,
+            "current_number": 2,
+            "total_months": 6,
             "category_id": ctx["categories"]["Otros"]["id"],
+            "current_is_charged": False,
         },
     )
     assert res.status_code == 201, res.text
 
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
     summary = plans[0]
-    # Cuotas 2026-04-15, 2026-05-15, 2026-06-15 <= 2026-06-20 → paid (3)
-    assert summary["paid_count"] == 3
-    assert summary["pending_count"] == 9
-    # Monto restante = 9 × 1000 = 9000.00
-    assert summary["remaining_amount"] == "9000.00"
-    # MSI-02 invariante: Σ cuotas == 12000.00
-    amounts = [float(i["amount"]) for i in summary["installments"]]
-    assert abs(sum(amounts) - 12000.0) < 0.01
+    assert summary["paid_count"] == 1
+    assert summary["charged_count"] == 0
+    assert summary["pending_count"] == 5
+    # remaining = 5 × 2505 = 12525.00
+    assert summary["remaining_amount"] == "12525.00"
+    dates = [i["estimated_charge_date"] for i in summary["installments"]]
+    # anchor_cutoff=15-jul (siguiente corte cuando charged=False y hoy=15-jun es cutoff).
+    assert dates[0] == "2026-06-15"  # cuota 1 (paid, ciclo anterior al ancla)
+    assert dates[1] == "2026-07-15"  # cuota 2 (pending, anchor_cutoff)
+    assert dates[2] == "2026-08-15"  # cuota 3 (pending)
 
 
-@freeze_time("2026-06-20 18:00:00")
-async def test_msi10_backfill_projected_payment_date(client):
-    """MSI-06: projected_payment_date = due_date del último statement (TDC-04)."""
+@freeze_time("2026-06-15 18:00:00")
+async def test_msi10_projected_payment_date(client):
+    """MSI-06: projected_payment_date = due_date_for(projected_payoff, spec)."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)  # corte 15, payment_due_days=20
 
-    # Compra a 3 meses desde 2026-06-10 → cuotas: jun-15, jul-15, ago-15.
-    # projected_payoff = 2026-08-15; projected_payment_date = 2026-08-15 + 20d = 2026-09-04.
+    # current_number=3, total_months=3, charged.
+    # anchor_cutoff=2026-06-15 (period_end del ciclo ancla).
+    # Cuota 3: 2026-06-15. Cuota 2: 2026-05-15. Cuota 1: 2026-04-15.
+    # projected_payoff = max = 2026-06-15.
+    # projected_payment_date = 2026-06-15 + 20d = 2026-07-05.
     res = await client.post(
         "/api/v1/installment-plans/backfill",
         headers=ctx["headers"],
         json={
-            "description": "Tablet",
-            "amount": "3000.00",
+            "description": "Lavadora",
+            "monthly_amount": "747.00",
             "currency": "MXN",
             "credit_card_id": card["id"],
-            "purchase_date": "2026-06-10",
-            "months": 3,
+            "current_number": 3,
+            "total_months": 3,
             "category_id": ctx["categories"]["Otros"]["id"],
+            "current_is_charged": True,
         },
     )
     assert res.status_code == 201, res.text
 
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
     summary = plans[0]
-    assert summary["projected_payoff"] == "2026-08-15"
-    assert summary["projected_payment_date"] == "2026-09-04"
+    assert summary["paid_count"] == 2
+    assert summary["charged_count"] == 1
+    assert summary["pending_count"] == 0
+    assert summary["remaining_amount"] == "747.00"
+    assert summary["projected_payoff"] == "2026-06-15"
+    assert summary["projected_payment_date"] == "2026-07-05"
 
 
-@freeze_time("2026-06-20 18:00:00")
-async def test_msi10_backfill_validations(client):
-    """MSI-10: validaciones básicas de alta retroactiva."""
+@freeze_time("2026-06-15 18:00:00")
+async def test_msi10_validations(client):
+    """MSI-10: validaciones básicas de registro por cuota en curso."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
 
     base = {
         "description": "Test",
-        "amount": "1200.00",
+        "monthly_amount": "500.00",
         "currency": "MXN",
         "credit_card_id": card["id"],
-        "purchase_date": "2026-01-10",
-        "months": 12,
+        "current_number": 3,
+        "total_months": 6,
         "category_id": ctx["categories"]["Otros"]["id"],
+        "current_is_charged": True,
     }
 
-    # Meses fuera de rango.
+    # total_months < 2 → falla en schema (ge=2).
     res = await client.post(
         "/api/v1/installment-plans/backfill",
         headers=ctx["headers"],
-        json={**base, "months": 1},
+        json={**base, "total_months": 1},
+    )
+    assert res.status_code == 422
+
+    # current_number > total_months → falla en servicio.
+    res = await client.post(
+        "/api/v1/installment-plans/backfill",
+        headers=ctx["headers"],
+        json={**base, "current_number": 7, "total_months": 6},
     )
     assert res.status_code == 422
 
@@ -308,6 +344,81 @@ async def test_msi10_backfill_validations(client):
         json={**base, "currency": "USD"},
     )
     assert res.status_code == 422
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_msi10_anchor_off_cutoff_day(client):
+    """MSI-10: cuando hoy NO es día de corte, el ancla debe resolverse al
+    corte correcto, no al próximo futuro.
+
+    Tarjeta corte=15. Hoy=20-jun (entre cortes).
+    cutoff_on_or_after(20-jun) = 15-jul (próximo), NO el 15-jun (cerrado).
+
+    charged=True  → ancla = 15-jun  (ciclo cerrado may-16 – jun-15)
+    charged=False → ancla = 15-jul  (ciclo abierto jun-16 – jul-15)
+    """
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)  # corte día 15
+
+    # --- charged=True: cuota en el ÚLTIMO estado de cuenta cerrado (15-jun) ---
+    res = await client.post(
+        "/api/v1/installment-plans/backfill",
+        headers=ctx["headers"],
+        json={
+            "description": "Aire acondicionado",
+            "monthly_amount": "1000.00",
+            "currency": "MXN",
+            "credit_card_id": card["id"],
+            "current_number": 2,
+            "total_months": 4,
+            "category_id": ctx["categories"]["Otros"]["id"],
+            "current_is_charged": True,
+        },
+    )
+    assert res.status_code == 201, res.text
+    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    summary = plans[0]
+    # charged=True: anchor_cutoff = previous_cutoff(15-jul) = 15-jun (period_end).
+    dates = [i["estimated_charge_date"] for i in summary["installments"]]
+    assert dates[0] == "2026-05-15"  # cuota 1 (paid, corte anterior al ancla)
+    assert dates[1] == "2026-06-15", f"cuota 2 debería anclar en 15-jun, no {dates[1]}"
+    assert dates[2] == "2026-07-15"  # cuota 3 (pending)
+    assert dates[3] == "2026-08-15"  # cuota 4 (pending)
+    assert summary["paid_count"] == 1
+    assert summary["charged_count"] == 1
+    assert summary["pending_count"] == 2
+
+    # Borrar el plan para el siguiente sub-test
+    txn_id = plans[0]["plan"]["transaction_id"]
+    await client.delete(f"/api/v1/transactions/{txn_id}", headers=ctx["headers"])
+
+    # --- charged=False: cuota en el ciclo ACTUALMENTE ABIERTO (cierra 15-jul) ---
+    res = await client.post(
+        "/api/v1/installment-plans/backfill",
+        headers=ctx["headers"],
+        json={
+            "description": "Lavadora",
+            "monthly_amount": "800.00",
+            "currency": "MXN",
+            "credit_card_id": card["id"],
+            "current_number": 2,
+            "total_months": 4,
+            "category_id": ctx["categories"]["Otros"]["id"],
+            "current_is_charged": False,
+        },
+    )
+    assert res.status_code == 201, res.text
+    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    summary = plans[0]
+    # charged=False: anchor_cutoff = coa = 15-jul (ciclo abierto jun-16 – jul-15).
+    dates = [i["estimated_charge_date"] for i in summary["installments"]]
+    assert dates[0] == "2026-06-15"  # cuota 1 (paid, corte anterior al ancla)
+    assert dates[1] == "2026-07-15", f"cuota 2 debería anclar en 15-jul, no {dates[1]}"
+    assert dates[2] == "2026-08-15"  # cuota 3 (pending)
+    assert dates[3] == "2026-09-15"  # cuota 4 (pending)
+    assert summary["paid_count"] == 1
+    assert summary["charged_count"] == 0
+    assert summary["pending_count"] == 3
 
 
 @freeze_time("2026-06-20 18:00:00")

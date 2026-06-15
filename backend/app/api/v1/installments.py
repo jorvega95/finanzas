@@ -10,8 +10,8 @@ from app.models.cards import Card
 from app.models.transactions import Transaction
 from app.schemas.cards import (
     InstallmentOut,
-    PlanBackfillCreate,
     PlanCreate,
+    PlanCurrentInstallmentCreate,
     PlanOut,
     PlanSummaryOut,
     ProjectionRow,
@@ -69,22 +69,26 @@ async def list_plans(db: DbSession, space_and_member: ActiveSpace) -> list[PlanS
 
 
 @router.post("/backfill", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
-async def create_plan_backfill(
-    db: DbSession, space_and_member: EditorSpace, user: CurrentUser, payload: PlanBackfillCreate
+async def create_plan_from_current_installment(
+    db: DbSession,
+    space_and_member: EditorSpace,
+    user: CurrentUser,
+    payload: PlanCurrentInstallmentCreate,
 ) -> PlanOut:
-    """MSI-10: alta retroactiva de compra MSI realizada antes de usar el sistema."""
+    """MSI-10: registro de cuota en curso para compras MSI anteriores al sistema."""
     space, _ = space_and_member
-    plan = await svc.create_plan_backfill(
+    plan = await svc.create_plan_from_current_installment(
         db,
         space,
         user.id,
         description=payload.description,
-        amount=payload.amount,
+        monthly_amount=payload.monthly_amount,
         currency=payload.currency,
         card_id=payload.credit_card_id,
-        purchase_date=payload.purchase_date,
-        months=payload.months,
         category_id=payload.category_id,
+        current_number=payload.current_number,
+        total_months=payload.total_months,
+        current_is_charged=payload.current_is_charged,
     )
     return PlanOut.model_validate(plan)
 

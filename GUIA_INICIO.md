@@ -173,7 +173,6 @@ para ver la API).
 ```powershell
 cd frontend
 npm install   # solo la primera vez
-npm run dev
 ```
 Queda en `http://localhost:5173`.
 
