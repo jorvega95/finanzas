@@ -456,6 +456,11 @@ function PaymentMethodsSection() {
               onChange={(e) => setEditName(e.target.value)}
             />
           </div>
+          {editName !== editingMethod?.name && editName.trim() !== "" && (
+            <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+              Todas las transacciones asignadas a este método reflejarán el nuevo nombre.
+            </p>
+          )}
           <ErrorText error={updateMethod.error} />
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" className="btn-secondary" onClick={closeEditModal}>
