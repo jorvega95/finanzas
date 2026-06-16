@@ -64,6 +64,7 @@ function CategoriesSection() {
   const [editingCategory, setEditingCategory] = useState<CategoryOut | null>(null);
   const [editName, setEditName] = useState("");
   const [editNature, setEditNature] = useState<ExpenseNature>("variable");
+  const [deletingCategory, setDeletingCategory] = useState<CategoryOut | null>(null);
   const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
 
   function handleCreate(e: FormEvent) {
@@ -105,13 +106,16 @@ function CategoriesSection() {
   function handleDelete(c: CategoryOut) {
     setDeleteMessage(null);
     deleteCategory.mutate(c.id, {
+      onSuccess: () => setDeletingCategory(null),
       onError: (err) => {
         if (err instanceof ApiError && err.status === 409) {
           updateCategory.mutate(
             { id: c.id, is_active: false },
             {
-              onSuccess: () =>
-                setDeleteMessage("Tiene registros asociados — fue desactivada en su lugar."),
+              onSuccess: () => {
+                setDeletingCategory(null);
+                setDeleteMessage("Tiene registros asociados — fue desactivada en su lugar.");
+              },
             },
           );
         }
@@ -210,8 +214,7 @@ function CategoriesSection() {
                     <button
                       aria-label="Eliminar categoría"
                       className="rounded p-1 text-ink-muted transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                      onClick={() => handleDelete(c)}
-                      disabled={deleteCategory.isPending}
+                      onClick={() => setDeletingCategory(c)}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
                         <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd" />
@@ -268,6 +271,39 @@ function CategoriesSection() {
           </div>
         </form>
       </Modal>
+
+      {/* Modal de confirmación de eliminación */}
+      <Modal
+        open={deletingCategory !== null}
+        onClose={() => setDeletingCategory(null)}
+        title="Eliminar categoría"
+      >
+        {deletingCategory && (
+          <div className="space-y-4">
+            <p className="text-sm">
+              ¿Eliminar <strong>{deletingCategory.name}</strong>? Si tiene transacciones
+              asociadas, se desactivará en su lugar.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setDeletingCategory(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                disabled={deleteCategory.isPending || updateCategory.isPending}
+                onClick={() => handleDelete(deletingCategory)}
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </section>
   );
 }
@@ -283,6 +319,7 @@ function PaymentMethodsSection() {
 
   const [editingMethod, setEditingMethod] = useState<PaymentMethodOut | null>(null);
   const [editName, setEditName] = useState("");
+  const [deletingMethod, setDeletingMethod] = useState<PaymentMethodOut | null>(null);
   const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
 
   const nonCardMethods = (methods.data ?? []).filter((m) => m.card_id === null);
@@ -308,13 +345,16 @@ function PaymentMethodsSection() {
   function handleDelete(m: PaymentMethodOut) {
     setDeleteMessage(null);
     deleteMethod.mutate(m.id, {
+      onSuccess: () => setDeletingMethod(null),
       onError: (err) => {
         if (err instanceof ApiError && err.status === 409) {
           updateMethod.mutate(
             { id: m.id, is_active: false },
             {
-              onSuccess: () =>
-                setDeleteMessage("Tiene registros asociados — fue desactivado en su lugar."),
+              onSuccess: () => {
+                setDeletingMethod(null);
+                setDeleteMessage("Tiene registros asociados — fue desactivado en su lugar.");
+              },
             },
           );
         }
@@ -385,8 +425,7 @@ function PaymentMethodsSection() {
               <button
                 aria-label="Eliminar método de pago"
                 className="rounded p-1 text-ink-muted transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                onClick={() => handleDelete(m)}
-                disabled={deleteMethod.isPending}
+                onClick={() => setDeletingMethod(m)}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
                   <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
@@ -422,6 +461,39 @@ function PaymentMethodsSection() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Modal de confirmación de eliminación */}
+      <Modal
+        open={deletingMethod !== null}
+        onClose={() => setDeletingMethod(null)}
+        title="Eliminar método de pago"
+      >
+        {deletingMethod && (
+          <div className="space-y-4">
+            <p className="text-sm">
+              ¿Eliminar <strong>{deletingMethod.name}</strong>? Si tiene transacciones
+              asociadas, se desactivará en su lugar.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setDeletingMethod(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                disabled={deleteMethod.isPending || updateMethod.isPending}
+                onClick={() => handleDelete(deletingMethod)}
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </section>
   );
