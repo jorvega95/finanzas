@@ -369,7 +369,36 @@ function PaymentMethodsSection() {
 
   return (
     <section className="card p-5">
-      <h2 className="mb-4 font-semibold">Métodos de pago</h2>
+      <h2 className="mb-3 font-semibold">Métodos de pago</h2>
+      <details className="mb-4 rounded-lg border border-slate-200 dark:border-slate-700">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-ink-muted select-none hover:text-ink dark:text-slate-400 dark:hover:text-slate-200">
+          ¿Para qué sirven?
+        </summary>
+        <div className="space-y-2 px-3 pb-3 pt-1 text-xs text-ink-muted dark:text-slate-400">
+          <p>
+            Cada transacción debe registrar <em>con qué</em> se pagó. Las tarjetas que agregas en
+            la sección <strong className="text-ink dark:text-slate-200">Tarjetas</strong> generan
+            su propio método de pago automáticamente — no necesitas hacer nada aquí para ellas.
+          </p>
+          <p>Esta sección es para los casos que no son tarjeta registrada:</p>
+          <ul className="ml-3 list-disc space-y-1">
+            <li>
+              <strong className="text-ink dark:text-slate-200">Efectivo</strong> — el único caso
+              que casi todos los usuarios necesitan.
+            </li>
+            <li>
+              <strong className="text-ink dark:text-slate-200">Transferencia / Débito</strong> —
+              útil si tienes cuentas bancarias que prefieres no registrar como tarjeta completa
+              (sin seguimiento de saldo ni ciclos).
+            </li>
+          </ul>
+          <p>
+            Si todas tus cuentas están registradas como tarjetas, esta sección solo te sirve para
+            el efectivo. Los métodos "Débito" y "Transferencia" que aparecen por defecto puedes
+            desactivarlos si no los usas.
+          </p>
+        </div>
+      </details>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -440,11 +469,6 @@ function PaymentMethodsSection() {
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-xs text-ink-muted dark:text-slate-500">
-        Los métodos de tarjeta de crédito y las tarjetas registradas se gestionan en la
-        sección de Tarjetas.
-      </p>
-
       <Modal open={editingMethod !== null} onClose={closeEditModal} title="Editar método de pago">
         <form onSubmit={handleSaveEdit} className="space-y-4">
           <div>
