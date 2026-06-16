@@ -216,18 +216,14 @@ async def test_rec_delete_rule_physical(client):
     # Confirmar la primera instancia.
     res = await client.get("/api/v1/transactions?needs_review=true", headers=ctx["headers"])
     txn_id = res.json()["items"][0]["id"]
-    await client.post(
-        f"/api/v1/transactions/{txn_id}/confirm", headers=ctx["headers"], json={}
-    )
+    await client.post(f"/api/v1/transactions/{txn_id}/confirm", headers=ctx["headers"], json={})
 
     # Eliminar la regla.
     res = await client.delete(f"/api/v1/recurring-rules/{rule_id}", headers=ctx["headers"])
     assert res.status_code == 204
 
     # La regla ya no existe.
-    res = await client.get(
-        "/api/v1/recurring-rules?include_inactive=true", headers=ctx["headers"]
-    )
+    res = await client.get("/api/v1/recurring-rules?include_inactive=true", headers=ctx["headers"])
     assert not any(r["id"] == rule_id for r in res.json())
 
     # La transacción confirmada sigue existiendo.

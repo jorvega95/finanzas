@@ -91,9 +91,7 @@ async def update_rule(
 
 
 @router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_rule(
-    db: DbSession, space_and_member: EditorSpace, rule_id: uuid.UUID
-) -> None:
+async def delete_rule(db: DbSession, space_and_member: EditorSpace, rule_id: uuid.UUID) -> None:
     """Physically deletes a recurring rule. Confirmed transactions are kept
     with recurring_rule_id=NULL (FK SET NULL). Tombstones cascade-delete."""
     space, _ = space_and_member
