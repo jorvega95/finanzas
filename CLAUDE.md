@@ -13,8 +13,9 @@ Si una decisión no está cubierta por una regla, propónla al usuario y, si se 
 
 1. Lee las reglas del dominio en `REGLAS_NEGOCIO.md`.
 2. Escribe los tests primero para lógica delicada (ciclos TDC, MSI, FX). Los 8 "casos de prueba obligatorios" al final de `REGLAS_NEGOCIO.md` son bloqueantes.
-3. Referencia los IDs de regla en docstrings, tests y commits: `feat(tdc): motor de ciclos [TDC-02..TDC-05]`, `test: MSI-02 property-based`.
-4. Una regla sin test que la cubra no está terminada.
+3. Siempre que se hagan cambios que afecten `REGLAS_NEGOCIO.md` actualizarlas antes de continuar.
+4. Referencia los IDs de regla en docstrings, tests y commits: `feat(tdc): motor de ciclos [TDC-02..TDC-05]`, `test: MSI-02 property-based`.
+5. Una regla sin test que la cubra no está terminada.
 
 ## Convenciones NO negociables
 
