@@ -244,6 +244,11 @@ function CategoriesSection() {
               onChange={(e) => setEditName(e.target.value)}
             />
           </div>
+          {editName !== editingCategory?.name && editName.trim() !== "" && (
+            <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+              Todas las transacciones asignadas a esta categoría reflejarán el nuevo nombre.
+            </p>
+          )}
           {editingCategory?.kind === "expense" && (
             <div>
               <label className="label">Tipo de gasto</label>
