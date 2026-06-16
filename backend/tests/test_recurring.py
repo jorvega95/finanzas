@@ -226,7 +226,7 @@ async def test_rec_delete_rule_physical(client):
 
     # La regla ya no existe.
     res = await client.get(
-        f"/api/v1/recurring-rules?include_inactive=true", headers=ctx["headers"]
+        "/api/v1/recurring-rules?include_inactive=true", headers=ctx["headers"]
     )
     assert not any(r["id"] == rule_id for r in res.json())
 
