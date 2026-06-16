@@ -275,6 +275,14 @@ export default function MsiPage() {
   const projection = useMsiProjection();
   const settle = useSettleMsiPlan();
 
+  const sortedPlans = useMemo(
+    () =>
+      [...(plans.data ?? [])].sort(
+        (a, b) => (a.charged_count + a.pending_count) - (b.charged_count + b.pending_count),
+      ),
+    [plans.data],
+  );
+
   const projectionByMonth = useMemo(() => {
     const months = [...new Set((projection.data ?? []).map((r) => r.month))].sort();
     const cards = [...new Set((projection.data ?? []).map((r) => r.card_alias))];
@@ -288,12 +296,12 @@ export default function MsiPage() {
       <ConvertSection />
       <BackfillSection />
 
-      {(plans.data ?? []).length === 0 ? (
+      {sortedPlans.length === 0 ? (
         <div className="card grid h-40 place-items-center p-8 text-center text-sm text-ink-muted dark:text-slate-400">
           Sin planes MSI. Convierte una compra con tarjeta o registra un MSI existente.
         </div>
       ) : (
-        (plans.data ?? []).map((summary) => {
+        sortedPlans.map((summary) => {
           const done = summary.paid_count + summary.charged_count;
           const total = summary.plan.months;
           return (

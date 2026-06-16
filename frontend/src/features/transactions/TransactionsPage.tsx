@@ -475,9 +475,24 @@ export default function TransactionsPage() {
                 onChange={(e) => setFilterCategoryId(e.target.value)}
               >
                 <option value="">Categoría</option>
-                {filterCategories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
+                {filterType === "" ? (
+                  <>
+                    <optgroup label="Gastos">
+                      {filterCategories.filter((c) => c.kind === "expense").map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Ingresos">
+                      {filterCategories.filter((c) => c.kind === "income").map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </optgroup>
+                  </>
+                ) : (
+                  filterCategories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))
+                )}
               </select>
             )}
             <select
