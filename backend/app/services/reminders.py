@@ -15,11 +15,17 @@ MAX_ATTEMPTS = 3  # REM-02
 
 
 async def schedule_card_reminders(
-    session: AsyncSession, card: Card, statement: CardStatement
+    session: AsyncSession,
+    card: Card,
+    statement: CardStatement,
+    today: date | None = None,
 ) -> None:
     """REM-01: al cerrar un statement se programan recordatorios a
     due_date − N para cada N de card.reminder_days, por canal (REM-04).
-    Único por (statement, offset, canal) — REM-02."""
+    Único por (statement, offset, canal) — REM-02.
+
+    REM-01: solo se crean recordatorios con fire_at >= today. Si today es None
+    no se filtra (compatibilidad con llamadas sin contexto de fecha)."""
     amount_due = statement.computed_total - statement.paid_amount
     if amount_due <= 0:
         return
@@ -27,6 +33,10 @@ async def schedule_card_reminders(
     message = f"Pago de {card.alias}: ${amount_due} antes del {statement.due_date.isoformat()}"
     for offset in card.reminder_days:
         fire_at = statement.due_date - timedelta(days=int(offset))
+        # REM-01: skip past fire dates to avoid immediate spurious notifications
+        # when closing historical statements (backfill, opening balance, etc.).
+        if today is not None and fire_at < today:
+            continue
         for channel in (ReminderChannel.in_app, ReminderChannel.email):
             exists_already = await session.scalar(
                 select(Reminder.id).where(
@@ -52,14 +62,15 @@ async def schedule_card_reminders(
 
 
 async def cancel_card_reminders(session: AsyncSession, statement: CardStatement) -> None:
-    """REM-01: si el statement se paga antes, los pendientes se cancelan."""
+    """REM-01b: al pagar un statement se cancelan sus recordatorios pending Y sent,
+    para que desaparezcan del inbox en cuanto se registra el pago."""
     reminders = (
         (
             await session.execute(
                 select(Reminder).where(
                     Reminder.kind == ReminderKind.card_due,
                     Reminder.ref_id == statement.id,
-                    Reminder.status == ReminderStatus.pending,
+                    Reminder.status.in_([ReminderStatus.pending, ReminderStatus.sent]),
                 )
             )
         )

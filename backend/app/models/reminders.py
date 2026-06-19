@@ -27,6 +27,7 @@ class ReminderStatus(enum.StrEnum):
     sent = "sent"
     canceled = "canceled"
     failed = "failed"
+    dismissed = "dismissed"  # REM-05: soft-delete por el usuario
 
 
 class Reminder(Base, TimestampMixin):

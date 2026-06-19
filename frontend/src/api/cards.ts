@@ -180,3 +180,12 @@ export function useCloseCycles() {
     onSuccess: invalidate,
   });
 }
+
+export function useDismissNotification() {
+  const invalidate = useInvalidateCards();
+  return useMutation({
+    mutationFn: (reminderId: string) =>
+      api(`/api/v1/cards/notifications/${reminderId}`, { method: "DELETE" }),
+    onSuccess: invalidate,
+  });
+}

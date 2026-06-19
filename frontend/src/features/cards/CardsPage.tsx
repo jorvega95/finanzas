@@ -6,6 +6,7 @@ import {
   useCardStatements,
   useCloseCycles,
   useCreateCard,
+  useDismissNotification,
   useNotifications,
   usePayCard,
   useUpdateCard,
@@ -526,6 +527,7 @@ export default function CardsPage() {
   const cards = useCards();
   const notifications = useNotifications();
   const closeCycles = useCloseCycles();
+  const dismiss = useDismissNotification();
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -558,10 +560,20 @@ export default function CardsPage() {
 
       {pendingNotifs.length > 0 && (
         <section className="card p-4">
-          <h2 className="mb-2 text-sm font-semibold">🔔 Recordatorios</h2>
-          <ul className="space-y-1 text-sm text-ink-muted dark:text-slate-400">
+          <h2 className="mb-2 text-sm font-semibold">Recordatorios</h2>
+          <ul className="space-y-1">
             {pendingNotifs.slice(0, 5).map((n) => (
-              <li key={n.id}>{n.message}</li>
+              <li key={n.id} className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-ink-muted dark:text-slate-400">{n.message}</span>
+                <button
+                  className="shrink-0 rounded p-1 text-ink-muted hover:bg-surface hover:text-red-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-red-400"
+                  title="Descartar recordatorio"
+                  disabled={dismiss.isPending}
+                  onClick={() => dismiss.mutate(n.id)}
+                >
+                  ✕
+                </button>
+              </li>
             ))}
           </ul>
         </section>

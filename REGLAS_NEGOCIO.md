@@ -121,10 +121,12 @@ Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas
 
 ## 9. Recordatorios (REM) — R14
 
-- **REM-01 · TDC:** al cerrar un statement (TDC-07) se programan recordatorios a `due_date − N días` con N = `card.reminder_days` (default `[3, 1]`). Si el statement se paga antes, los pendientes se cancelan.
+- **REM-01 · TDC:** al cerrar un statement (TDC-07) se programan recordatorios a `due_date − N días` con N = `card.reminder_days` (default `[3, 1]`). **Solo se crean recordatorios con `fire_at ≥ hoy`**: si el corte ya venció al momento de cerrarse (p. ej. backfill de gastos históricos), no se generan notificaciones de cortes pasados. Aplica igualmente al registrar `opening_balance` (TDC-14): el statement sintético del corte anterior también programa sus recordatorios futuros en el mismo momento de crearse, con el mismo filtro de fecha.
+- **REM-01b · Cancelación al pagar:** cuando un statement queda totalmente pagado, se cancelan sus recordatorios en estado `pending` **y** `sent`. Esto garantiza que las notificaciones ya enviadas desaparezcan del inbox en cuanto se registra el pago.
 - **REM-02:** un recordatorio se envía una sola vez por (statement, offset, canal). Reintentos ante fallo de envío: 3 con backoff, luego `failed` visible en UI.
 - **REM-03 · Contenido:** alias de tarjeta, monto a pagar (`computed_total − paid_amount`), fecha límite. Nunca incluir `last4` completo en notificaciones push (privacidad en lockscreen): solo alias.
 - **REM-04 · Canales:** v1: in-app (centro de notificaciones) + email (Resend). Push llega con la PWA (Fase 6). Preferencias por usuario y por tipo (TDC, presupuesto) en settings.
+- **REM-05 · Descarte:** el usuario PUEDE descartar cualquier recordatorio in-app (`DELETE /notifications/{id}`). El registro pasa a `dismissed` (soft-delete): se oculta del inbox pero se conserva para auditoría. Solo se puede descartar recordatorios del propio espacio activo (GLO-05). No afecta el estado del statement ni otros canales.
 
 ## 10. Inversiones (INV) — R5, R15
 

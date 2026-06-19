@@ -176,7 +176,12 @@ async def set_opening_balance(
     """TDC-14: record the pending debt from the previous cut as a closed
     statement (due at the next payment date) so it enters TDC-09 (saldo al
     corte) and is paid via TDC-10. Create-or-update on the previous cut; never
-    overwrite a cut that already has itemized charges. Usable at alta and edit."""
+    overwrite a cut that already has itemized charges. Usable at alta and edit.
+
+    REM-01: schedules future reminders for the statement; cancels existing
+    ones when amount is zeroed out."""
+    from app.services.reminders import cancel_card_reminders, schedule_card_reminders
+
     if not (cycle_ready(card) and _payment_ready(card)):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -205,6 +210,10 @@ async def set_opening_balance(
         existing.status = StatementStatus.closed
         _update_payment_status(existing)
         await session.flush()
+        if amount == ZERO:
+            await cancel_card_reminders(session, existing)
+        else:
+            await schedule_card_reminders(session, card, existing, today)
         return existing
 
     statement = CardStatement(
@@ -219,6 +228,8 @@ async def set_opening_balance(
     )
     session.add(statement)
     await session.flush()
+    # REM-01: schedule reminders for the new statement; filter past fire dates.
+    await schedule_card_reminders(session, card, statement, today)
     return statement
 
 
@@ -728,7 +739,8 @@ async def close_due_statements(
                 statement.computed_total = await _raw_statement_total(session, statement) - credit
                 statement.status = StatementStatus.closed
                 _update_payment_status(statement)
-                await schedule_card_reminders(session, card, statement)
+                # REM-01: pass today so past fire dates are skipped.
+                await schedule_card_reminders(session, card, statement, today)
                 closed.append(statement)
             await session.flush()
 
