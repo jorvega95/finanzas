@@ -99,11 +99,17 @@ async def create_plan_from_transaction(
             "Compras MSI en moneda distinta a la de la tarjeta no se soportan",
         )
 
+    spec = spec_for(card)
     amounts = split_installments(txn.amount, months)
-    charge_dates = installment_charge_dates(txn.date, spec_for(card), months)
-    # MSI-05: si la compra ya estaba en un statement (ciclo actual o pasado),
-    # la cuota 1 hereda ese statement y queda charged de inmediato.
+    charge_dates = installment_charge_dates(txn.date, spec, months)
     old_statement_id = txn.statement_id
+
+    # MSI-05: classify each installment by its cycle relative to today.
+    # charge_date < current_cutoff → past closed cycle → paid.
+    # charge_date == current_cutoff → currently open cycle → charged.
+    # charge_date > current_cutoff → future cycle → pending.
+    today = _today_for_space(space)
+    current_cutoff = cycles.cutoff_on_or_after(today, spec)
 
     plan = InstallmentPlan(
         space_id=space.id,
@@ -120,15 +126,29 @@ async def create_plan_from_transaction(
     for number, (amount, charge_date) in enumerate(
         zip(amounts, charge_dates, strict=True), start=1
     ):
-        is_first = number == 1 and old_statement_id is not None
+        if charge_date < current_cutoff:
+            # Past cycle: already covered. Cuota 1 keeps old_statement_id so
+            # recompute_statement_total reflects the installment instead of the
+            # full transaction amount.
+            stmt_id = old_statement_id if number == 1 else None
+            inst_status = InstallmentStatus.paid
+        elif charge_date == current_cutoff:
+            # Current open cycle: charge lands here.
+            open_stmt = await get_or_create_statement(session, card, charge_date)
+            stmt_id = open_stmt.id
+            inst_status = InstallmentStatus.charged
+        else:
+            stmt_id = None
+            inst_status = InstallmentStatus.pending
+
         session.add(
             Installment(
                 plan_id=plan.id,
                 number=number,
                 amount=amount,
                 estimated_charge_date=charge_date,
-                statement_id=old_statement_id if is_first else None,
-                status=InstallmentStatus.charged if is_first else InstallmentStatus.pending,
+                statement_id=stmt_id,
+                status=inst_status,
             )
         )
     # MSI-03: la transacción-madre queda marcada y fuera de agregados; si ya
@@ -136,6 +156,9 @@ async def create_plan_from_transaction(
     txn.installment_plan_id = plan.id
     txn.statement_id = None
     await session.flush()
+    # If every installment is in the past, the plan is completed immediately.
+    if charge_dates[-1] < current_cutoff:
+        plan.status = PlanStatus.completed
     if old_statement_id is not None:
         await recompute_statement_total(session, old_statement_id)
     await session.commit()

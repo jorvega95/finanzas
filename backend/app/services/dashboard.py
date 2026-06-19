@@ -12,7 +12,7 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -327,10 +327,19 @@ async def upcoming_commitments(
             select(Installment, Transaction.description)
             .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
             .join(Transaction, InstallmentPlan.transaction_id == Transaction.id)
+            .outerjoin(CardStatement, Installment.statement_id == CardStatement.id)
             .where(
                 InstallmentPlan.space_id == space.id,
-                Installment.status == InstallmentStatus.pending,
+                Installment.status.in_(
+                    [InstallmentStatus.pending, InstallmentStatus.charged]
+                ),
                 Installment.estimated_charge_date <= horizon,
+                # Charged installments in closed statements already surface as
+                # card_due; only include those in open statements or no statement.
+                or_(
+                    Installment.statement_id.is_(None),
+                    CardStatement.status == StatementStatus.open,
+                ),
             )
         )
     ).all()

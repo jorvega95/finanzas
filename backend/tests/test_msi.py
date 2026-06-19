@@ -29,10 +29,12 @@ async def test_msi01_04_plan_creation_and_schedule(client):
     assert len(plans) == 1
     summary = plans[0]
     assert summary["description"] == "TV"
-    # MSI-05: cuota 1 ya en statement → charged de inmediato; 2 y 3 pendientes.
+    # MSI-05: cuota 1 (15-jun) en ciclo pasado (current_cutoff=15-jul) → paid;
+    # cuota 2 (15-jul) en ciclo actual → charged; cuota 3 (15-ago) → pending.
+    assert summary["paid_count"] == 1
     assert summary["charged_count"] == 1
-    assert summary["pending_count"] == 2
-    assert summary["remaining_amount"] == "1000.00"
+    assert summary["pending_count"] == 1
+    assert summary["remaining_amount"] == "666.67"
 
     # MSI-02: 333.33 × 2 + 333.34.
     amounts = [i["amount"] for i in summary["installments"]]
@@ -74,10 +76,11 @@ async def test_msi03_parent_excluded_statement_charges_installments(client):
     # Solo la cuota 1 (1000.00), nunca el total ni total+cuota.
     assert st["computed_total"] == "1000.00"
 
-    # TDC-09: comprometido futuro = 11 cuotas pendientes.
+    # TDC-09: cuota 2 charged en ciclo abierto (15-jul); cuotas 3-12 pending.
     detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["statement_balance"] == "1000.00"
-    assert detail["debt"]["committed_msi"] == "11000.00"
+    assert detail["debt"]["current_cycle_spend"] == "1000.00"
+    assert detail["debt"]["committed_msi"] == "10000.00"
     assert detail["debt"]["total_debt"] == "12000.00"
 
 
@@ -92,10 +95,13 @@ async def test_msi05_lifecycle_pending_charged_paid(client):
     closed = await close_cycles(client, ctx)
     statement_id = closed[0]["id"]
 
+    # MSI-05: cuota 1 (15-jun) en ciclo pasado → paid; cuota 2 (15-jul) → charged;
+    # cuota 3 → pending.
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
     statuses = [i["status"] for i in plans[0]["installments"]]
-    assert statuses == ["charged", "pending", "pending"]  # MSI-05
+    assert statuses == ["paid", "charged", "pending"]
 
+    # Pagar el statement de junio (cuota 1=300) no afecta cuota 2 (en statement de julio).
     await client.post(
         f"/api/v1/cards/{card['id']}/payments",
         headers=ctx["headers"],
@@ -108,8 +114,8 @@ async def test_msi05_lifecycle_pending_charged_paid(client):
     )
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
     statuses = [i["status"] for i in plans[0]["installments"]]
-    assert statuses == ["paid", "pending", "pending"]
-    assert plans[0]["remaining_amount"] == "600.00"  # MSI-06
+    assert statuses == ["paid", "charged", "pending"]
+    assert plans[0]["remaining_amount"] == "600.00"  # MSI-06: charged + pending
 
 
 @freeze_time("2026-06-20 18:00:00")
@@ -120,10 +126,9 @@ async def test_msi06_projection_month_by_card(client):
     await make_plan(client, ctx, txn["id"], 3)
 
     rows = (await client.get("/api/v1/installment-plans/projection", headers=ctx["headers"])).json()
-    # Cuota 1 (period_end=15-jun) queda charged en statement → no aparece en proyección.
-    # Cuota 2 (period_end=15-jul) y cuota 3 (period_end=15-ago) se proyectan.
+    # Cuota 1 (15-jun) → paid; cuota 2 (15-jul) → charged; cuota 3 (15-ago) → pending.
+    # La proyección solo incluye cuotas pending.
     assert [(r["month"], r["amount"]) for r in rows] == [
-        ("2026-07", "200.00"),
         ("2026-08", "200.00"),
     ]
     assert all(r["card_alias"] == "BBVA Azul" for r in rows)
@@ -135,7 +140,7 @@ async def test_msi07_settle_early(client):
     card = await create_card(client, ctx)
     txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "1200.00")
     plan = await make_plan(client, ctx, txn["id"], 12)
-    await close_cycles(client, ctx)  # cuota 1 charged
+    await close_cycles(client, ctx)  # cuota 1 paid (ciclo pasado), cuota 2 charged (ciclo actual)
 
     res = await client.post(
         f"/api/v1/installment-plans/{plan['id']}/settle", headers=ctx["headers"]
@@ -145,10 +150,12 @@ async def test_msi07_settle_early(client):
 
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
     statuses = [i["status"] for i in plans[0]["installments"]]
-    assert statuses.count("canceled") == 11
+    # settle cancela las 10 cuotas pending (3-12); cuota 1 paid y cuota 2 charged, intactas.
+    assert statuses.count("canceled") == 10
     assert statuses.count("charged") == 1
+    assert statuses.count("paid") == 1
 
-    # El cargo único por las 11 cuotas (1100) vive en el ciclo abierto.
+    # Cargo único por las 10 cuotas (1000) + cuota 2 charged (100) = 1100 en ciclo abierto.
     detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["committed_msi"] == "0.00"
     assert detail["debt"]["current_cycle_spend"] == "1100.00"
@@ -172,6 +179,63 @@ async def test_msi08_delete_purchase_rules(client):
     await close_cycles(client, ctx)
     res = await client.delete(f"/api/v1/transactions/{txn2['id']}", headers=ctx["headers"])
     assert res.status_code == 409
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_msi01_old_transaction_past_installments_are_paid(client):
+    """MSI-01: una compra de ciclos pasados genera cuotas paid, plan completed."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+
+    # Transacción del 05/03/2026 (3 ciclos atrás, corte=15).
+    # charge_dates = [2026-03-15, 2026-04-15, 2026-05-15]
+    # current_cutoff = cutoff_on_or_after(2026-06-20, day=15) = 2026-07-15
+    # Todas las cuotas < current_cutoff → todas paid → plan completed.
+    txn = await charge(client, ctx, card["payment_method_id"], "2026-03-05", "900.00", "Refri")
+    await make_plan(client, ctx, txn["id"], 3)
+
+    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    summary = plans[0]
+
+    dates = [i["estimated_charge_date"] for i in summary["installments"]]
+    assert dates == ["2026-03-15", "2026-04-15", "2026-05-15"]
+
+    statuses = [i["status"] for i in summary["installments"]]
+    assert statuses == ["paid", "paid", "paid"]
+    assert summary["plan"]["status"] == "completed"
+    assert summary["paid_count"] == 3
+    assert summary["charged_count"] == 0
+    assert summary["pending_count"] == 0
+    assert summary["remaining_amount"] == "0.00"
+
+
+@freeze_time("2026-04-16 18:00:00")
+async def test_msi01_old_transaction_mixed_statuses(client):
+    """MSI-01: cuotas de ciclos pasados paid, cuota del ciclo actual charged, futuras pending."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+
+    # Transacción 05/03/2026, hoy 16/04/2026, corte=15.
+    # charge_dates = [2026-03-15, 2026-04-15, 2026-05-15, 2026-06-15]
+    # current_cutoff = cutoff_on_or_after(2026-04-16, day=15) = 2026-05-15
+    # cuota 1 (03-15) < 05-15 → paid
+    # cuota 2 (04-15) < 05-15 → paid
+    # cuota 3 (05-15) == 05-15 → charged (ciclo actual)
+    # cuota 4 (06-15) > 05-15 → pending
+    txn = await charge(client, ctx, card["payment_method_id"], "2026-03-05", "1200.00", "Tele")
+    await make_plan(client, ctx, txn["id"], 4)
+
+    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    summary = plans[0]
+
+    statuses = [i["status"] for i in summary["installments"]]
+    assert statuses == ["paid", "paid", "charged", "pending"]
+    assert summary["paid_count"] == 2
+    assert summary["charged_count"] == 1
+    assert summary["pending_count"] == 1
+    assert summary["plan"]["status"] == "active"
+    # remaining = charged + pending = 300 + 300 = 600
+    assert summary["remaining_amount"] == "600.00"
 
 
 @freeze_time("2026-06-15 18:00:00")
