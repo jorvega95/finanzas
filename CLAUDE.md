@@ -56,6 +56,27 @@ npm run build                    # tsc + vite build
 npm run generate:api             # regenerar tipos desde OpenAPI
 ```
 
+## CI — verificación obligatoria antes de cada commit
+
+El CI (`.github/workflows/ci.yml`) bloquea el merge si **cualquiera** de estos pasos falla. Córrelos **localmente y en este orden ANTES de commitear**; no consideres terminado el trabajo hasta que todos pasen. `ruff check` por sí solo NO basta: el CI también valida formato y tipos.
+
+```bash
+# Backend (desde backend/; aquí uv se invoca como `python -m uv`)
+python -m uv run ruff check .          # lint  (CI: falla con I001/F841/etc.)
+python -m uv run ruff format --check . # formato (CI usa --check; corre `ruff format .` para arreglar)
+python -m uv run mypy app              # tipos estrictos (p. ej. no-any-return de session.scalar)
+python -m uv run pytest                # toda la suite, no solo los tests tocados
+
+# Frontend (desde frontend/)
+npm run build                          # tsc -b + vite build (el CI solo hace build aquí)
+```
+
+Reglas para no romper CI:
+- Tras tocar backend, **siempre** `ruff format .` y `mypy app`, no solo `pytest`. Olvidarlos es la causa #1 de CI rojo.
+- El check de formato es del **repo completo**: si `ruff format --check .` marca archivos que no tocaste (drift previo), formatéalos también — el CI igual los exige.
+- `session.scalar(...)` está tipado como `Any`; anota la variable (`x: T | None = await session.scalar(...)`) para evitar `no-any-return`.
+- Si algo falla, arréglalo y vuelve a correr la lista **completa** antes de commitear; reporta el resultado real (verde/rojo), no asumas.
+
 ## Testing
 
 - `freezegun` para todo lo que dependa de "hoy" (ciclos, jobs). `hypothesis` para invariantes (MSI-02: `Σ cuotas == total` en miles de combinaciones).
