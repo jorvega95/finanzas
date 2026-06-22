@@ -62,11 +62,10 @@ async def get_card(session: AsyncSession, space_id: uuid.UUID, card_id: uuid.UUI
 async def get_card_layout(
     session: AsyncSession, user_id: uuid.UUID, space_id: uuid.UUID
 ) -> CardLayout | None:
-    return await session.scalar(
-        select(CardLayout).where(
-            CardLayout.user_id == user_id, CardLayout.space_id == space_id
-        )
+    layout: CardLayout | None = await session.scalar(
+        select(CardLayout).where(CardLayout.user_id == user_id, CardLayout.space_id == space_id)
     )
+    return layout
 
 
 def order_cards(cards: list[Card], layout_ids: list[str]) -> list[Card]:
@@ -87,11 +86,7 @@ async def set_card_layout(
     """TAR-07: upsert the user's ordered list for the space, dropping ids that
     don't belong to the space (defensive)."""
     valid = set(
-        (
-            await session.execute(select(Card.id).where(Card.space_id == space_id))
-        )
-        .scalars()
-        .all()
+        (await session.execute(select(Card.id).where(Card.space_id == space_id))).scalars().all()
     )
     ordered = [str(cid) for cid in card_ids if cid in valid]
     layout = await get_card_layout(session, user_id, space_id)

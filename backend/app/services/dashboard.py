@@ -330,9 +330,7 @@ async def upcoming_commitments(
             .outerjoin(CardStatement, Installment.statement_id == CardStatement.id)
             .where(
                 InstallmentPlan.space_id == space.id,
-                Installment.status.in_(
-                    [InstallmentStatus.pending, InstallmentStatus.charged]
-                ),
+                Installment.status.in_([InstallmentStatus.pending, InstallmentStatus.charged]),
                 Installment.estimated_charge_date <= horizon,
                 # Charged installments in closed statements already surface as
                 # card_due; only include those in open statements or no statement.

@@ -11,7 +11,6 @@ from freezegun import freeze_time
 from tests.conftest import bootstrap_space
 from tests.test_cards import charge, close_cycles, create_card
 
-
 # ---------------------------------------------------------------------------
 # Bug 1 — Gastos en meses pasados no deben crear recordatorios inmediatos
 # ---------------------------------------------------------------------------
@@ -45,13 +44,11 @@ async def test_rem01_opening_balance_schedules_future_reminders(client):
     para el statement sintético del corte anterior (TDC-14 + REM-01)."""
     ctx = await bootstrap_space(client)
     # Hoy 20-jun, corte=15 → cutoff anterior=15-jun → due 5-jul → fire_at 2-jul y 4-jul.
-    card = await create_card(client, ctx, opening_balance="1500.00", reminder_days=[3, 1])
+    await create_card(client, ctx, opening_balance="1500.00", reminder_days=[3, 1])
 
     inbox = (await client.get("/api/v1/cards/notifications/inbox", headers=ctx["headers"])).json()
     fire_dates = {r["fire_at"] for r in inbox}
-    assert fire_dates == {"2026-07-02", "2026-07-04"}, (
-        f"fire_at inesperados: {fire_dates}"
-    )
+    assert fire_dates == {"2026-07-02", "2026-07-04"}, f"fire_at inesperados: {fire_dates}"
     # Deben estar pending: fire_due_reminders no se ha ejecutado aún.
     assert all(r["status"] == "pending" for r in inbox), (
         f"Statuses inesperados: {[r['status'] for r in inbox]}"
@@ -65,12 +62,10 @@ async def test_rem01_opening_balance_no_reminders_when_due_date_passed(client):
     ctx = await bootstrap_space(client)
     # Corte anterior desde hoy-10-jul: cutoff_on_or_after(10-jul)=15-jul,
     # previous(15-jul)=15-jun → due=5-jul (pasado), fire_at 2-jul y 4-jul (pasados).
-    card = await create_card(client, ctx, opening_balance="1500.00", reminder_days=[3, 1])
+    await create_card(client, ctx, opening_balance="1500.00", reminder_days=[3, 1])
 
     inbox = (await client.get("/api/v1/cards/notifications/inbox", headers=ctx["headers"])).json()
-    assert inbox == [], (
-        f"Se crearon recordatorios con due_date ya vencida: {inbox}"
-    )
+    assert inbox == [], f"Se crearon recordatorios con due_date ya vencida: {inbox}"
 
 
 @freeze_time("2026-06-20 18:00:00")
@@ -195,9 +190,7 @@ async def test_rem05_dismiss_removes_from_inbox(client):
 
     # Descartar el primero.
     reminder_id = inbox[0]["id"]
-    res = await client.delete(
-        f"/api/v1/cards/notifications/{reminder_id}", headers=ctx["headers"]
-    )
+    res = await client.delete(f"/api/v1/cards/notifications/{reminder_id}", headers=ctx["headers"])
     assert res.status_code == 204
 
     # El inbox ya no lo muestra.
@@ -216,9 +209,7 @@ async def test_rem05_dismiss_cross_space_404(client):
     await charge(client, ctx_a, card["payment_method_id"], "2026-06-10", "100.00")
     await close_cycles(client, ctx_a)
 
-    inbox = (
-        await client.get("/api/v1/cards/notifications/inbox", headers=ctx_a["headers"])
-    ).json()
+    inbox = (await client.get("/api/v1/cards/notifications/inbox", headers=ctx_a["headers"])).json()
     reminder_id = inbox[0]["id"]
 
     # Usuario de espacio B intenta descartar recordatorio de A.
@@ -242,9 +233,7 @@ async def test_rem05_dismiss_does_not_cancel_statement(client):
     inbox = (await client.get("/api/v1/cards/notifications/inbox", headers=ctx["headers"])).json()
     # Descartar ambos.
     for n in inbox:
-        res = await client.delete(
-            f"/api/v1/cards/notifications/{n['id']}", headers=ctx["headers"]
-        )
+        res = await client.delete(f"/api/v1/cards/notifications/{n['id']}", headers=ctx["headers"])
         assert res.status_code == 204
 
     # El statement sigue cerrado y pendiente de pago.

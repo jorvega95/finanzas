@@ -353,9 +353,7 @@ async def create_card_for(client, headers, alias):
 
 
 async def put_layout(client, headers, card_ids, expected=204):
-    res = await client.put(
-        "/api/v1/cards/layout", headers=headers, json={"card_ids": card_ids}
-    )
+    res = await client.put("/api/v1/cards/layout", headers=headers, json={"card_ids": card_ids})
     assert res.status_code == expected, res.text
 
 
@@ -688,7 +686,5 @@ async def test_tdc06_late_charge_recomputes_closed_statement(client):
     )
 
     # La deuda de la tarjeta también debe reflejar el nuevo total.
-    card_data = (
-        await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])
-    ).json()
+    card_data = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
     assert card_data["debt"]["statement_balance"] == "500.00"

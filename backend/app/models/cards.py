@@ -114,9 +114,7 @@ class CardLayout(Base):
     may set their own layout."""
 
     __tablename__ = "card_layouts"
-    __table_args__ = (
-        UniqueConstraint("user_id", "space_id", name="uq_card_layout_user_space"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "space_id", name="uq_card_layout_user_space"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
