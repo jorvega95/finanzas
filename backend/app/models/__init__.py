@@ -2,7 +2,7 @@
 
 from app.db.base import Base
 from app.models.budgets import Budget
-from app.models.cards import Card, CardStatement, CutoffDayPolicy, StatementStatus
+from app.models.cards import Card, CardLayout, CardStatement, CutoffDayPolicy, StatementStatus
 from app.models.catalogs import (
     CardBehavior,
     CardType,
@@ -37,6 +37,7 @@ __all__ = [
     "Budget",
     "Card",
     "CardBehavior",
+    "CardLayout",
     "CardStatement",
     "CardType",
     "Holding",

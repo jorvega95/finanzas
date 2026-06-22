@@ -14,6 +14,7 @@ from app.models.reminders import Reminder, ReminderChannel, ReminderStatus
 from app.models.spaces import Space
 from app.schemas.cards import (
     CardCreate,
+    CardLayoutUpdate,
     CardOut,
     CardUpdate,
     CardWithDebtOut,
@@ -58,14 +59,34 @@ async def _card_with_debt(db: DbSession, space: Space, card: Card) -> CardWithDe
 
 @router.get("", response_model=list[CardWithDebtOut])
 async def list_cards(
-    db: DbSession, space_and_member: ActiveSpace, include_inactive: bool = False
+    db: DbSession,
+    space_and_member: ActiveSpace,
+    user: CurrentUser,
+    include_inactive: bool = False,
 ) -> list[CardWithDebtOut]:
     space, _ = space_and_member
     stmt = select(Card).where(Card.space_id == space.id)
     if not include_inactive:
         stmt = stmt.where(Card.is_active.is_(True))
-    cards = (await db.execute(stmt.order_by(Card.alias))).scalars().all()
+    cards = list((await db.execute(stmt.order_by(Card.alias))).scalars().all())
+    # TAR-07: apply the user's personal ordering on top of the alias baseline.
+    layout = await svc.get_card_layout(db, user.id, space.id)
+    cards = svc.order_cards(cards, layout.card_ids if layout else [])
     return [await _card_with_debt(db, space, card) for card in cards]
+
+
+@router.put("/layout", status_code=status.HTTP_204_NO_CONTENT)
+async def set_card_layout(
+    db: DbSession,
+    space_and_member: ActiveSpace,
+    user: CurrentUser,
+    payload: CardLayoutUpdate,
+) -> None:
+    """TAR-07: save the current user's card order for the active space. Personal
+    UI preference (not shared domain data), so any member may set it — ActiveSpace,
+    not EditorSpace. Non-members get 404 upstream (GLO-05)."""
+    space, _ = space_and_member
+    await svc.set_card_layout(db, user.id, space.id, payload.card_ids)
 
 
 @router.post("", response_model=CardOut, status_code=status.HTTP_201_CREATED)

@@ -280,6 +280,187 @@ async def test_glo05_cards_cross_space_404(client):
     assert res.status_code == 404
 
 
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc12_reactivate_card_restores_method(client):
+    """TDC-12 + CAT-07: reactivar (is_active=true) restaura la tarjeta y su
+    método vinculado, que vuelve a aceptar cargos."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    method_id = card["payment_method_id"]
+
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"is_active": False}
+    )
+    assert res.status_code == 200
+    assert res.json()["is_active"] is False
+
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"is_active": True}
+    )
+    assert res.status_code == 200
+    assert res.json()["is_active"] is True
+
+    # CAT-07: el método vinculado vuelve a estar activo y acepta cargos.
+    res = await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "expense",
+            "date": "2026-06-19",
+            "amount": "50.00",
+            "currency": "MXN",
+            "category_id": ctx["categories"]["Comida"]["id"],
+            "payment_method_id": method_id,
+        },
+    )
+    assert res.status_code == 201, res.text
+
+
+async def test_list_cards_include_inactive(client):
+    """TDC-12: las tarjetas desactivadas se ocultan por defecto y solo aparecen
+    con include_inactive=true (para poder reactivarlas desde la UI)."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"is_active": False}
+    )
+    assert res.status_code == 200
+
+    res = await client.get("/api/v1/cards", headers=ctx["headers"])
+    assert res.status_code == 200
+    assert all(c["id"] != card["id"] for c in res.json())
+
+    res = await client.get("/api/v1/cards?include_inactive=true", headers=ctx["headers"])
+    assert res.status_code == 200
+    assert any(c["id"] == card["id"] for c in res.json())
+
+
+# --- TAR-07: orden de tarjetas por usuario ------------------------------------
+
+
+async def create_card_for(client, headers, alias):
+    """Create a credit card in whatever space `headers` points to."""
+    types = (await client.get("/api/v1/catalogs/card-types", headers=headers)).json()
+    credit = next(t for t in types if t["behavior"] == "credit")
+    res = await client.post(
+        "/api/v1/cards",
+        headers=headers,
+        json={**CARD_PAYLOAD, "alias": alias, "card_type_id": credit["id"]},
+    )
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+async def put_layout(client, headers, card_ids, expected=204):
+    res = await client.put(
+        "/api/v1/cards/layout", headers=headers, json={"card_ids": card_ids}
+    )
+    assert res.status_code == expected, res.text
+
+
+async def card_order(client, headers):
+    res = await client.get("/api/v1/cards", headers=headers)
+    assert res.status_code == 200
+    return [c["id"] for c in res.json()]
+
+
+async def add_member(client, owner_headers, space_id, role, email):
+    """Invite + claim a new user into the space with the given role."""
+    friend = auth_headers(uuid.uuid4(), email)
+    await client.get("/api/v1/me", headers=friend)
+    inv = await client.post(
+        f"/api/v1/spaces/{space_id}/invites",
+        headers=owner_headers,
+        json={"email": email, "role": role},
+    )
+    assert inv.status_code == 201, inv.text
+    claim = await client.post(
+        "/api/v1/invites/claim", headers=friend, json={"token": inv.json()["token"]}
+    )
+    assert claim.status_code == 200, claim.text
+    return {**friend, "X-Space-Id": space_id}
+
+
+async def test_tar07_layout_reorders_list(client):
+    ctx = await bootstrap_space(client)
+    a = await create_card_for(client, ctx["headers"], "Alfa")
+    b = await create_card_for(client, ctx["headers"], "Beta")
+    c = await create_card_for(client, ctx["headers"], "Gama")
+
+    # Línea base alfabética.
+    assert await card_order(client, ctx["headers"]) == [a["id"], b["id"], c["id"]]
+
+    await put_layout(client, ctx["headers"], [c["id"], a["id"], b["id"]])
+    assert await card_order(client, ctx["headers"]) == [c["id"], a["id"], b["id"]]
+
+
+async def test_tar07_new_card_appended_at_end(client):
+    ctx = await bootstrap_space(client)
+    a = await create_card_for(client, ctx["headers"], "Alfa")
+    b = await create_card_for(client, ctx["headers"], "Beta")
+    await put_layout(client, ctx["headers"], [b["id"], a["id"]])
+
+    # Una tarjeta nueva no está en el layout ⇒ va al final (orden por alias).
+    c = await create_card_for(client, ctx["headers"], "Gama")
+    assert await card_order(client, ctx["headers"]) == [b["id"], a["id"], c["id"]]
+
+
+async def test_tar07_unknown_ids_ignored(client):
+    ctx = await bootstrap_space(client)
+    a = await create_card_for(client, ctx["headers"], "Alfa")
+    b = await create_card_for(client, ctx["headers"], "Beta")
+
+    # Un id ajeno al espacio se ignora sin romper.
+    await put_layout(client, ctx["headers"], [b["id"], str(uuid.uuid4()), a["id"]])
+    assert await card_order(client, ctx["headers"]) == [b["id"], a["id"]]
+
+
+async def test_tar07_layout_is_per_user(client):
+    owner = await bootstrap_space(client)
+    shared = await client.post("/api/v1/spaces", headers=owner["headers"], json={"name": "Familia"})
+    space_id = shared.json()["id"]
+    owner_sh = {**owner["headers"], "X-Space-Id": space_id}
+
+    a = await create_card_for(client, owner_sh, "Alfa")
+    b = await create_card_for(client, owner_sh, "Beta")
+    c = await create_card_for(client, owner_sh, "Gama")
+
+    friend = await add_member(client, owner["headers"], space_id, "editor", "amigo@example.com")
+
+    await put_layout(client, owner_sh, [c["id"], b["id"], a["id"]])
+    await put_layout(client, friend, [b["id"], a["id"], c["id"]])
+
+    # Cada usuario ve su propio orden; el del owner no afecta al del amigo.
+    assert await card_order(client, owner_sh) == [c["id"], b["id"], a["id"]]
+    assert await card_order(client, friend) == [b["id"], a["id"], c["id"]]
+
+
+async def test_tar07_viewer_can_reorder_and_nonmember_404(client):
+    owner = await bootstrap_space(client)
+    shared = await client.post("/api/v1/spaces", headers=owner["headers"], json={"name": "Casa"})
+    space_id = shared.json()["id"]
+    owner_sh = {**owner["headers"], "X-Space-Id": space_id}
+
+    a = await create_card_for(client, owner_sh, "Uno")
+    b = await create_card_for(client, owner_sh, "Dos")
+
+    # Un viewer SÍ puede reordenar su propia vista (no es mutación de dominio).
+    viewer = await add_member(client, owner["headers"], space_id, "viewer", "viewer@example.com")
+    await put_layout(client, viewer, [b["id"], a["id"]])
+    assert await card_order(client, viewer) == [b["id"], a["id"]]
+
+    # Un no-miembro recibe 404 (GLO-05), nunca 403.
+    intruder = auth_headers(uuid.uuid4(), "evil@example.com")
+    await client.get("/api/v1/me", headers=intruder)
+    res = await client.put(
+        "/api/v1/cards/layout",
+        headers={**intruder, "X-Space-Id": space_id},
+        json={"card_ids": []},
+    )
+    assert res.status_code == 404
+
+
 # --- TDC-14: opening debt --------------------------------------------------------
 
 
@@ -474,3 +655,40 @@ async def test_tdc15_edit_revalidates(client):
         f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"last4": "12a4"}
     )
     assert res.status_code == 422
+
+
+# --- TDC-06: cargo tardío sobre corte ya cerrado ----------------------------------
+
+
+@freeze_time("2026-06-22 18:00:00")
+async def test_tdc06_late_charge_recomputes_closed_statement(client):
+    """TDC-06: agregar un gasto con fecha anterior al último corte (corte=15,
+    hoy=22) actualiza el computed_total del statement ya cerrado inmediatamente.
+    Antes del fix, el total quedaba stale y la deuda se mostraba incorrecta."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    method_id = card["payment_method_id"]
+
+    # Cargo del 10-jun → ciclo [16-may, 15-jun] → se cerrará al close_cycles.
+    await charge(client, ctx, method_id, "2026-06-10", "300.00")
+    closed = await close_cycles(client, ctx)
+    assert len(closed) == 1
+    assert closed[0]["computed_total"] == "300.00"
+
+    # Ahora es 22-jun; se agrega un cargo olvidado del 8-jun (mismo ciclo cerrado).
+    await charge(client, ctx, method_id, "2026-06-08", "200.00")
+
+    # El statement cerrado debe reflejar 500 sin requerir otro close_cycles.
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    closed_st = next(s for s in statements if s["id"] == closed[0]["id"])
+    assert closed_st["computed_total"] == "500.00", (
+        f"computed_total no se actualizó tras cargo tardío: {closed_st['computed_total']}"
+    )
+
+    # La deuda de la tarjeta también debe reflejar el nuevo total.
+    card_data = (
+        await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])
+    ).json()
+    assert card_data["debt"]["statement_balance"] == "500.00"

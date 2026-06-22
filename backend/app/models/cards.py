@@ -106,6 +106,29 @@ class Card(Base, AuditMixin):
     statements: Mapped[list["CardStatement"]] = relationship(back_populates="card")
 
 
+class CardLayout(Base):
+    """TAR-07: per-user ordering of cards within a space, stored as an ordered
+    list of card ids (one row per user+space). Cards absent from the list fall
+    back to alias order at the end; ids no longer present are ignored. This is a
+    personal UI preference, not shared domain data, so any member (incl. viewer)
+    may set their own layout."""
+
+    __tablename__ = "card_layouts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "space_id", name="uq_card_layout_user_space"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    space_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Ordered card ids as strings (JSON-portable; UUIDs don't serialize natively).
+    card_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+
 class CardStatement(Base):
     __tablename__ = "card_statements"
     __table_args__ = (

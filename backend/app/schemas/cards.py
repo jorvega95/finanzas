@@ -57,6 +57,13 @@ class CardUpdate(BaseModel):
     is_active: bool | None = None  # TDC-12
 
 
+class CardLayoutUpdate(BaseModel):
+    """TAR-07: full ordered list of card ids for the current user in the space.
+    Ids not belonging to the space are ignored; missing cards keep alias order."""
+
+    card_ids: list[uuid.UUID]
+
+
 class DebtSummary(BaseModel):
     """TDC-09: three numbers, never mixed."""
 

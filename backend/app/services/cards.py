@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dates import today_in_tz
 from app.core.text import normalize_name
-from app.models.cards import Card, CardStatement, StatementStatus
+from app.models.cards import Card, CardLayout, CardStatement, StatementStatus
 from app.models.catalogs import (
     CardBehavior,
     CardType,
@@ -54,6 +54,52 @@ async def get_card(session: AsyncSession, space_id: uuid.UUID, card_id: uuid.UUI
     if card is None or card.space_id != space_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tarjeta no encontrada")
     return card
+
+
+# --- TAR-07: per-user card ordering --------------------------------------------
+
+
+async def get_card_layout(
+    session: AsyncSession, user_id: uuid.UUID, space_id: uuid.UUID
+) -> CardLayout | None:
+    return await session.scalar(
+        select(CardLayout).where(
+            CardLayout.user_id == user_id, CardLayout.space_id == space_id
+        )
+    )
+
+
+def order_cards(cards: list[Card], layout_ids: list[str]) -> list[Card]:
+    """TAR-07: order `cards` by the user's saved layout; cards not in the layout
+    keep alias order at the end. Pure list ordering (not a SQL aggregate), so it
+    doesn't fall under DSH-03."""
+    position = {cid: i for i, cid in enumerate(layout_ids)}
+    end = len(layout_ids)
+    return sorted(cards, key=lambda c: (position.get(str(c.id), end), c.alias))
+
+
+async def set_card_layout(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    space_id: uuid.UUID,
+    card_ids: list[uuid.UUID],
+) -> None:
+    """TAR-07: upsert the user's ordered list for the space, dropping ids that
+    don't belong to the space (defensive)."""
+    valid = set(
+        (
+            await session.execute(select(Card.id).where(Card.space_id == space_id))
+        )
+        .scalars()
+        .all()
+    )
+    ordered = [str(cid) for cid in card_ids if cid in valid]
+    layout = await get_card_layout(session, user_id, space_id)
+    if layout is None:
+        session.add(CardLayout(user_id=user_id, space_id=space_id, card_ids=ordered))
+    else:
+        layout.card_ids = ordered
+    await session.commit()
 
 
 async def _ensure_fees_category(
