@@ -1,7 +1,24 @@
 // Tarjetas (TAR-01..05): crédito con ciclos/deuda (TDC) y débito/prepaid con
 // saldo (TAR-05). Alta con selector de tipo (CAT-08) y campos condicionales.
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  saveCardLayoutRequest,
   useCards,
   useCardStatements,
   useCloseCycles,
@@ -9,6 +26,7 @@ import {
   useDismissNotification,
   useNotifications,
   usePayCard,
+  useSaveCardLayout,
   useUpdateCard,
   type CardBody,
   type CardOut,
@@ -18,6 +36,8 @@ import {
 import { useCardTypes, usePaymentMethods } from "../../api/catalogs";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
+import Modal from "../../components/ui/Modal";
+import Spinner from "../../components/ui/Spinner";
 
 const STATUS_LABELS: Record<StatementOut["status"], string> = {
   open: "Abierto",
@@ -277,6 +297,20 @@ function PayForm({ card, statements }: { card: CardOut; statements: StatementOut
 function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
   const update = useUpdateCard();
   const isCredit = card.behavior === "credit";
+  // TDC-12: baja/reactivación lógica de la tarjeta (y su método vinculado, CAT-07).
+  const [confirmingToggle, setConfirmingToggle] = useState(false);
+
+  function toggleActive() {
+    update.mutate(
+      { cardId: card.id, is_active: !card.is_active },
+      {
+        onSuccess: () => {
+          setConfirmingToggle(false);
+          onDone();
+        },
+      },
+    );
+  }
   const [alias, setAlias] = useState(card.alias);
   const [bank, setBank] = useState(card.bank);
   const [network, setNetwork] = useState(card.network);
@@ -325,6 +359,7 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
   }
 
   return (
+    <>
     <form
       onSubmit={handleSubmit}
       className="mt-4 grid grid-cols-2 gap-3 border-t border-line pt-4 dark:border-slate-800 md:grid-cols-4"
@@ -479,7 +514,80 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
           {update.error.message}
         </p>
       )}
+
+      {/* TDC-12: baja/reactivación lógica desde el propio formulario de edición. */}
+      <div className="col-span-2 mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4 dark:border-slate-800 md:col-span-4">
+        <p className="text-xs text-ink-muted dark:text-slate-400">
+          {card.is_active
+            ? "Desactivar impide nuevos cargos; podrás reactivarla luego."
+            : "Esta tarjeta está desactivada."}
+        </p>
+        <button
+          type="button"
+          className={
+            card.is_active
+              ? "text-sm font-medium text-red-600 hover:underline dark:text-red-400"
+              : "text-sm font-medium text-accent hover:underline"
+          }
+          onClick={() => setConfirmingToggle(true)}
+        >
+          {card.is_active ? "Desactivar tarjeta" : "Reactivar tarjeta"}
+        </button>
+      </div>
     </form>
+
+    <Modal
+      open={confirmingToggle}
+      onClose={() => setConfirmingToggle(false)}
+      title={card.is_active ? "Desactivar tarjeta" : "Reactivar tarjeta"}
+    >
+      <div className="space-y-4">
+        <p className="text-sm">
+          {card.is_active ? (
+            <>
+              Vas a desactivar <strong>{card.alias}</strong>. No podrás registrar nuevos{" "}
+              {isCredit ? "cargos" : "movimientos"} con esta tarjeta ni con su método de pago
+              vinculado.{" "}
+              {isCredit
+                ? "Sus ciclos seguirán cerrando hasta liquidar la deuda pendiente."
+                : "Su saldo actual se conserva."}{" "}
+              Podrás reactivarla cuando quieras.
+            </>
+          ) : (
+            <>
+              Vas a reactivar <strong>{card.alias}</strong>. Volverás a poder registrar{" "}
+              {isCredit ? "cargos" : "movimientos"} con esta tarjeta y con su método de pago
+              vinculado.
+            </>
+          )}
+        </p>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setConfirmingToggle(false)}
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className={
+              card.is_active
+                ? "inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                : "btn-primary"
+            }
+            disabled={update.isPending}
+            onClick={toggleActive}
+          >
+            {card.is_active ? "Desactivar" : "Reactivar"}
+          </button>
+        </div>
+        {update.error && (
+          <p className="text-sm text-red-600 dark:text-red-400">{update.error.message}</p>
+        )}
+      </div>
+    </Modal>
+    </>
   );
 }
 
@@ -523,24 +631,140 @@ function CardDetail({ card }: { card: CardOut }) {
   );
 }
 
+// TAR-07: a draggable row used only inside the reorder mode.
+function SortableCardRow({ card }: { card: CardOut }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: card.id,
+  });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={`card flex items-center gap-3 p-4 ${
+        isDragging ? "opacity-70 ring-2 ring-accent" : ""
+      }`}
+    >
+      <button
+        type="button"
+        className="cursor-grab touch-none text-lg leading-none text-ink-muted hover:text-ink dark:text-slate-400"
+        aria-label="Arrastrar para reordenar"
+        {...attributes}
+        {...listeners}
+      >
+        ⠿
+      </button>
+      <div className="min-w-0">
+        <p className="truncate font-medium">
+          {card.alias}
+          {!card.is_active && (
+            <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+              Inactiva
+            </span>
+          )}
+        </p>
+        <p className="truncate text-xs text-ink-muted dark:text-slate-400">
+          {card.bank} · {card.network} ····{card.last4}
+        </p>
+      </div>
+    </li>
+  );
+}
+
 export default function CardsPage() {
-  const cards = useCards();
-  const notifications = useNotifications();
+  // TDC-07: al entrar, cierra ciclos vencidos en segundo plano para que
+  // "Saldo al corte" y "Próximo pago" reflejen el estado actual sin depender del
+  // job horario. No bloquea la carga de tarjetas (ver efecto abajo).
   const closeCycles = useCloseCycles();
+  const autoClosed = useRef(false);
+  useEffect(() => {
+    if (autoClosed.current) return;
+    autoClosed.current = true;
+    // TDC-07: cierra ciclos vencidos al entrar. Fire-and-forget: useCloseCycles
+    // invalida ["cards"] al terminar, así "Saldo al corte"/"Próximo pago" se
+    // refrescan en cuanto cierra. NO bloqueamos la query de tarjetas en este
+    // callback: gatearla en el resultado de una mutación puede dejarla
+    // deshabilitada para siempre (spinner infinito) si el callback queda
+    // huérfano (StrictMode/desmontaje). Las tarjetas cargan de inmediato.
+    closeCycles.mutate();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [showInactive, setShowInactive] = useState(false);
+  const cards = useCards(true, showInactive);
+  const notifications = useNotifications();
   const dismiss = useDismissNotification();
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
 
-  // Al entrar al módulo, cierra ciclos vencidos (TDC-07) para que "Saldo al
-  // corte" y "Próximo pago" estén al día sin depender del job horario. Es
-  // idempotente; se ignora el 403 de un viewer (no puede mutar, ESP-03).
-  const autoClosed = useRef(false);
+  const cardList = cards.data ?? [];
+
+  // TAR-07: reorder mode. Gated by a button; drag is active only inside it.
+  const qc = useQueryClient();
+  const saveLayout = useSaveCardLayout();
+  const [reordering, setReordering] = useState(false);
+  const [draftOrder, setDraftOrder] = useState<CardOut[]>([]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  function startReorder() {
+    setExpanded(null);
+    setEditing(null);
+    setDraftOrder(cardList);
+    setReordering(true);
+  }
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (over && active.id !== over.id) {
+      setDraftOrder((items) => {
+        const from = items.findIndex((c) => c.id === active.id);
+        const to = items.findIndex((c) => c.id === over.id);
+        return arrayMove(items, from, to);
+      });
+    }
+  }
+
+  function saveReorder() {
+    const ordered = draftOrder;
+    setReordering(false);
+    // Reflect the new order in the cache right away so the list updates on
+    // return; the mutation's invalidation refetches in the background to confirm
+    // (Supabase can be slow from local dev, so we don't wait on it visually).
+    qc.setQueryData<CardOut[]>(["cards", { includeInactive: showInactive }], ordered);
+    saveLayout.mutate(ordered.map((c) => c.id));
+  }
+
+  function cancelReorder() {
+    setReordering(false);
+    setDraftOrder([]);
+  }
+
+  // Auto-save on leaving the module with unsaved order (TAR-07). A ref holds the
+  // latest state so the unmount cleanup can fire a raw request even though the
+  // component (and its mutation hook) is gone.
+  const autoSaveRef = useRef<{ active: boolean; ids: string[]; baseline: string[] }>({
+    active: false,
+    ids: [],
+    baseline: [],
+  });
+  autoSaveRef.current = {
+    active: reordering,
+    ids: draftOrder.map((c) => c.id),
+    baseline: cardList.map((c) => c.id),
+  };
   useEffect(() => {
-    if (autoClosed.current) return;
-    autoClosed.current = true;
-    closeCycles.mutate(undefined, { onError: () => {} });
-  }, [closeCycles]);
+    return () => {
+      const { active, ids, baseline } = autoSaveRef.current;
+      if (active && ids.length > 0 && JSON.stringify(ids) !== JSON.stringify(baseline)) {
+        void saveCardLayoutRequest(ids)
+          .then(() => qc.invalidateQueries({ queryKey: ["cards"] }))
+          .catch(() => {});
+      }
+    };
+  }, [qc]);
 
   const pendingNotifs = (notifications.data ?? []).filter((n) => n.status === "sent");
 
@@ -548,13 +772,31 @@ export default function CardsPage() {
     <div className="mx-auto max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Tarjetas</h1>
-        <div className="flex gap-2">
-          <button className="btn-secondary" onClick={() => closeCycles.mutate()}>
-            Cerrar ciclos vencidos
-          </button>
-          <button className="btn-primary" onClick={() => setShowForm(true)}>
-            + Nueva tarjeta
-          </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 text-sm text-ink-muted dark:text-slate-400">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              disabled={reordering}
+              onChange={(e) => setShowInactive(e.target.checked)}
+            />
+            Mostrar inactivas
+          </label>
+          {!reordering && cardList.length > 1 && (
+            <button className="btn-secondary" onClick={startReorder}>
+              Ordenar
+            </button>
+          )}
+          {!reordering && (
+            <>
+              <button className="btn-secondary" onClick={() => closeCycles.mutate()}>
+                Cerrar ciclos vencidos
+              </button>
+              <button className="btn-primary" onClick={() => setShowForm(true)}>
+                + Nueva tarjeta
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -581,7 +823,56 @@ export default function CardsPage() {
 
       {showForm && <NewCardForm onDone={() => setShowForm(false)} />}
 
-      {(cards.data ?? []).length === 0 && !showForm ? (
+      {reordering ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-ink-muted dark:text-slate-400">
+              Arrastra ⠿ para reordenar. Este orden es solo tuyo; si sales sin guardar, también se
+              conserva.
+            </p>
+            <div className="flex gap-2">
+              <button className="btn-secondary" onClick={cancelReorder}>
+                Cancelar
+              </button>
+              <button
+                className="btn-primary"
+                disabled={saveLayout.isPending}
+                onClick={saveReorder}
+              >
+                Guardar orden
+              </button>
+            </div>
+          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={draftOrder.map((c) => c.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <ul className="space-y-2">
+                {draftOrder.map((card) => (
+                  <SortableCardRow key={card.id} card={card} />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
+        </div>
+      ) : cards.isPending ? (
+        <div className="card flex h-48 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-ink-muted dark:text-slate-400">
+          <Spinner className="size-7" />
+          Cargando tus tarjetas…
+        </div>
+      ) : cards.isError ? (
+        <div className="card flex h-48 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-ink-muted dark:text-slate-400">
+          No se pudieron cargar tus tarjetas.
+          <button className="btn-secondary" onClick={() => cards.refetch()}>
+            Reintentar
+          </button>
+        </div>
+      ) : (cards.data ?? []).length === 0 && !showForm ? (
         <div className="card grid h-48 place-items-center p-8 text-center text-sm text-ink-muted dark:text-slate-400">
           Sin tarjetas aún. Da de alta la primera: crédito, débito, vales o tarjeta de regalo.
         </div>
@@ -589,7 +880,7 @@ export default function CardsPage() {
         (cards.data ?? []).map((card) => {
           const isCredit = card.behavior === "credit";
           return (
-            <section key={card.id} className="card p-5">
+            <section key={card.id} className={`card p-5 ${card.is_active ? "" : "opacity-60"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="font-semibold">
@@ -597,6 +888,11 @@ export default function CardsPage() {
                     <span className="text-sm font-normal text-ink-muted dark:text-slate-400">
                       {card.bank} · {card.network} ····{card.last4}
                     </span>
+                    {!card.is_active && (
+                      <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                        Inactiva
+                      </span>
+                    )}
                   </h3>
                   <p className="text-xs text-ink-muted dark:text-slate-400">
                     {isCredit

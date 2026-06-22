@@ -101,10 +101,14 @@ export interface CardUpdateBody {
   is_active?: boolean;
 }
 
-export function useCards() {
+export function useCards(enabled = true, includeInactive = false) {
   return useQuery({
-    queryKey: ["cards"],
-    queryFn: () => api<CardOut[]>("/api/v1/cards"),
+    // includeInactive is part of the key so toggling refetches; the broad
+    // ["cards"] invalidation in useInvalidateCards still matches by prefix.
+    queryKey: ["cards", { includeInactive }],
+    queryFn: () =>
+      api<CardOut[]>(`/api/v1/cards${includeInactive ? "?include_inactive=true" : ""}`),
+    enabled,
   });
 }
 
@@ -170,6 +174,25 @@ export function usePayCard() {
         body: JSON.stringify(body),
       }),
     onSuccess: invalidate,
+  });
+}
+
+// TAR-07: persist the current user's card order. Raw request so it can be
+// fired during unmount (auto-save on leaving the module) without depending on
+// a mutation hook's lifecycle.
+export function saveCardLayoutRequest(cardIds: string[]) {
+  return api("/api/v1/cards/layout", {
+    method: "PUT",
+    body: JSON.stringify({ card_ids: cardIds }),
+  });
+}
+
+export function useSaveCardLayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (cardIds: string[]) => saveCardLayoutRequest(cardIds),
+    // Only the order changed: invalidate just cards, not the broad debt/MSI set.
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["cards"] }),
   });
 }
 
