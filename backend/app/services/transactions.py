@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dates import today_in_tz
-from app.models.cards import Card
+from app.models.cards import Card, StatementStatus
 from app.models.catalogs import (
     CardBehavior,
     Category,
@@ -256,7 +256,12 @@ async def create_transaction(
     )
     session.add(txn)
     await session.flush()
-    from app.services.cards import apply_card_payment, assign_charge_to_statement, cycle_ready
+    from app.services.cards import (
+        apply_card_payment,
+        assign_charge_to_statement,
+        cycle_ready,
+        recompute_statement_total,
+    )
 
     if (
         resolved.card is not None
@@ -265,7 +270,13 @@ async def create_transaction(
         and data.type != TransactionType.transfer
     ):
         # TXN-06/TDC-05: only credit charges belong to a billing cycle (TAR-04).
-        await assign_charge_to_statement(session, resolved.card, txn, cycle_hint=data.cycle_hint)
+        stmt = await assign_charge_to_statement(
+            session, resolved.card, txn, cycle_hint=data.cycle_hint
+        )
+        # TDC-06: if the statement is already closed (late charge on a past cycle),
+        # recompute its total so debt numbers stay accurate.
+        if stmt.status != StatementStatus.open:
+            await recompute_statement_total(session, stmt.id)
     elif data.type == TransactionType.transfer and data.payment_method_to_id is not None:
         # TXN-09: transfer to a credit card method → apply as TDC payment.
         dest_method = await session.get(PaymentMethod, data.payment_method_to_id)
