@@ -29,5 +29,8 @@ frontend/src/api/schema.d.ts
 .DS_Store
 Thumbs.db
 
+# --- Scripts locales de arranque (varían por entorno de cada dev) ---
+iniciar.bat
+
 # --- Claude ---
 .claude/settings.local.json
