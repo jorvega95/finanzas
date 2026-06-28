@@ -1,17 +1,22 @@
 """Router: dashboard aggregates. Implements DSH-01..DSH-05."""
 
-from fastapi import APIRouter
+from decimal import Decimal
+from typing import Annotated
+
+from fastapi import APIRouter, Query
 
 from app.core.dates import today_in_tz
 from app.core.deps import ActiveSpace, DbSession
 from app.schemas.dashboard import (
     CategoryBreakdownRow,
     DashboardSummary,
+    ForecastSummary,
     Totals,
     TrendPoint,
     UpcomingItem,
 )
 from app.services import dashboard as svc
+from app.services import forecast as forecast_svc
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -20,13 +25,12 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 async def summary(
     db: DbSession, space_and_member: ActiveSpace, month: str | None = None
 ) -> DashboardSummary:
-    """DSH-02/03/04/05 en un solo payload; agregados 100% en SQL."""
+    """DSH-02/03/05 en un solo payload; agregados 100% en SQL."""
     space, _ = space_and_member
     month = month or today_in_tz(space.timezone).strftime("%Y-%m")
     start, end = svc.month_bounds(month)
 
-    accrual = await svc.monthly_totals(db, space, start, end)
-    cash_flow = await svc.cash_flow_totals(db, space, start, end)
+    totals = await svc.monthly_totals(db, space, start, end)
     by_category = await svc.expenses_by_category(db, space, start, end)
     by_nature = await svc.expenses_by_nature(db, space, start, end)
     trend = await svc.trend(db, space, month)
@@ -34,10 +38,24 @@ async def summary(
 
     return DashboardSummary(
         month=month,
-        accrual=Totals(**accrual),
-        cash_flow=Totals(**cash_flow),
+        totals=Totals(**totals),
         by_category=[CategoryBreakdownRow(**row) for row in by_category],
         by_nature=by_nature,
         trend=[TrendPoint(**point) for point in trend],
         upcoming=[UpcomingItem(**item) for item in upcoming],
     )
+
+
+@router.get("/forecast", response_model=ForecastSummary)
+async def forecast(
+    db: DbSession,
+    space_and_member: ActiveSpace,
+    horizon_months: Annotated[int, Query(ge=1, le=24)] = 6,
+    cash_adjustment: Annotated[Decimal, Query()] = Decimal("0"),
+) -> ForecastSummary:
+    """PRO-01..06: pronóstico de flujo a futuro y detección de sobregiro."""
+    space, _ = space_and_member
+    result = await forecast_svc.forecast(
+        db, space, horizon_months=horizon_months, cash_adjustment=cash_adjustment
+    )
+    return ForecastSummary(**result)

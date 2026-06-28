@@ -29,8 +29,7 @@ export interface UpcomingItem {
 
 export interface DashboardSummary {
   month: string;
-  accrual: Totals;
-  cash_flow: Totals;
+  totals: Totals;
   by_category: CategoryRow[];
   by_nature: Record<string, string>;
   trend: TrendPoint[];

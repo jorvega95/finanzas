@@ -50,7 +50,7 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 - **TXN-03 · Fechas:** `date` PUEDE ser pasada o presente; futura solo hasta +1 año (para programados manuales). Las transacciones con fecha futura se excluyen de agregados del mes actual hasta que llegue su fecha.
 - **TXN-04 · Moneda:** `currency` ∈ ISO-4217 soportadas (v1: MXN, USD; crypto se maneja en inversiones, no en transacciones). Al crear/editar, se persiste `fx_rate_to_base` según FX-03 — el agregado nunca re-consulta tasas históricas.
 - **TXN-05 · Edición/borrado:** editable por cualquier editor/owner del espacio. Si la transacción tiene plan MSI asociado, ver MSI-08. Si proviene de regla recurrente o import, editarla la desvincula de regeneraciones futuras (mantiene `recurring_rule_id`/`import_batch_id` para trazabilidad).
-- **TXN-06 · TDC:** una transacción con método de pago de tipo `credit_card` se asigna a un ciclo de facturación según TDC-05 y NO cuenta como flujo de salida hasta que se paga el statement (el gasto sí cuenta en reportes por categoría en su fecha; el flujo de caja lo refleja el pago — ver DSH-04).
+- **TXN-06 · TDC:** una transacción con método de pago de tipo `credit_card` se asigna a un ciclo de facturación según TDC-05 (el gasto cuenta en los agregados devengados —totales, reportes por categoría y presupuestos— en su fecha de compra, DSH-04; su liquidación se refleja en la deuda de la tarjeta, TDC-09, no en los agregados de gasto).
 - **TXN-07 · Adjuntos (v2+):** preparar `attachment_url` (ticket/factura, Supabase Storage). No bloqueante para v1.
 - **TXN-08 · Balance en transferencias:** una transferencia cuyo `payment_method_id` (origen) pertenece a una tarjeta de behavior `debit`/`prepaid` se rechaza (422) si `amount > saldo_disponible`, salvo `allow_overdraft=true` en esa tarjeta. No aplica cuando el origen es efectivo, transferencia bancaria u otro método sin tarjeta vinculada (sin `card_id`).
 - **TXN-09 · Transferencia a TDC como pago:** si `payment_method_to_id` pertenece a una tarjeta de behavior `credit`, `create_transaction` enruta internamente como pago: abona `amount` a `paid_amount` del statement cerrado más antiguo con saldo pendiente; si no existe ninguno, abona al statement abierto del ciclo actual. El campo opcional `target_statement_id` en el request permite elegir el statement exacto. La transacción se crea siempre como `type=transfer` para trazabilidad (TXN-02). Aplica también al editar (update).
@@ -159,8 +159,22 @@ Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas
 - **DSH-01 · Mes financiero:** los agregados son por mes calendario en tz del espacio. (Mes personalizado tipo "quincena a quincena" es backlog.)
 - **DSH-02 · Ingresos/gastos del mes:** ingresos = Σ income; gastos = Σ expense excluyendo transacciones-madre MSI (MSI-03) e incluyendo cuotas MSI cargadas en el mes; transfers excluidos siempre (TXN-02). Todo en base currency con tasas congeladas (FX-03).
 - **DSH-03 · Desgloses:** por categoría (raíz, con drill-down CAT-06), por naturaleza (CAT-03), por método de pago, tendencia 6 meses. Todos calculados en SQL con los mismos predicados de DSH-02 — un solo lugar (vista SQL o CTE compartido) para que ningún número difiera entre widgets.
-- **DSH-04 · Doble vista TDC:** el dashboard distingue **gasto devengado** (cuándo compraste — categorías, presupuestos) de **flujo de caja** (cuándo pagaste — pagos de statements). Default: devengado; toggle a flujo. Ambos documentados en la UI con tooltip, porque es la confusión #1 en apps de finanzas con TDC.
+- **DSH-04 · Gasto devengado:** el dashboard reporta **gasto devengado** — cuándo compraste, no cuándo pagaste. Una compra con TDC cuenta en su fecha de compra (totales, categorías, presupuestos), no cuando se liquida el statement. v1 NO ofrece vista de flujo de caja; el pago del statement se refleja en la deuda de la tarjeta (TDC-09) y en próximos compromisos (DSH-05), nunca en los agregados de gasto. (Vista de flujo de caja "cuándo pagaste" es backlog.)
 - **DSH-05 · Próximos compromisos:** widget con statements por vencer (TDC-08), cuotas MSI del próximo mes (MSI-06) y recurrentes próximas (REC), ordenados por fecha.
+
+## 14. Pronóstico de flujo (PRO) — R17
+
+El pronóstico responde "¿con mis ingresos futuros podré pagar lo que se viene?". Es la versión **a futuro** del flujo de caja; el flujo de caja *histórico* ("cuándo pagaste") sigue en backlog (DSH-04).
+
+- **PRO-01 · Naturaleza:** el pronóstico es una proyección de flujo de caja **read-only** sobre un horizonte configurable (default 6 meses; opciones 3/6/12). Se calcula al vuelo: NO persiste nada, NO materializa statements ni cuotas (respeta TDC-11/MSI-04) y NO escribe en BD. Es lo opuesto al gasto devengado del dashboard (DSH-04): aquí importa **cuándo sale/entra el dinero**, no cuándo se compró. Todo en `date` puro (GLO-02) y `Decimal` (GLO-01).
+- **PRO-02 · Caja inicial:** la liquidez de arranque = Σ `card_balance()` (TAR-05) de tarjetas activas de behavior `debit`/`prepaid` **+** un `cash_adjustment` opcional capturado por el usuario para efectivo/cuentas bancarias no modeladas en la app (PAT-02). Las inversiones (INV) NO son líquidas y NO entran. El `cash_adjustment` no se persiste; viaja en el request.
+- **PRO-03 · Salidas proyectadas:** sobre `(hoy, hoy + horizonte]`:
+  - **Pagos de TDC** (behavior `credit`, cycle-ready TDC-15): por cada ciclo del horizonte se proyecta el monto del statement = cargos ya asignados al statement abierto + cuotas MSI `pending` cuya `estimated_charge_date` cae en el ciclo (MSI-04) + ocurrencias de recurrentes-gasto (REC) cuyo método de pago pertenece a esa tarjeta, asignadas al ciclo por TDC-05; menos el saldo a favor conocido. El egreso se fecha en el `due_date` proyectado (TDC-04). Los statements ya existentes cerrados/parciales no pagados entran con su saldo real (TDC-09a) en su `due_date`.
+  - **Gastos no-crédito recurrentes** (efectivo/débito/prepago, método sin tarjeta de crédito): egreso inmediato en la fecha de ocurrencia (TAR-04).
+  - **Transacciones futuras manuales** (TXN-03, `date > hoy`): si son cargo de crédito alimentan el statement proyectado de su tarjeta; si son cash/débito o ingreso, entran directo en su fecha.
+- **PRO-04 · Entradas proyectadas:** ocurrencias de recurrentes-ingreso (nómina, REC) en su fecha + ingresos futuros manuales (TXN-03). Los montos marcados `amount_is_estimate` (REC-03) se usan y se reportan como aproximados.
+- **PRO-05 · Detección de sobregiro:** recorriendo los eventos ordenados por fecha, `saldo(t) = caja_inicial + Σ entradas(≤t) − Σ salidas(≤t)`. Si tras aplicar una salida `saldo(t) < 0`, esa obligación queda **no cubierta**: se reporta su fecha, el faltante (`−saldo(t)`, acotado al monto de la obligación) y se marca el **primer punto de sobregiro** global del horizonte. El pronóstico devuelve la serie de saldo por evento, la lista de obligaciones con su flag de cobertura y las alertas.
+- **PRO-06 · Moneda:** todo se reporta en `base_currency`. Montos en moneda ≠ base se convierten con la **última tasa disponible** (no congelada — es proyección, análogo a FX-04) y se marcan como aproximados. Si no hay tasa, se usa 1 y se advierte.
 
 ---
 
@@ -183,6 +197,7 @@ Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas
 | R13 import | IMP-01…07 |
 | R14 recordatorios | REM-01…04 |
 | R15 no-crypto | INV-01/02/04/05/06 |
+| R17 pronóstico | PRO-01…06, TDC-04/09, MSI-04, REC-01, TAR-05 |
 
 ## Casos de prueba obligatorios (mínimos)
 
@@ -196,3 +211,4 @@ Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas
 8. **GLO-05/ESP-03:** un viewer no puede mutar nada (test de permisos por endpoint); un usuario sin membresía recibe 404 (no 403, para no filtrar existencia).
 9. **TAR-04/05/DSH-02:** un gasto de 500 con tarjeta de débito descuenta el saldo, NO toca ningún statement y cuenta como salida en su fecha; una nómina (income) hacia el método de la tarjeta sube el saldo. Gasto que excede el saldo sin `allow_overdraft` ⇒ 422; con `allow_overdraft=true` ⇒ permitido (saldo negativo).
 10. **PAT-01:** `patrimonio = inversiones + saldos de tarjetas no-crédito − deuda de crédito`; al cambiar un saldo (nuevo gasto/ingreso) el siguiente snapshot lo refleja.
+11. **PRO-05 (sobregiro):** TDC con `due_date` el día 17 y nómina recurrente el día 15. Si el ingreso acumulado antes del 17 + caja inicial no cubre el pago del statement ⇒ la obligación se marca **no cubierta** con el faltante exacto y se reporta el primer sobregiro; si la nómina alcanza ⇒ sin sobregiro. Una compra MSI cuyas cuotas caen en cortes futuros (PRO-03) empuja el sobregiro al mes correcto. El pronóstico no materializa statements (conteo de `card_statements` constante antes/después).

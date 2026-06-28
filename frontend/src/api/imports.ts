@@ -53,7 +53,7 @@ export function usePreviewImport() {
 function useInvalidateImports() {
   const qc = useQueryClient();
   return () =>
-    ["imports", "transactions", "cards", "statements", "budgets"].forEach(
+    ["imports", "transactions", "cards", "statements", "budgets", "forecast"].forEach(
       (k) => void qc.invalidateQueries({ queryKey: [k] }),
     );
 }

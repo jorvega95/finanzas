@@ -1,4 +1,4 @@
-// Dashboard (R6): resumen mensual con doble vista devengado/flujo (DSH-04),
+// Dashboard (R6): resumen mensual de gasto devengado (DSH-02/04),
 // desgloses (DSH-03), tendencia 6 meses y próximos compromisos (DSH-05).
 // Presupuestos con barra de avance (PRE-04, R10).
 import { useState, type FormEvent } from "react";
@@ -159,42 +159,21 @@ function BudgetsSection({ month }: { month: string }) {
 export default function DashboardPage() {
   const { activeSpace } = useSpace();
   const [month, setMonth] = useState(currentMonth);
-  const [view, setView] = useState<"accrual" | "cash_flow">("accrual");
   const dashboard = useDashboard(month);
   const data = dashboard.data;
-  const totals = data?.[view];
+  const totals = data?.totals;
   const currency = activeSpace.base_currency;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Dashboard</h1>
-        <div className="flex items-center gap-2">
-          <div
-            className="flex rounded-lg border border-line p-0.5 dark:border-slate-700"
-            title="Devengado: cuándo compraste. Flujo: cuándo pagaste (la confusión #1 con TDC)."
-          >
-            {(["accrual", "cash_flow"] as const).map((v) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition ${
-                  view === v
-                    ? "bg-accent text-white"
-                    : "text-ink-muted hover:text-ink dark:text-slate-400"
-                }`}
-              >
-                {v === "accrual" ? "Devengado" : "Flujo de caja"}
-              </button>
-            ))}
-          </div>
-          <input
-            type="month"
-            className="input w-auto"
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-          />
-        </div>
+        <input
+          type="month"
+          className="input w-auto"
+          value={month}
+          onChange={(e) => setMonth(e.target.value)}
+        />
       </div>
 
       {/* Totales del mes (DSH-02) */}

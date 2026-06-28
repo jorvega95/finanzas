@@ -67,9 +67,9 @@ async def test_dsh02_totals_exclude_transfers_and_future(client):
     await add_expense(client, ctx, "999.00", date_str="2026-06-25")
 
     body = await summary(client, ctx)
-    assert body["accrual"]["income"] == "8000.00"
-    assert body["accrual"]["expenses"] == "150.00"
-    assert body["accrual"]["net"] == "7850.00"
+    assert body["totals"]["income"] == "8000.00"
+    assert body["totals"]["expenses"] == "150.00"
+    assert body["totals"]["net"] == "7850.00"
 
 
 @freeze_time("2026-06-20 18:00:00")
@@ -88,7 +88,7 @@ async def test_dsh02_msi_case4_full_dashboard(client):
     await close_cycles(client, ctx)  # cuota 1 charged en corte 15-jun
 
     body = await summary(client, ctx)
-    assert body["accrual"]["expenses"] == "1000.00"  # ni 12,000 ni 13,000
+    assert body["totals"]["expenses"] == "1000.00"  # ni 12,000 ni 13,000
     # La cuota hereda la categoría de la compra (MSI-03).
     comida = next(r for r in body["by_category"] if r["category_name"] == "Comida")
     assert comida["total"] == "1000.00"
@@ -97,19 +97,20 @@ async def test_dsh02_msi_case4_full_dashboard(client):
 
 
 @freeze_time("2026-06-20 18:00:00")
-async def test_dsh04_accrual_vs_cash_flow(client):
-    """DSH-04: devengado registra la compra TDC; flujo solo el pago."""
+async def test_dsh04_accrued_spending(client):
+    """DSH-04: el gasto es devengado (cuándo compraste). La compra TDC cuenta
+    en su fecha; el pago del statement (transfer) nunca toca los agregados."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
     await charge(client, ctx, card["payment_method_id"], "2026-06-10", "500.00")
-    await add_expense(client, ctx, "200.00")  # efectivo: cuenta en ambos
+    await add_expense(client, ctx, "200.00")  # efectivo: gasto inmediato
     closed = await close_cycles(client, ctx)
 
     body = await summary(client, ctx)
-    assert body["accrual"]["expenses"] == "700.00"
-    assert body["cash_flow"]["expenses"] == "200.00"  # aún no se paga la TDC
+    # Compra TDC (500) + efectivo (200) cuentan ambos en su fecha de compra.
+    assert body["totals"]["expenses"] == "700.00"
 
-    # Pago de tarjeta: aparece en flujo, no en devengado (TXN-02).
+    # Pago de tarjeta: es transfer (TXN-02), no altera el gasto devengado.
     await client.post(
         f"/api/v1/cards/{card['id']}/payments",
         headers=ctx["headers"],
@@ -121,8 +122,7 @@ async def test_dsh04_accrual_vs_cash_flow(client):
         },
     )
     body = await summary(client, ctx)
-    assert body["accrual"]["expenses"] == "700.00"
-    assert body["cash_flow"]["expenses"] == "700.00"
+    assert body["totals"]["expenses"] == "700.00"
 
 
 @freeze_time("2026-06-20 18:00:00")
@@ -149,7 +149,7 @@ async def test_dsh03_category_rollup_and_fx(client, db_session):
     assert comida["total"] == "160.00"  # 100 directo + 60 subcategoría
     transporte = next(r for r in body["by_category"] if r["category_name"] == "Transporte")
     assert Decimal(transporte["total"]) == Decimal("180.00")  # 10 USD × 18.00
-    assert Decimal(body["accrual"]["expenses"]) == Decimal("340.00")
+    assert Decimal(body["totals"]["expenses"]) == Decimal("340.00")
 
 
 @freeze_time("2026-06-20 18:00:00")
@@ -201,5 +201,5 @@ async def test_dsh03_trend_consistency(client):
     body = await summary(client, ctx)
     by_month = {p["month"]: p for p in body["trend"]}
     assert by_month["2026-05"]["expenses"] == "100.00"
-    assert by_month["2026-06"]["expenses"] == body["accrual"]["expenses"] == "250.00"
+    assert by_month["2026-06"]["expenses"] == body["totals"]["expenses"] == "250.00"
     assert len(body["trend"]) == 6

@@ -55,35 +55,44 @@ export function useRecurringRules(includeInactive = false) {
   });
 }
 
-export function useCreateRecurringRule() {
+function useInvalidateRecurring() {
   const qc = useQueryClient();
+  // El pronóstico proyecta nómina/domiciliados desde las reglas (PRO-03/04).
+  return () =>
+    ["recurring-rules", "forecast"].forEach(
+      (k) => void qc.invalidateQueries({ queryKey: [k] }),
+    );
+}
+
+export function useCreateRecurringRule() {
+  const invalidate = useInvalidateRecurring();
   return useMutation({
     mutationFn: (body: RecurringRuleBody) =>
       api<RecurringRuleOut>("/api/v1/recurring-rules", {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["recurring-rules"] }),
+    onSuccess: invalidate,
   });
 }
 
 export function useUpdateRecurringRule() {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateRecurring();
   return useMutation({
     mutationFn: ({ id, ...body }: RecurringRuleUpdate) =>
       api<RecurringRuleOut>(`/api/v1/recurring-rules/${id}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["recurring-rules"] }),
+    onSuccess: invalidate,
   });
 }
 
 export function useDeleteRecurringRule() {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateRecurring();
   return useMutation({
     mutationFn: (id: string) =>
       api<void>(`/api/v1/recurring-rules/${id}`, { method: "DELETE" }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["recurring-rules"] }),
+    onSuccess: invalidate,
   });
 }

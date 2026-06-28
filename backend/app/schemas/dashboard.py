@@ -38,12 +38,50 @@ class UpcomingItem(BaseModel):
 
 class DashboardSummary(BaseModel):
     month: str
-    accrual: Totals  # DSH-04: devengado (default)
-    cash_flow: Totals  # DSH-04: flujo de caja
+    totals: Totals  # DSH-02: ingresos/gastos/neto del mes (gasto devengado)
     by_category: list[CategoryBreakdownRow]
     by_nature: dict[str, MoneyOut]
     trend: list[TrendPoint]
     upcoming: list[UpcomingItem]
+
+
+class ForecastEvent(BaseModel):
+    """PRO-03/04/05: un evento fechado del flujo proyectado."""
+
+    date: dt.date
+    kind: str
+    direction: str  # in | out
+    description: str
+    amount: MoneyOut  # base, magnitud positiva
+    currency: str  # moneda original
+    is_estimate: bool
+    covered: bool
+    shortfall: MoneyOut
+    balance_after: MoneyOut
+
+
+class ForecastAlert(BaseModel):
+    """PRO-05: una obligación que el flujo no alcanza a cubrir."""
+
+    date: dt.date
+    description: str
+    shortfall: MoneyOut
+
+
+class ForecastSummary(BaseModel):
+    """PRO-01..06: pronóstico de flujo a futuro."""
+
+    horizon_months: int
+    generated_for: dt.date
+    starting_cash: MoneyOut  # PRO-02
+    cash_adjustment: MoneyOut
+    ending_balance: MoneyOut
+    min_balance: MoneyOut
+    min_balance_date: dt.date | None
+    first_overdraft_date: dt.date | None  # PRO-05
+    total_shortfall: MoneyOut
+    events: list[ForecastEvent]
+    alerts: list[ForecastAlert]
 
 
 class BudgetCreate(BaseModel):

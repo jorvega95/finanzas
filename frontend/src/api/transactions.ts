@@ -69,7 +69,7 @@ export function useTransactions(filters: TransactionFilters) {
 function useInvalidateTransactions() {
   const qc = useQueryClient();
   return () =>
-    ["transactions", "cards", "statements", "budgets"].forEach(
+    ["transactions", "cards", "statements", "budgets", "forecast"].forEach(
       (k) => void qc.invalidateQueries({ queryKey: [k] }),
     );
 }

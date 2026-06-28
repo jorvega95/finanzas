@@ -7,6 +7,7 @@ import { useTheme } from "../lib/theme";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: "📊" },
+  { to: "/pronostico", label: "Pronóstico", icon: "🔮" },
   { to: "/transacciones", label: "Transacciones", icon: "💸" },
   { to: "/tarjetas", label: "Tarjetas", icon: "💳" },
   { to: "/msi", label: "MSI", icon: "📅" },

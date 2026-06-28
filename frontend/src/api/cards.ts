@@ -130,7 +130,7 @@ export function useNotifications() {
 function useInvalidateCards() {
   const qc = useQueryClient();
   return () =>
-    ["cards", "statements", "transactions", "notifications", "msi"].forEach(
+    ["cards", "statements", "transactions", "notifications", "msi", "forecast"].forEach(
       (k) => void qc.invalidateQueries({ queryKey: [k] }),
     );
 }

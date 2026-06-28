@@ -232,12 +232,11 @@ async def test_tar04_05_debit_balance_no_statement_immediate(client):
     assert statements == []
     assert (await client.post("/api/v1/cards/close-cycles", headers=ctx["headers"])).json() == []
 
-    # DSH-02/04: debit spend is immediate in both accrual and cash flow.
+    # DSH-02/04: debit spend counts as accrued expense on its date.
     body = (
         await client.get("/api/v1/dashboard/summary?month=2026-06", headers=ctx["headers"])
     ).json()
-    assert body["accrual"]["expenses"] == "300.00"
-    assert body["cash_flow"]["expenses"] == "300.00"
+    assert body["totals"]["expenses"] == "300.00"
 
 
 @freeze_time("2026-06-20 18:00:00")

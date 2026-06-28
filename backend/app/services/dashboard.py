@@ -18,7 +18,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.dates import today_in_tz
 from app.models.cards import CardStatement, StatementStatus
-from app.models.catalogs import Category, PaymentMethod, PaymentMethodType
+from app.models.catalogs import Category
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus
 from app.models.recurring import RecurringRule
 from app.models.spaces import Space
@@ -128,48 +128,6 @@ async def monthly_totals(
         "expenses": expense_total,
         "net": income_total - expense_total,
     }
-
-
-async def cash_flow_totals(
-    session: AsyncSession, space: Space, start: dt.date, end: dt.date
-) -> dict[str, Decimal]:
-    """DSH-04 vista flujo: sale el dinero cuando se paga, no cuando se compra.
-
-    Salidas = gastos no diferidos (efectivo, débito y prepaid salen en su
-    fecha, TAR-04) + pagos de tarjeta de crédito (transfers hacia métodos
-    credit_card, TDC-10/TXN-06). Los cargos de crédito se difieren: solo entran
-    como flujo cuando se paga el statement. Entradas = income.
-    """
-    today = today_in_tz(space.timezone)
-    income = await session.scalar(
-        select(func.coalesce(func.sum(AMOUNT_BASE), 0)).where(
-            *income_predicates(space.id, start, end, today)
-        )
-    )
-    non_card_expense = await session.scalar(
-        select(func.coalesce(func.sum(AMOUNT_BASE), 0)).where(
-            *expense_predicates(space.id, start, end, today),
-            # TAR-04: only credit charges carry a statement and are deferred;
-            # debit/prepaid/cash spend has no statement and is immediate.
-            Transaction.statement_id.is_(None),
-        )
-    )
-    card_payments = await session.scalar(
-        select(func.coalesce(func.sum(AMOUNT_BASE), 0))
-        .select_from(Transaction)
-        .join(PaymentMethod, Transaction.payment_method_to_id == PaymentMethod.id)
-        .where(
-            Transaction.space_id == space.id,
-            Transaction.type == TransactionType.transfer,
-            Transaction.date >= start,
-            Transaction.date <= end,
-            Transaction.date <= today,
-            PaymentMethod.type == PaymentMethodType.credit_card,
-        )
-    )
-    out_total = to_money(non_card_expense) + to_money(card_payments)
-    income_total = to_money(income)
-    return {"income": income_total, "expenses": out_total, "net": income_total - out_total}
 
 
 async def expenses_by_category(

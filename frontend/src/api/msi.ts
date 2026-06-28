@@ -70,7 +70,7 @@ export function useMsiProjection() {
 function useInvalidateMsi() {
   const qc = useQueryClient();
   return () =>
-    ["msi", "cards", "statements", "transactions"].forEach(
+    ["msi", "cards", "statements", "transactions", "forecast"].forEach(
       (k) => void qc.invalidateQueries({ queryKey: [k] }),
     );
 }
