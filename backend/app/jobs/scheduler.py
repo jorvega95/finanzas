@@ -82,9 +82,15 @@ async def run_fx_job() -> None:
 
 def build_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.add_job(run_recurring_job, "cron", minute=35, id="recurring")
-    scheduler.add_job(run_card_close_job, "cron", minute=50, id="card_close")
+    now = datetime.now(UTC)
+    # next_run_time=now: además del cron, corre una vez de inmediato al
+    # arrancar (jobs idempotentes, seguro repetirlos). El job de FX queda
+    # fuera para no golpear la API externa en cada reinicio (p. ej. --reload).
+    scheduler.add_job(run_recurring_job, "cron", minute=35, id="recurring", next_run_time=now)
+    scheduler.add_job(run_card_close_job, "cron", minute=50, id="card_close", next_run_time=now)
     scheduler.add_job(run_fx_job, "cron", hour=18, minute=10, id="fx")  # ~12:10 MX
     # INV-05: 23:50 hora MX ≈ 05:50 UTC.
-    scheduler.add_job(run_snapshot_job, "cron", hour=5, minute=50, id="snapshots")
+    scheduler.add_job(
+        run_snapshot_job, "cron", hour=5, minute=50, id="snapshots", next_run_time=now
+    )
     return scheduler
