@@ -206,23 +206,25 @@ async def _card_due_events(
     events: list[_Event] = []
     spec = spec_for(card)
 
-    # (a) Statements cerrados/parciales no pagados (TDC-09a): saldo real.
-    closed = (
+    # Statements ya cerrados (closed/partially_paid/paid): su computed_total ya es
+    # definitivo, así que sus transacciones/cuotas NUNCA deben re-proyectarse en un
+    # corte futuro (de lo contrario un statement ya pagado se "recicla" y se suma
+    # otra vez al próximo pago proyectado).
+    settled = (
         (
             await session.execute(
                 select(CardStatement).where(
                     CardStatement.credit_card_id == card.id,
-                    CardStatement.status.in_(
-                        [StatementStatus.closed, StatementStatus.partially_paid]
-                    ),
+                    CardStatement.status != StatementStatus.open,
                 )
             )
         )
         .scalars()
         .all()
     )
-    closed_ids = {s.id for s in closed}
-    for s in closed:
+    settled_ids = {s.id for s in settled}
+    # (a) Statements cerrados/parciales no pagados (TDC-09a): saldo real.
+    for s in settled:
         outstanding = s.computed_total - s.paid_amount
         if outstanding > ZERO:
             events.append(
@@ -258,7 +260,7 @@ async def _card_due_events(
         .all()
     )
     for txn in txns:
-        if txn.statement_id is not None and txn.statement_id in closed_ids:
+        if txn.statement_id is not None and txn.statement_id in settled_ids:
             continue  # ya contabilizado en su statement cerrado real
         _, cutoff = cycles.cycle_for_purchase(txn.date, spec)
         target = _bucket(cutoff, projected)
@@ -284,7 +286,7 @@ async def _card_due_events(
         .all()
     )
     for inst in pending:
-        if inst.statement_id is not None and inst.statement_id in closed_ids:
+        if inst.statement_id is not None and inst.statement_id in settled_ids:
             continue
         target = _bucket(inst.estimated_charge_date, projected)
         if target is None:

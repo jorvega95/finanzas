@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from app.models.cards import CardStatement
 from app.models.fx import ExchangeRate
 from tests.conftest import bootstrap_space
-from tests.test_cards import charge, create_card
+from tests.test_cards import charge, close_cycles, create_card
 
 
 async def forecast(client, ctx, horizon_months=6, cash_adjustment="0"):
@@ -174,6 +174,50 @@ async def test_pro06_multicurrency_with_rate(client, db_session):
     usd_in = next(e for e in body["events"] if e["direction"] == "in" and e["date"] == "2026-07-01")
     assert usd_in["amount"] == "1800.00"  # 100 USD × 18.00
     assert usd_in["currency"] == "USD"
+
+
+@freeze_time("2026-05-20 18:00:00")
+async def test_pro03_paid_statement_not_recycled_into_next_projection(client):
+    """Bug: un statement ya `paid` se re-sumaba en el pago proyectado siguiente
+    porque el filtro solo excluía closed/partially_paid, no paid. Un statement
+    cerrado y liquidado por completo no debe re-proyectarse (solo el ciclo
+    abierto actual debe alimentar el próximo pago)."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx, statement_day=15, payment_due_days=2)
+    method_id = card["payment_method_id"]
+    debito = ctx["methods"]["Débito"]["id"]
+
+    # Cargo en el ciclo [16-abr, 15-may], cerrado y pagado por completo.
+    await charge(client, ctx, method_id, "2026-05-10", "500.00")
+    closed = await close_cycles(client, ctx)
+    statement_id = closed[0]["id"]
+    res = await client.post(
+        f"/api/v1/cards/{card['id']}/payments",
+        headers=ctx["headers"],
+        json={
+            "amount": "500.00",
+            "from_payment_method_id": debito,
+            "date": "2026-05-20",
+            "statement_id": statement_id,
+        },
+    )
+    assert res.status_code == 201, res.text
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    assert next(s for s in statements if s["id"] == statement_id)["status"] == "paid"
+
+    # Cargo en el ciclo abierto actual [16-may, 15-jun].
+    await charge(client, ctx, method_id, "2026-06-10", "300.00")
+
+    with freeze_time("2026-06-20 18:00:00"):
+        body = await forecast(client, ctx, horizon_months=2)
+
+    card_dues = [e for e in body["events"] if e["kind"] == "card_due"]
+    assert len(card_dues) == 1
+    due = card_dues[0]
+    assert due["date"] == "2026-07-17"
+    assert due["amount"] == "300.00"  # NO debe arrastrar el statement ya pagado (500)
 
 
 @freeze_time("2026-06-20 18:00:00")
