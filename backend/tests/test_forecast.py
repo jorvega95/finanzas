@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from app.models.cards import CardStatement
 from app.models.fx import ExchangeRate
 from tests.conftest import bootstrap_space
-from tests.test_cards import charge, close_cycles, create_card
+from tests.test_cards import charge, close_cycles, create_card, refund
 
 
 async def forecast(client, ctx, horizon_months=6, cash_adjustment="0"):
@@ -231,3 +231,33 @@ async def test_pro01_readonly_no_statement_materialization(client, db_session):
     await forecast(client, ctx, horizon_months=12)
     after = await db_session.scalar(select(func.count()).select_from(CardStatement))
     assert before == after
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_pend02_future_refund_on_statement_not_double_counted(client):
+    """PEND-02 (regresión): un reembolso futuro que TDC-16 ya asignó a un
+    statement de TDC no debe además contarse como entrada de caja genérica
+    (PRO-04) — ya está reflejado en el `card_due` de ese statement (PRO-03)."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    method_id = card["payment_method_id"]
+
+    await charge(client, ctx, method_id, "2026-06-10", "500.00")
+    closed = await close_cycles(client, ctx)
+    statement_id = closed[0]["id"]
+    assert closed[0]["due_date"] == "2026-07-05"
+
+    # Reembolso con fecha futura (hoy es 20-jun) dentro de la ventana del
+    # statement pendiente ⇒ TDC-16 lo asigna ahí y reduce su computed_total.
+    txn = await refund(client, ctx, method_id, "2026-06-25", "200.00")
+    assert txn["statement_id"] == statement_id
+
+    body = await forecast(client, ctx, horizon_months=2)
+
+    income_events = [e for e in body["events"] if e["kind"] == "income"]
+    assert income_events == []  # ya tiene statement_id ⇒ excluido de PRO-04
+
+    card_dues = [e for e in body["events"] if e["kind"] == "card_due"]
+    assert len(card_dues) == 1
+    assert card_dues[0]["date"] == "2026-07-05"
+    assert card_dues[0]["amount"] == "300.00"  # 500 - 200, no duplicado

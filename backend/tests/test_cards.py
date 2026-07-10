@@ -785,6 +785,64 @@ async def test_tdc16_refund_after_due_date_not_retroactive(client):
 
 
 @freeze_time("2026-06-20 18:00:00")
+async def test_pend01_late_refund_does_not_wipe_manual_opening_balance(client):
+    """PEND-01 (regresión): un opening_balance manual (TDC-14) se conservaba
+    solo mientras el statement no tuviera transacciones itemizadas. Un
+    reembolso que TDC-16 le asigna después (misma ventana period_end/due_date)
+    NO debe descartar los 1500 capturados a mano; debe restarse de ellos."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx, opening_balance="1500.00")
+    method_id = card["payment_method_id"]
+
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    opening = next(s for s in statements if s["computed_total"] == "1500.00")
+    assert opening["due_date"] == "2026-07-05"
+
+    # Reembolso el 25-jun: después del corte (15-jun), antes del due_date (5-jul)
+    # ⇒ TDC-16 lo asigna a este mismo statement de opening balance.
+    txn = await refund(client, ctx, method_id, "2026-06-25", "200.00")
+    assert txn["statement_id"] == opening["id"]
+
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    updated = next(s for s in statements if s["id"] == opening["id"])
+    assert updated["computed_total"] == "1300.00", (
+        f"opening_balance descartado tras el reembolso: {updated['computed_total']}"
+    )
+
+    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    assert detail["debt"]["statement_balance"] == "1300.00"
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_pend01_late_charge_adds_to_manual_opening_balance(client):
+    """PEND-01 (regresión): mismo caso que arriba pero con un cargo tardío
+    (TDC-06) en vez de un reembolso — debe sumarse a los 1500, no reemplazarlos."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx, opening_balance="1500.00")
+    method_id = card["payment_method_id"]
+
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    opening = next(s for s in statements if s["computed_total"] == "1500.00")
+
+    # Cargo olvidado del mismo corte anterior (10-jun, dentro del ciclo cerrado).
+    await charge(client, ctx, method_id, "2026-06-10", "300.00")
+
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    updated = next(s for s in statements if s["id"] == opening["id"])
+    assert updated["computed_total"] == "1800.00", (
+        f"opening_balance descartado tras el cargo tardío: {updated['computed_total']}"
+    )
+
+
+@freeze_time("2026-06-20 18:00:00")
 async def test_tdc16_refund_edit_reassigns(client):
     """Editar la fecha de un reembolso reevalúa TDC-16: si la nueva fecha cae en
     la ventana de un statement pendiente, se reasigna y ambos totales se recalculan."""

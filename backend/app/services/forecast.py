@@ -411,6 +411,9 @@ async def _income_events(
                     Transaction.type == TransactionType.income,
                     Transaction.date > today,
                     Transaction.date <= horizon_end,
+                    # PEND-02: un income ya asignado a un statement de TDC (TDC-16)
+                    # ya se cuenta vía _card_due_events; no duplicarlo aquí.
+                    Transaction.statement_id.is_(None),
                     Transaction.recurring_rule_id.is_(None),
                 )
             )

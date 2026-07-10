@@ -208,7 +208,7 @@ async def get_opening_balance(session: AsyncSession, space: Space, card: Card) -
         return None
     if await _statement_has_charges(session, existing.id):
         return None
-    return existing.computed_total
+    return existing.opening_balance
 
 
 async def set_opening_balance(
@@ -247,6 +247,7 @@ async def set_opening_balance(
                 status.HTTP_409_CONFLICT,
                 "Ya hay cargos en el corte anterior; no se puede sobreponer un saldo manual",
             )
+        existing.opening_balance = amount
         existing.computed_total = amount
         existing.status = StatementStatus.closed
         _update_payment_status(existing)
@@ -264,6 +265,7 @@ async def set_opening_balance(
         period_end=period_end,
         due_date=cycles.due_date_for(period_end, spec),
         computed_total=amount,
+        opening_balance=amount,
         paid_amount=ZERO,
         status=StatementStatus.closed,
     )
@@ -669,10 +671,14 @@ async def get_statement(
 
 
 async def _raw_statement_total(session: AsyncSession, statement: CardStatement) -> Decimal:
-    """Charges − refunds + MSI installments charged into this statement.
+    """Opening balance + charges − refunds + MSI installments charged into
+    this statement.
 
     MSI-03: parent purchases (installment_plan_id != NULL) are excluded; their
     installments enter instead. Payments (transfers) live in paid_amount.
+    TDC-14 (PEND-01): opening_balance is kept separate from itemized charges
+    so a late charge/refund landing on a manual-opening-balance statement adds
+    to it instead of silently replacing it.
     """
     charges = await session.scalar(
         select(func.coalesce(func.sum(Transaction.amount), 0)).where(
@@ -693,7 +699,8 @@ async def _raw_statement_total(session: AsyncSession, statement: CardStatement) 
             Installment.status.in_([InstallmentStatus.charged, InstallmentStatus.paid]),
         )
     )
-    return Decimal(charges or 0) - Decimal(refunds or 0) + Decimal(msi or 0)
+    opening = Decimal(statement.opening_balance) if statement.opening_balance is not None else ZERO
+    return opening + Decimal(charges or 0) - Decimal(refunds or 0) + Decimal(msi or 0)
 
 
 async def recompute_statement_total(session: AsyncSession, statement_id: uuid.UUID) -> None:

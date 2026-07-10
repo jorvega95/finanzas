@@ -4,7 +4,7 @@ Hallazgos encontrados al implementar o auditar features, que **no** se corrigier
 
 ---
 
-### PEND-01 · `recompute_statement_total` puede sobrescribir un `opening_balance` manual (TDC-14) 🟡
+### PEND-01 · `recompute_statement_total` puede sobrescribir un `opening_balance` manual (TDC-14) 🟡 [RESUELTO]
 
 **Qué:** si a un statement `closed` creado como saldo de apertura manual (TDC-14: `computed_total = opening_balance`, sin cargos itemizados en ese momento) se le asigna **después** una transacción — un cargo tardío (TDC-06) o un reembolso (TDC-16) que caiga en su ventana `(period_end, due_date]` —, la siguiente llamada a `recompute_statement_total` (`backend/app/services/cards.py:668-677`) recalcula `computed_total` como `_raw_statement_total(...) - applied_credit`, es decir, **solo la suma de las transacciones itemizadas realmente ligadas al statement**, ignorando por completo el monto manual (`opening_balance`) que el usuario capturó.
 
@@ -21,9 +21,11 @@ Hallazgos encontrados al implementar o auditar features, que **no** se corrigier
 
 **Detectado:** 2026-07-09, durante el diseño de TDC-16 (reembolsos posteriores al corte).
 
+**Resuelto:** 2026-07-10, commit siguiente. Se agregó la columna `card_statements.opening_balance` (migración `0012`, con backfill para statements existentes sin cargos itemizados) y `_raw_statement_total` ahora suma `opening_balance + cargos − reembolsos + MSI` en vez de descartarlo. `set_opening_balance`/`get_opening_balance` (TDC-14) leen/escriben el nuevo campo. Tests de regresión: `test_pend01_late_refund_does_not_wipe_manual_opening_balance`, `test_pend01_late_charge_adds_to_manual_opening_balance` (`backend/tests/test_cards.py`).
+
 ---
 
-### PEND-02 · `forecast._income_events` no excluye ingresos ya asignados a un statement de TDC 🟢
+### PEND-02 · `forecast._income_events` no excluye ingresos ya asignados a un statement de TDC 🟢 [RESUELTO]
 
 **Qué:** en `backend/app/services/forecast.py`, `_non_credit_expense_events` excluye explícitamente gastos con `statement_id IS NOT NULL` (ya contados vía TDC-09/`_card_due_events`) para no duplicarlos en el pronóstico (PRO-01). `_income_events` (líneas ~368-432) **no tiene el filtro equivalente**: un `income` futuro (`date > hoy`) hacia una TDC (p. ej. un reembolso programado) entraría como entrada de caja "in" en el pronóstico general, sin importar que además vaya a reducir el `computed_total` de un statement de TDC contado aparte en `_card_due_events`.
 
@@ -34,3 +36,5 @@ Hallazgos encontrados al implementar o auditar features, que **no** se corrigier
 **Fix sugerido (no implementado):** aplicar el mismo filtro `Transaction.statement_id.is_(None)` (o excluir por `card_id IS NOT NULL` con behavior credit) en `_income_events`.
 
 **Detectado:** 2026-07-09, mismo análisis de TDC-16 (preexistente, no introducido por ese cambio).
+
+**Resuelto:** 2026-07-10, commit siguiente. Se agregó `Transaction.statement_id.is_(None)` al filtro de `_income_events`, igual que ya tenía `_non_credit_expense_events`. Test de regresión: `test_pend02_future_refund_on_statement_not_double_counted` (`backend/tests/test_forecast.py`).

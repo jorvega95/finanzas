@@ -149,6 +149,10 @@ class CardStatement(Base):
     computed_total: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), nullable=False, default=Decimal("0")
     )
+    # TDC-14: manually captured previous-cut debt, kept separate from itemized
+    # charges so a later late charge/refund (TDC-06/TDC-16) doesn't wipe it out
+    # when computed_total is recomputed. NULL for statements without one.
+    opening_balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     # TDC-10: credit carried over from the previous statement's overpayment.
     applied_credit: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), nullable=False, default=Decimal("0")
