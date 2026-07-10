@@ -259,6 +259,7 @@ async def create_transaction(
     from app.services.cards import (
         apply_card_payment,
         assign_charge_to_statement,
+        assign_refund_to_statement,
         cycle_ready,
         recompute_statement_total,
     )
@@ -269,10 +270,14 @@ async def create_transaction(
         and cycle_ready(resolved.card)  # TDC-15: skip unconfigured cards
         and data.type != TransactionType.transfer
     ):
-        # TXN-06/TDC-05: only credit charges belong to a billing cycle (TAR-04).
-        stmt = await assign_charge_to_statement(
-            session, resolved.card, txn, cycle_hint=data.cycle_hint
-        )
+        # TXN-06/TDC-05: credit charges belong to a billing cycle (TAR-04).
+        # TDC-16: refunds prefer a pending closed statement over the next cycle.
+        if data.type == TransactionType.income:
+            stmt = await assign_refund_to_statement(session, resolved.card, txn)
+        else:
+            stmt = await assign_charge_to_statement(
+                session, resolved.card, txn, cycle_hint=data.cycle_hint
+            )
         # TDC-06: if the statement is already closed (late charge on a past cycle),
         # recompute its total so debt numbers stay accurate.
         if stmt.status != StatementStatus.open:
@@ -344,6 +349,7 @@ async def update_transaction(
     from app.services.cards import (
         apply_card_payment,
         assign_charge_to_statement,
+        assign_refund_to_statement,
         cycle_ready,
         get_card,
         recompute_statement_total,
@@ -364,7 +370,13 @@ async def update_transaction(
         and data.type != TransactionType.transfer
     ):
         # TDC-05: credit charge → assign/re-assign to billing cycle.
-        await assign_charge_to_statement(session, resolved.card, txn, cycle_hint=data.cycle_hint)
+        # TDC-16: refunds prefer a pending closed statement over the next cycle.
+        if data.type == TransactionType.income:
+            await assign_refund_to_statement(session, resolved.card, txn)
+        else:
+            await assign_charge_to_statement(
+                session, resolved.card, txn, cycle_hint=data.cycle_hint
+            )
     elif data.type == TransactionType.transfer and data.payment_method_to_id is not None:
         # TXN-09: transfer to credit card → apply as new payment.
         dest_method = await session.get(PaymentMethod, data.payment_method_to_id)

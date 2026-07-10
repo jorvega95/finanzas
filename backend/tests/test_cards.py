@@ -57,6 +57,24 @@ async def close_cycles(client, ctx):
     return res.json()
 
 
+async def refund(client, ctx, method_id, date, amount, description="Devolución"):
+    res = await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "income",
+            "date": date,
+            "amount": amount,
+            "currency": "MXN",
+            "category_id": ctx["categories"]["Nómina"]["id"],
+            "payment_method_id": method_id,
+            "description": description,
+        },
+    )
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
 async def test_tdc01_validation_and_cat07_method(client):
     ctx = await bootstrap_space(client)
 
@@ -688,3 +706,120 @@ async def test_tdc06_late_charge_recomputes_closed_statement(client):
     # La deuda de la tarjeta también debe reflejar el nuevo total.
     card_data = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
     assert card_data["debt"]["statement_balance"] == "500.00"
+
+
+# --- TDC-16: reembolso posterior al corte abona al statement pendiente -----------
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc16_refund_after_cutoff_reduces_pending_statement(client):
+    """Caso obligatorio 12 (parte 1): reembolso entre period_end y due_date de
+    un statement closed ⇒ se resta de ese computed_total, no del ciclo abierto."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    method_id = card["payment_method_id"]
+
+    await charge(client, ctx, method_id, "2026-06-10", "500.00")
+    closed = await close_cycles(client, ctx)
+    statement_id = closed[0]["id"]
+    assert closed[0]["due_date"] == "2026-07-05"
+
+    # Devolución el 18-jun: después del corte (15-jun), antes del due_date (5-jul).
+    txn = await refund(client, ctx, method_id, "2026-06-18", "200.00")
+    assert txn["statement_id"] == statement_id
+
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    st = next(s for s in statements if s["id"] == statement_id)
+    assert st["computed_total"] == "300.00"
+    assert st["status"] == "closed"
+
+    card_data = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    assert card_data["debt"]["statement_balance"] == "300.00"
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc16_refund_without_pending_statement_falls_back_to_tdc05(client):
+    """Caso obligatorio 12 (parte 2): sin ningún statement closed/partially_paid
+    pendiente, el reembolso cae en la asignación normal de TDC-05 (ciclo abierto)."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    method_id = card["payment_method_id"]
+
+    # Tarjeta recién creada: no hay ningún statement closed todavía.
+    txn = await refund(client, ctx, method_id, "2026-06-18", "200.00")
+
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    st = next(s for s in statements if s["id"] == txn["statement_id"])
+    assert st["status"] == "open"
+    assert st["period_end"] == "2026-07-15"  # primer corte >= 18-jun (TDC-05)
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc16_refund_after_due_date_not_retroactive(client):
+    """Caso obligatorio 12 (parte 3): un reembolso posterior al due_date del
+    statement pendiente NO lo abona retroactivamente; sigue TDC-05 normal."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    method_id = card["payment_method_id"]
+
+    await charge(client, ctx, method_id, "2026-06-10", "500.00")
+    closed = await close_cycles(client, ctx)
+    statement_id = closed[0]["id"]
+    assert closed[0]["due_date"] == "2026-07-05"
+
+    with freeze_time("2026-07-10 18:00:00"):
+        # 8-jul es posterior al due_date (5-jul) del statement pendiente.
+        txn = await refund(client, ctx, method_id, "2026-07-08", "200.00")
+
+    assert txn["statement_id"] != statement_id
+
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    st = next(s for s in statements if s["id"] == statement_id)
+    assert st["computed_total"] == "500.00"  # sin cambios
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc16_refund_edit_reassigns(client):
+    """Editar la fecha de un reembolso reevalúa TDC-16: si la nueva fecha cae en
+    la ventana de un statement pendiente, se reasigna y ambos totales se recalculan."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    method_id = card["payment_method_id"]
+
+    await charge(client, ctx, method_id, "2026-06-10", "500.00")
+    closed = await close_cycles(client, ctx)
+    statement_id = closed[0]["id"]
+
+    # Fecha capturada con error (9-jul, posterior al due_date 5-jul) ⇒ cae en TDC-05
+    # normal, en el ciclo abierto, no en el statement pendiente.
+    txn = await refund(client, ctx, method_id, "2026-07-09", "200.00")
+    assert txn["statement_id"] != statement_id
+
+    # Se corrige la fecha a 18-jun (dentro de la ventana del statement pendiente).
+    res = await client.put(
+        f"/api/v1/transactions/{txn['id']}",
+        headers=ctx["headers"],
+        json={
+            "type": "income",
+            "date": "2026-06-18",
+            "amount": "200.00",
+            "currency": "MXN",
+            "category_id": ctx["categories"]["Nómina"]["id"],
+            "payment_method_id": method_id,
+            "description": "Devolución",
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["statement_id"] == statement_id
+
+    statements = (
+        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+    ).json()
+    st = next(s for s in statements if s["id"] == statement_id)
+    assert st["computed_total"] == "300.00"

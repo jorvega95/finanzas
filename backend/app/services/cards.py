@@ -628,6 +628,37 @@ async def assign_charge_to_statement(
     return statement
 
 
+async def assign_refund_to_statement(
+    session: AsyncSession, card: Card, txn: Transaction
+) -> CardStatement:
+    """TDC-16: a refund (income) posted after a statement's cutoff but on/before
+    its due_date reduces that pending statement instead of the next cycle,
+    mirroring how a bank applies a late refund to the bill already issued."""
+    candidates = (
+        (
+            await session.execute(
+                select(CardStatement)
+                .where(
+                    CardStatement.credit_card_id == card.id,
+                    CardStatement.status.in_(
+                        [StatementStatus.closed, StatementStatus.partially_paid]
+                    ),
+                    CardStatement.period_end < txn.date,
+                    CardStatement.due_date >= txn.date,
+                )
+                .order_by(CardStatement.period_end)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for statement in candidates:
+        if statement.computed_total - statement.paid_amount > ZERO:
+            txn.statement_id = statement.id
+            return statement
+    return await assign_charge_to_statement(session, card, txn)
+
+
 async def get_statement(
     session: AsyncSession, space_id: uuid.UUID, statement_id: uuid.UUID
 ) -> CardStatement:
