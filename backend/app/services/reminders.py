@@ -36,7 +36,10 @@ async def schedule_card_reminders(
     if amount_due <= 0:
         return
     # REM-03: alias + monto + fecha límite; nunca last4.
-    message = f"Pago de {card.alias}: ${amount_due} antes del {statement.due_date.isoformat()}"
+    # CWE-117: el alias es texto libre y el mensaje termina en los logs; se
+    # colapsan los saltos de línea para que no se puedan forjar líneas de log.
+    alias = " ".join(card.alias.split())
+    message = f"Pago de {alias}: ${amount_due} antes del {statement.due_date.isoformat()}"
     for offset in card.reminder_days:
         fire_at = statement.due_date - timedelta(days=int(offset))
         # REM-01: skip past fire dates to avoid immediate spurious notifications

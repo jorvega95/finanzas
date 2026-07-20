@@ -230,6 +230,12 @@ async def create_plan_from_current_installment(
     if monthly_amount < CENT:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Monto inválido")
 
+    # GLO-05/TXN-01: la categoría debe pertenecer al espacio activo y ser de gasto.
+    # Import local: transactions importa de cards/msi (evita ciclo de imports).
+    from app.services.transactions import _validate_category
+
+    await _validate_category(session, space.id, category_id, TransactionType.expense)
+
     card = await get_card(session, space.id, card_id)
     if await card_behavior(session, card) != CardBehavior.credit:
         raise HTTPException(

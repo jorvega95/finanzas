@@ -133,7 +133,7 @@ async def test_cat04_deactivation_hides_from_forms_but_keeps_it(client):
 async def test_cat05_cannot_deactivate_last_active(client):
     """CAT-05: ni la última categoría activa de un kind ni el último método."""
     ctx = await bootstrap_space(client)
-    income = [c for c in ctx["categories"].values() if c["kind"] == "income"]
+    income = list(ctx["income_categories"].values())
     assert len(income) == 4
     for cat in income[:-1]:
         res = await client.patch(

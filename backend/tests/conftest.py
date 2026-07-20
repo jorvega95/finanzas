@@ -6,6 +6,7 @@ same SQLAlchemy models (portable types only — enforced by convention).
 
 import os
 import uuid
+from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret-0123456789abcdef0123456789abcdef")
 
@@ -68,12 +69,19 @@ async def client(session_factory):
 
 
 def make_token(user_id: uuid.UUID | None = None, email: str = "user@example.com") -> str:
+    # exp/iat son obligatorios en la verificación (app.core.security.REQUIRED_CLAIMS),
+    # igual que en los tokens que emite Supabase. El exp es deliberadamente
+    # amplio: varios tests avanzan el reloj con freeze_time y la expiración del
+    # token no es lo que están probando.
+    now = datetime.now(UTC)
     return pyjwt.encode(
         {
             "sub": str(user_id or uuid.uuid4()),
             "aud": "authenticated",
             "email": email,
             "user_metadata": {},
+            "iat": now,
+            "exp": now + timedelta(days=3650),
         },
         JWT_SECRET,
         algorithm="HS256",
@@ -100,7 +108,14 @@ async def bootstrap_space(client, user_id: uuid.UUID | None = None) -> dict:
         "user_id": user_id,
         "space_id": space_id,
         "headers": headers,
-        "categories": {c["name"]: c for c in categories},
+        # CAT-02 siembra "Otros" en gasto y en ingreso: indexar solo por nombre
+        # colapsaba ambas y la ganadora dependía del orden de la query. Las de
+        # gasto tienen prioridad (uso predominante); las de ingreso van aparte.
+        "categories": {
+            c["name"]: c for c in sorted(categories, key=lambda c: c["kind"] == "expense")
+        },
+        "income_categories": {c["name"]: c for c in categories if c["kind"] == "income"},
+        "expense_categories": {c["name"]: c for c in categories if c["kind"] == "expense"},
         "methods": {m["name"]: m for m in methods},
         # CAT-08: seeded card types keyed by behavior for convenience.
         "card_types": {ct["name"]: ct for ct in card_types},

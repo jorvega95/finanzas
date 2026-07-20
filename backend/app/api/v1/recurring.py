@@ -83,6 +83,17 @@ async def update_rule(
     space, _ = space_and_member
     rule = await svc.get_rule(db, space.id, rule_id)
     data = payload.model_dump(exclude_unset=True)
+    # GLO-05: las referencias editables deben seguir perteneciendo al espacio
+    # activo (create_rule ya lo valida; el update no debe ser una puerta trasera).
+    if data.get("category_id") is not None:
+        from app.services.transactions import _validate_category
+
+        await _validate_category(db, space.id, data["category_id"], rule.type)
+    if data.get("payment_method_id") is not None:
+        from app.services.transactions import _validate_payment_method
+
+        await _validate_payment_method(db, space.id, data["payment_method_id"])
+
     for field, value in data.items():
         setattr(rule, field, value)
     await db.commit()

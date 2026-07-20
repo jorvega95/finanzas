@@ -297,6 +297,21 @@ EXPORT_COLUMNS = [
 ]
 
 
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: str) -> str:
+    """CWE-1236: neutraliza fórmulas en celdas CSV.
+
+    Excel/Sheets ejecutan el contenido de una celda que empieza con `=`, `+`,
+    `-` o `@`. Los campos libres (description, notes) y los nombres de catálogo
+    los escribe el usuario, así que se prefijan con `'` para forzar texto plano.
+    """
+    if value and value.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 async def export_transactions_csv(session: AsyncSession, space: Space) -> str:
     """IMP-07: CSV con el mismo esquema conceptual que el import."""
     from app.models.catalogs import PaymentMethod
@@ -338,10 +353,10 @@ async def export_transactions_csv(session: AsyncSession, space: Space) -> str:
                 txn.type.value,
                 str(txn.amount),
                 txn.currency,
-                txn.description,
-                categories.get(txn.category_id, "") if txn.category_id else "",
-                methods.get(txn.payment_method_id, "") if txn.payment_method_id else "",
-                txn.notes or "",
+                _csv_safe(txn.description),
+                _csv_safe(categories.get(txn.category_id, "")) if txn.category_id else "",
+                _csv_safe(methods.get(txn.payment_method_id, "")) if txn.payment_method_id else "",
+                _csv_safe(txn.notes or ""),
             ]
         )
     return output.getvalue()

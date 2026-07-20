@@ -26,6 +26,10 @@ from app.core.config import settings
 # Algorithms Supabase uses for asymmetric signing keys.
 JWKS_ALGORITHMS = ["ES256", "RS256"]
 
+# PyJWT solo valida exp/iat si el claim viene en el payload: sin esto, un token
+# firmado sin exp se aceptaría como eterno. Se exigen explícitamente.
+REQUIRED_CLAIMS = ["exp", "iat", "sub"]
+
 
 @lru_cache(maxsize=1)
 def _jwks_client(supabase_url: str) -> PyJWKClient:
@@ -46,6 +50,7 @@ def verify_supabase_jwt(token: str) -> dict[str, Any]:
                 settings.supabase_jwt_secret,
                 algorithms=["HS256"],
                 audience="authenticated",
+                options={"require": REQUIRED_CLAIMS},
             )
         except jwt.PyJWTError as exc:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token") from exc
@@ -59,6 +64,8 @@ def verify_supabase_jwt(token: str) -> dict[str, Any]:
                 signing_key.key,
                 algorithms=JWKS_ALGORITHMS,
                 audience="authenticated",
+                issuer=f"{settings.supabase_url.rstrip('/')}/auth/v1",
+                options={"require": [*REQUIRED_CLAIMS, "iss"]},
             )
         except jwt.PyJWTError as exc:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token") from exc
