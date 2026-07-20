@@ -8,6 +8,7 @@ from app.api.v1 import (
     imports,
     installments,
     investments,
+    notifications,
     recurring,
     spaces,
     transactions,
@@ -24,3 +25,4 @@ api_router.include_router(investments.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(budgets.router)
 api_router.include_router(imports.router)
+api_router.include_router(notifications.router)

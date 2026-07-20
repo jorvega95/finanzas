@@ -4,6 +4,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { useSpace } from "../features/spaces/SpaceProvider";
 import { useTheme } from "../lib/theme";
+import NotificationBell from "./NotificationBell";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: "📊" },
@@ -68,6 +69,8 @@ export default function AppLayout() {
             </select>
           </div>
           <div className="flex items-center gap-2">
+            {/* REM-04: centro de notificaciones in-app */}
+            <NotificationBell />
             <button onClick={toggle} className="btn-secondary" aria-label="Cambiar tema">
               {theme === "dark" ? "☀️" : "🌙"}
             </button>

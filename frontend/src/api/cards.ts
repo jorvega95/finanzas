@@ -54,14 +54,7 @@ export interface StatementOut {
   is_overdue: boolean;
 }
 
-export interface ReminderOut {
-  id: string;
-  kind: string;
-  fire_at: string;
-  channel: string;
-  message: string;
-  status: string;
-}
+// Los recordatorios se exponen en src/api/notifications.ts (REM-04..REM-07).
 
 export interface CardBody {
   card_type_id: string;
@@ -117,13 +110,6 @@ export function useCardStatements(cardId: string | null) {
     queryKey: ["statements", cardId],
     queryFn: () => api<StatementOut[]>(`/api/v1/cards/${cardId}/statements`),
     enabled: cardId !== null,
-  });
-}
-
-export function useNotifications() {
-  return useQuery({
-    queryKey: ["notifications"],
-    queryFn: () => api<ReminderOut[]>("/api/v1/cards/notifications/inbox"),
   });
 }
 
@@ -204,11 +190,3 @@ export function useCloseCycles() {
   });
 }
 
-export function useDismissNotification() {
-  const invalidate = useInvalidateCards();
-  return useMutation({
-    mutationFn: (reminderId: string) =>
-      api(`/api/v1/cards/notifications/${reminderId}`, { method: "DELETE" }),
-    onSuccess: invalidate,
-  });
-}

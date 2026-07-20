@@ -200,16 +200,21 @@ async def test_rem01_reminders_scheduled_and_canceled_on_payment(client):
     statement_id = closed[0]["id"]
 
     # REM-01: due 5-jul ⇒ recordatorios 2-jul y 4-jul (in_app + email).
-    inbox = (await client.get("/api/v1/cards/notifications/inbox", headers=ctx["headers"])).json()
-    assert {r["fire_at"] for r in inbox} == {"2026-07-02", "2026-07-04"}
+    # REM-06: aún no se disparan (hoy 20-jun), así que se consultan en el historial.
+    async def history():
+        res = await client.get("/api/v1/notifications/history", headers=ctx["headers"])
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    scheduled = await history()
+    assert {r["fire_at"] for r in scheduled} == {"2026-07-02", "2026-07-04"}
     # REM-03: el mensaje lleva alias y nunca last4.
-    assert all("BBVA Azul" in r["message"] for r in inbox)
-    assert all("1234" not in r["message"] for r in inbox)
+    assert all("BBVA Azul" in r["message"] for r in scheduled)
+    assert all("1234" not in r["message"] for r in scheduled)
 
     # REM-02: re-cerrar no duplica recordatorios.
     await close_cycles(client, ctx)
-    inbox2 = (await client.get("/api/v1/cards/notifications/inbox", headers=ctx["headers"])).json()
-    assert len(inbox2) == len(inbox)
+    assert len(await history()) == len(scheduled)
 
     # REM-01: pagar cancela los pendientes.
     await client.post(
@@ -222,8 +227,7 @@ async def test_rem01_reminders_scheduled_and_canceled_on_payment(client):
             "statement_id": statement_id,
         },
     )
-    inbox3 = (await client.get("/api/v1/cards/notifications/inbox", headers=ctx["headers"])).json()
-    assert all(r["status"] == "canceled" for r in inbox3)
+    assert all(r["status"] == "canceled" for r in await history())
 
 
 @freeze_time("2026-06-20 18:00:00")

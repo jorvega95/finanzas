@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.cards import CutoffDayPolicy, StatementStatus
 from app.models.catalogs import CardBehavior
 from app.models.msi import InstallmentStatus, PlanStatus
-from app.models.reminders import ReminderChannel, ReminderKind, ReminderStatus
 from app.schemas.transactions import Money, MoneyNonNeg, MoneyOut
 
 
@@ -212,12 +211,4 @@ class MoveCycle(BaseModel):
     direction: str = Field(pattern="^(prev|next)$")
 
 
-class ReminderOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    kind: ReminderKind
-    fire_at: dt.date
-    channel: ReminderChannel
-    message: str
-    status: ReminderStatus
+# Los recordatorios se exponen en app/schemas/notifications.py (REM-04..REM-07).

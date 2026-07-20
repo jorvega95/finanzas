@@ -10,12 +10,13 @@ Documentación completa de los endpoints de la API REST de Finanzas. Todos los e
 2. **[Catálogos (Catalogs)](./catalogs.md)** — Categorías, métodos de pago y tipos de tarjeta (CAT-01..CAT-08).
 3. **[Transacciones (Transactions)](./transactions.md)** — Alta, edición y consulta de transacciones (TXN-01..TXN-06, REC-03).
 4. **[Reglas Recurrentes (Recurring)](./recurring.md)** — Creación y gestión de reglas de generación automática (REC-01..REC-05).
-5. **[Tarjetas (Cards)](./cards.md)** — Tarjetas de crédito y débito, estados de cuenta, pagos, ciclos y recordatorios (TDC-01..TDC-16, TAR-01..TAR-07, REM-01..REM-05).
+5. **[Tarjetas (Cards)](./cards.md)** — Tarjetas de crédito y débito, estados de cuenta, pagos y ciclos (TDC-01..TDC-16, TAR-01..TAR-07).
 6. **[Cuotas/MSI (Installments)](./installments.md)** — Planes de compra en cuotas (MSI-01..MSI-10).
 7. **[Inversiones (Investments)](./investments.md)** — Cuentas de inversión, portafolio, snapshots de patrimonio (INV-01..INV-06, PAT-01..PAT-02).
 8. **[Dashboard (Dashboard)](./dashboard.md)** — Resumen de ingresos/gastos, tendencias, próximos compromisos y pronóstico de flujo (DSH-01..DSH-05, PRO-01..PRO-06).
 9. **[Presupuestos (Budgets)](./budgets.md)** — Presupuestos por categoría mensual, seguimiento de consumo y alertas (PRE-01..PRE-04).
 10. **[Importación/Exportación (Imports)](./imports.md)** — CSV preview, confirmación, rollback y exportación de datos (IMP-01..IMP-07).
+11. **[Notificaciones (Notifications)](./notifications.md)** — Centro de notificaciones in-app: inbox, badge de no leídos y descarte (REM-04..REM-07).
 
 ## Notas generales
 

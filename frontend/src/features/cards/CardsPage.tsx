@@ -23,8 +23,6 @@ import {
   useCardStatements,
   useCloseCycles,
   useCreateCard,
-  useDismissNotification,
-  useNotifications,
   usePayCard,
   useSaveCardLayout,
   useUpdateCard,
@@ -692,8 +690,6 @@ export default function CardsPage() {
 
   const [showInactive, setShowInactive] = useState(false);
   const cards = useCards(true, showInactive);
-  const notifications = useNotifications();
-  const dismiss = useDismissNotification();
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -766,8 +762,6 @@ export default function CardsPage() {
     };
   }, [qc]);
 
-  const pendingNotifs = (notifications.data ?? []).filter((n) => n.status === "sent");
-
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
@@ -800,26 +794,7 @@ export default function CardsPage() {
         </div>
       </div>
 
-      {pendingNotifs.length > 0 && (
-        <section className="card p-4">
-          <h2 className="mb-2 text-sm font-semibold">Recordatorios</h2>
-          <ul className="space-y-1">
-            {pendingNotifs.slice(0, 5).map((n) => (
-              <li key={n.id} className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-ink-muted dark:text-slate-400">{n.message}</span>
-                <button
-                  className="shrink-0 rounded p-1 text-ink-muted hover:bg-surface hover:text-red-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-red-400"
-                  title="Descartar recordatorio"
-                  disabled={dismiss.isPending}
-                  onClick={() => dismiss.mutate(n.id)}
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {/* Los recordatorios viven en la campana del header (REM-04, OPP-01). */}
 
       {showForm && <NewCardForm onDone={() => setShowForm(false)} />}
 

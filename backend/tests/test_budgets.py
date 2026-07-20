@@ -121,7 +121,12 @@ async def test_pre03_alerts_once_per_level(client):
     assert await check() == 2  # nivel 100%
     assert await check() == 0
 
-    inbox = (await client.get("/api/v1/cards/notifications/inbox", headers=ctx["headers"])).json()
-    budget_alerts = [r for r in inbox if r["kind"] == "budget_alert"]
+    # REM-06: el historial conserva los avisos aún no disparados.
+    all_reminders = (
+        await client.get("/api/v1/notifications/history", headers=ctx["headers"])
+    ).json()
+    budget_alerts = [
+        r for r in all_reminders if r["kind"] == "budget_alert" and r["channel"] == "in_app"
+    ]
     assert len(budget_alerts) == 2  # in_app: una por nivel
     assert all("Comida" in r["message"] for r in budget_alerts)

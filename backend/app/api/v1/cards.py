@@ -3,14 +3,13 @@
 import datetime as dt
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 from sqlalchemy import select
 
 from app.core.dates import today_in_tz
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
 from app.models.cards import Card, CardStatement, StatementStatus
 from app.models.catalogs import CardBehavior
-from app.models.reminders import Reminder, ReminderChannel, ReminderStatus
 from app.models.spaces import Space
 from app.schemas.cards import (
     CardCreate,
@@ -21,7 +20,6 @@ from app.schemas.cards import (
     DebtSummary,
     NextPaymentOut,
     PaymentCreate,
-    ReminderOut,
     StatementOut,
 )
 from app.schemas.transactions import TransactionOut
@@ -208,32 +206,5 @@ async def close_cycles(db: DbSession, space_and_member: EditorSpace) -> list[Sta
     return [_statement_out(s, today) for s in closed]
 
 
-@router.get("/notifications/inbox", response_model=list[ReminderOut])
-async def notifications_inbox(db: DbSession, space_and_member: ActiveSpace) -> list[Reminder]:
-    """REM-04: in-app notification center. Excludes dismissed (REM-05)."""
-    space, _ = space_and_member
-    rows = await db.execute(
-        select(Reminder)
-        .where(
-            Reminder.space_id == space.id,
-            Reminder.channel == ReminderChannel.in_app,
-            Reminder.status != ReminderStatus.dismissed,
-        )
-        .order_by(Reminder.fire_at.desc())
-        .limit(50)
-    )
-    return list(rows.scalars().all())
-
-
-@router.delete("/notifications/{reminder_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def dismiss_notification(
-    db: DbSession, space_and_member: ActiveSpace, reminder_id: uuid.UUID
-) -> None:
-    """REM-05: soft-delete un recordatorio in-app. Pasa a 'dismissed' y
-    desaparece del inbox; el registro se conserva para auditoría."""
-    space, _ = space_and_member
-    reminder = await db.get(Reminder, reminder_id)
-    if reminder is None or reminder.space_id != space.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Recordatorio no encontrado")
-    reminder.status = ReminderStatus.dismissed
-    await db.commit()
+# El centro de notificaciones in-app vive en su propio router (REM-04..REM-07):
+# ver app/api/v1/notifications.py.

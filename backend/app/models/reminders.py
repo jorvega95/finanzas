@@ -60,3 +60,5 @@ class Reminder(Base, TimestampMixin):
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # REM-02 retries
     sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # REM-07: read (badge) is independent from dismissed (REM-05). NULL = unread.
+    read_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))

@@ -1,6 +1,6 @@
 # Tarjetas (Cards)
 
-Gestión de tarjetas de crédito y débito, estados de cuenta, pagos y ciclos de facturación (TDC-01..TDC-16, TAR-01..TAR-07, REM-01..REM-05).
+Gestión de tarjetas de crédito y débito, estados de cuenta, pagos y ciclos de facturación (TDC-01..TDC-16, TAR-01..TAR-07, REM-01, REM-01b).
 
 Una **tarjeta** puede ser de crédito (revolvente) o débito/prepago. Las tarjetas de crédito generan **ciclos de facturación** (statements) automáticamente según reglas TDC-02..TDC-04. Los recordatorios (REM-01) disparan notificaciones cercanas a la fecha de vencimiento.
 
@@ -319,65 +319,9 @@ curl -X POST http://localhost:8000/api/v1/cards/close-cycles \
 
 ---
 
-## `GET /api/v1/cards/notifications/inbox`
+## Notificaciones
 
-**Para qué sirve:** Centro de notificaciones in-app (REM-04). Excluye descartadas (REM-05). Recordatorios sin leer, máximo 50.
-
-**Auth:** requiere JWT + membresía. No-miembro ⇒ 404.
-
-**Path params:** ninguno
-
-**Query params:** ninguno
-
-**Request body:** ninguno
-
-**Respuesta** `200` (list[`ReminderOut`]):
-- `id` (uuid)
-- `space_id` (uuid)
-- `kind` (`ReminderKind`) — `payment_due`, `payment_overdue`, etc.
-- `channel` (`ReminderChannel`) — `in_app`, `email`, `sms` (en Fase posterior).
-- `fire_at` (datetime) — cuándo dispara.
-- `status` (`ReminderStatus`) — `pending`, `sent`, `dismissed`.
-- (otros campos según el modelo)
-
-**Errores:**
-- `401` JWT inválido o expirado.
-- `404` espacio no encontrado o no-miembro.
-
-**Ejemplo:**
-```bash
-curl -s "http://localhost:8000/api/v1/cards/notifications/inbox" \
-  -H "Authorization: Bearer $JWT" \
-  -H "X-Space-Id: $SPACE_ID" | jq .
-```
-
----
-
-## `DELETE /api/v1/cards/notifications/{reminder_id}`
-
-**Para qué sirve:** Descarta una notificación in-app (REM-05). Soft-delete: cambia status a `dismissed` y desaparece del inbox; registro se preserva para auditoría.
-
-**Auth:** requiere JWT + membresía. No-miembro ⇒ 404.
-
-**Path params:**
-- `reminder_id` (uuid) — ID del recordatorio.
-
-**Query params:** ninguno
-
-**Request body:** ninguno
-
-**Respuesta** `204 No Content`: descartado exitosamente.
-
-**Errores:**
-- `401` JWT inválido o expirado.
-- `404` recordatorio o espacio no encontrado; no-miembro o recordatorio no pertenece al espacio.
-
-**Ejemplo:**
-```bash
-curl -X DELETE http://localhost:8000/api/v1/cards/notifications/$REMINDER_ID \
-  -H "Authorization: Bearer $JWT" \
-  -H "X-Space-Id: $SPACE_ID"
-```
+El centro de notificaciones in-app (inbox, badge de no leídos y descarte) vive en su propio router: ver **[notifications.md](./notifications.md)** (REM-04..REM-07). Las tarjetas solo *generan* los recordatorios al cerrar un statement (REM-01) y los cancelan al pagarlo (REM-01b).
 
 ---
 
