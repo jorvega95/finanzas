@@ -237,3 +237,108 @@ async def test_pat01_net_worth_assets_minus_card_debt(client, db_session, monkey
     await client.post("/api/v1/investments/net-worth/snapshot", headers=ctx["headers"])
     history = (await client.get("/api/v1/investments/net-worth", headers=ctx["headers"])).json()
     assert len(history) == 1
+
+
+async def _seed_holding(client, ctx, symbol, kind="fixed_income"):
+    account = await make_account(client, ctx, kind=kind, name=f"acc-{symbol}")
+    await move(
+        client,
+        ctx,
+        account["id"],
+        asset_symbol=symbol,
+        quantity="100",
+        price="10.00",
+        currency="MXN",
+    )
+    return account
+
+
+async def test_inv04_manual_price_requires_owned_symbol(client):
+    """INV-04: no se puede fijar precio de un símbolo que el espacio no posee."""
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/investments/prices",
+        headers=ctx["headers"],
+        json={"symbol": "CETES-28", "price": "10.00", "currency": "MXN"},
+    )
+    assert res.status_code == 404, res.text
+
+    await _seed_holding(client, ctx, "CETES-28")
+    res = await client.post(
+        "/api/v1/investments/prices",
+        headers=ctx["headers"],
+        json={"symbol": "CETES-28", "price": "10.00", "currency": "MXN"},
+    )
+    assert res.status_code == 200, res.text
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_inv04b_manual_price_isolated_between_spaces(client, db_session, monkeypatch):
+    """INV-04b: el precio manual de un espacio no altera la valuación de otro,
+    aunque compartan el símbolo."""
+    monkeypatch.setattr(prices, "_default_provider", FakeProvider({}))
+    db_session.add(ExchangeRate(base="MXN", quote="MXN", date=date(2026, 6, 20), rate=Decimal("1")))
+    await db_session.commit()
+
+    import uuid
+
+    a = await bootstrap_space(client, uuid.uuid4())
+    b = await bootstrap_space(client, uuid.uuid4())
+    await _seed_holding(client, a, "CETES-28")
+    await _seed_holding(client, b, "CETES-28")
+
+    # A fija 10.00, B fija 99.00 sobre el MISMO símbolo.
+    for ctx, price in ((a, "10.00"), (b, "99.00")):
+        res = await client.post(
+            "/api/v1/investments/prices",
+            headers=ctx["headers"],
+            json={"symbol": "CETES-28", "price": price, "currency": "MXN"},
+        )
+        assert res.status_code == 200, res.text
+
+    # Cada espacio ve su propio precio; B no pisó a A.
+    a_holding = (await client.get("/api/v1/investments/portfolio", headers=a["headers"])).json()[
+        "holdings"
+    ][0]
+    b_holding = (await client.get("/api/v1/investments/portfolio", headers=b["headers"])).json()[
+        "holdings"
+    ][0]
+    assert a_holding["price"] == "10.00000000"
+    assert b_holding["price"] == "99.00000000"
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_inv04b_manual_price_wins_over_provider_cache(client, db_session, monkeypatch):
+    """INV-04b: el precio manual del espacio gana sobre la caché del proveedor,
+    y fijarlo no consume una llamada del proveedor para ese símbolo."""
+    provider = FakeProvider({"bitcoin": "50000"})
+    monkeypatch.setattr(prices, "_default_provider", provider)
+    db_session.add(ExchangeRate(base="USD", quote="MXN", date=date(2026, 6, 20), rate=Decimal("1")))
+    db_session.add(ExchangeRate(base="MXN", quote="MXN", date=date(2026, 6, 20), rate=Decimal("1")))
+    await db_session.commit()
+
+    ctx = await bootstrap_space(client)
+    account = await make_account(client, ctx, kind="crypto", name="Wallet")
+    await move(client, ctx, account["id"], asset_symbol="bitcoin", quantity="1", price="40000.00")
+
+    # Con precio de proveedor: 50000.
+    holding = (await client.get("/api/v1/investments/portfolio", headers=ctx["headers"])).json()[
+        "holdings"
+    ][0]
+    assert holding["price"] == "50000.00000000"
+    assert holding["price_source"] == "coingecko"
+    calls_before = provider.calls
+
+    # Precio manual: gana, y no toca al proveedor para bitcoin.
+    res = await client.post(
+        "/api/v1/investments/prices",
+        headers=ctx["headers"],
+        json={"symbol": "bitcoin", "price": "1.00", "currency": "USD"},
+    )
+    assert res.status_code == 200, res.text
+    holding = (await client.get("/api/v1/investments/portfolio", headers=ctx["headers"])).json()[
+        "holdings"
+    ][0]
+    assert holding["price"] == "1.00000000"
+    assert holding["price_source"] == "manual"
+    assert provider.calls == calls_before

@@ -111,7 +111,12 @@ class InvestmentMovement(Base, AuditMixin):
 
 
 class AssetPrice(Base):
-    """INV-03/INV-04: server-side price cache (CoinGecko) and manual prices."""
+    """INV-03: caché server-side del proveedor, compartida por todo el sistema.
+
+    Es global a propósito: INV-03 exige un solo batch por refresh para todos
+    los símbolos (presupuesto de créditos de CoinGecko). Los precios manuales
+    NO viven aquí — ver ManualAssetPrice (INV-04b).
+    """
 
     __tablename__ = "asset_prices"
 
@@ -120,6 +125,24 @@ class AssetPrice(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     fetched_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="coingecko")
+
+
+class ManualAssetPrice(Base):
+    """INV-04: precio capturado a mano, aislado por espacio (GLO-05).
+
+    INV-04b: gana sobre la caché del proveedor para el espacio que lo capturó,
+    y nunca la contamina ni detiene su refresco para los demás espacios.
+    """
+
+    __tablename__ = "manual_asset_prices"
+
+    space_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    symbol: Mapped[str] = mapped_column(String(60), primary_key=True)
+    price: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="MXN")
+    fetched_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class PortfolioSnapshot(Base):

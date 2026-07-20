@@ -46,6 +46,25 @@ async def get_account(
     return account
 
 
+async def space_holds_symbol(session: AsyncSession, space_id: uuid.UUID, symbol: str) -> bool:
+    """INV-04: ¿el espacio tiene algún holding (qty > 0) con este símbolo?
+
+    Predicado para autorizar la captura de un precio manual: solo se permite
+    sobre instrumentos que el espacio efectivamente posee.
+    """
+    found = await session.scalar(
+        select(Holding.id)
+        .join(InvestmentAccount, Holding.account_id == InvestmentAccount.id)
+        .where(
+            InvestmentAccount.space_id == space_id,
+            Holding.asset_symbol == symbol,
+            Holding.quantity > 0,
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
 async def create_account(
     session: AsyncSession,
     space: Space,
@@ -161,7 +180,7 @@ async def portfolio_valuation(
         .all()
     )
     symbols = sorted({h.asset_symbol for a in accounts for h in a.holdings if h.quantity > 0})
-    price_map = await prices.get_prices(session, symbols, provider)
+    price_map = await prices.get_prices(session, space.id, symbols, provider)
 
     holdings_out: list[dict[str, Any]] = []
     total = ZERO

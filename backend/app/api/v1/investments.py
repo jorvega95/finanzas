@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
@@ -82,8 +82,17 @@ async def portfolio(db: DbSession, space_and_member: ActiveSpace) -> PortfolioOu
 async def manual_price(
     db: DbSession, space_and_member: EditorSpace, payload: ManualPrice
 ) -> dict[str, str]:
-    """INV-04: captura manual de precio para activos no-crypto."""
-    row = await prices.set_manual_price(db, payload.symbol, payload.price, payload.currency)
+    """INV-04: captura manual de precio para activos no-crypto, por espacio."""
+    space, _ = space_and_member
+    # INV-04: solo se puede fijar precio de símbolos que el espacio posee.
+    if not await svc.space_holds_symbol(db, space.id, payload.symbol):
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "No tienes ninguna posición con ese símbolo",
+        )
+    row = await prices.set_manual_price(
+        db, space.id, payload.symbol, payload.price, payload.currency
+    )
     await db.commit()
     return {"symbol": row.symbol, "price": str(row.price), "currency": row.currency}
 
