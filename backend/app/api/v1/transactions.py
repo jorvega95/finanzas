@@ -1,10 +1,10 @@
-"""Router: transactions. Implements TXN-01..TXN-06, REC-03 (review tray)."""
+"""Router: transactions. Implements TXN-01..TXN-06, TXN-10, REC-03 (review tray)."""
 
 import uuid
 from datetime import date
 
 from fastapi import APIRouter, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
 from app.models.transactions import Transaction, TransactionType
@@ -64,7 +64,14 @@ async def list_transactions(
     if category_id is not None:
         filters.append(Transaction.category_id == category_id)
     if payment_method_id is not None:
-        filters.append(Transaction.payment_method_id == payment_method_id)
+        # TXN-10: the filter means "movements touching this method", so transfers
+        # match on either leg (source or destination).
+        filters.append(
+            or_(
+                Transaction.payment_method_id == payment_method_id,
+                Transaction.payment_method_to_id == payment_method_id,
+            )
+        )
     if needs_review is not None:
         filters.append(Transaction.needs_review.is_(needs_review))
 

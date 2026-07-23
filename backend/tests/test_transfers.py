@@ -422,3 +422,65 @@ async def test_tar06_credit_no_debt_signed_balance_is_zero(client):
 
     detail = await get_card(client, ctx, credit["id"])
     assert detail["signed_balance"] == "0.00"
+
+
+# ---------------------------------------------------------------------------
+# TXN-10: el filtro por método de pago incluye ambas piernas de la transferencia
+# ---------------------------------------------------------------------------
+
+
+@freeze_time("2026-06-20 12:00:00")
+async def test_txn10_filter_by_method_matches_transfer_destination(client):
+    """TXN-10: filtrar por el método destino devuelve la transferencia."""
+    ctx = await bootstrap_space(client)
+    debito = await make_debit(client, ctx, initial_balance="5000.00")
+    efectivo = ctx["methods"]["Efectivo"]["id"]
+
+    res = await transfer(client, ctx, debito["payment_method_id"], efectivo, "400.00")
+    assert res.status_code == 201, res.text
+    txn_id = res.json()["id"]
+
+    # Origen: la encuentra (comportamiento previo).
+    res = await client.get(
+        f"/api/v1/transactions?payment_method_id={debito['payment_method_id']}",
+        headers=ctx["headers"],
+    )
+    assert [t["id"] for t in res.json()["items"]] == [txn_id]
+
+    # Destino: también debe encontrarla (TXN-10).
+    res = await client.get(
+        f"/api/v1/transactions?payment_method_id={efectivo}", headers=ctx["headers"]
+    )
+    assert [t["id"] for t in res.json()["items"]] == [txn_id]
+
+
+@freeze_time("2026-06-20 12:00:00")
+async def test_txn10_card_payment_visible_when_filtering_by_card_method(client):
+    """TXN-10: un pago de TDC (TDC-10) aparece al filtrar por la tarjeta pagada."""
+    ctx = await bootstrap_space(client)
+    credit = await make_credit(client, ctx)
+    debito = await make_debit(client, ctx, initial_balance="5000.00")
+
+    await charge_credit(client, ctx, credit["payment_method_id"], "500.00", "2026-06-10")
+    await close_cycles(client, ctx)
+
+    res = await client.post(
+        f"/api/v1/cards/{credit['id']}/payments",
+        headers=ctx["headers"],
+        json={
+            "amount": "500.00",
+            "from_payment_method_id": debito["payment_method_id"],
+            "date": "2026-06-20",
+        },
+    )
+    assert res.status_code == 201, res.text
+    payment_id = res.json()["id"]
+
+    res = await client.get(
+        f"/api/v1/transactions?payment_method_id={credit['payment_method_id']}",
+        headers=ctx["headers"],
+    )
+    items = res.json()["items"]
+    assert payment_id in [t["id"] for t in items]
+    # El cargo original sigue apareciendo: el filtro no reemplaza la pierna origen.
+    assert len(items) == 2
