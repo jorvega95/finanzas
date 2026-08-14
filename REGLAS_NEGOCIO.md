@@ -9,6 +9,7 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 - **GLO-03 · Soft-delete:** catálogos, tarjetas y cuentas de inversión nunca se borran físicamente si tienen registros asociados; se desactivan (`is_active=false`). Borrado físico solo si no tienen referencias.
 - **GLO-04 · Auditoría:** toda entidad lleva `created_by`, `created_at`, `updated_at`. Las transacciones además `updated_by`.
 - **GLO-05 · Aislamiento:** ninguna query de negocio cruza espacios. Toda tabla de dominio lleva `space_id` y RLS activa; FastAPI filtra siempre por el espacio activo de la sesión.
+- **GLO-06 · Errores legibles:** la UI NO DEBE mostrar códigos crudos (`Error 422`, `Error 500`). Todo error de validación de FastAPI (`detail` como lista de errores de Pydantic) se traduce en el cliente a una frase en es-MX que nombre el campo y la condición violada (`"El monto debe ser mayor a 0."`); ver `src/lib/apiErrors.ts`. Las restricciones que el usuario puede violar tecleando (monto ≤ 0, texto vacío, rangos) DEBEN además validarse en el formulario antes de enviar, y cuando exista una alternativa de negocio para lo que el usuario intentaba, el mensaje la señala (p. ej. monto 0 en un recurrente ⇒ descartar la instancia o pausar la regla).
 
 ---
 

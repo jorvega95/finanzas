@@ -24,7 +24,7 @@ import {
 import ImportSection from "./ImportSection";
 import MembersSection from "../spaces/MembersSection";
 import { useSpace } from "../spaces/SpaceProvider";
-import { formatMoney } from "../../lib/money";
+import { formatMoney, isPositiveAmount } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 
 const FREQ_LABELS: Record<string, string> = {
@@ -621,6 +621,7 @@ function RecurringSection() {
   const [editCategoryId, setEditCategoryId] = useState("");
   const [editMethodId, setEditMethodId] = useState("");
   const [editEndDate, setEditEndDate] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Modal de eliminación
   const [deletingRule, setDeletingRule] = useState<RecurringRuleOut | null>(null);
@@ -675,11 +676,22 @@ function RecurringSection() {
     setEditCategoryId(rule.category_id ?? "");
     setEditMethodId(rule.payment_method_id ?? "");
     setEditEndDate(rule.end_date ?? "");
+    setEditError(null);
   }
 
   function handleEditSubmit(e: FormEvent) {
     e.preventDefault();
     if (!editingRule) return;
+    setEditError(null);
+    // El backend exige monto > 0 (REC-01): explicamos la alternativa real de
+    // "este mes no cuenta" en vez de dejar que rebote con un 422.
+    if (!isPositiveAmount(editAmount)) {
+      setEditError(
+        "El monto debe ser mayor a 0. Si este mes no aplica, descarta el movimiento " +
+          "en «Por confirmar»; si ya no aplica en adelante, pausa la regla.",
+      );
+      return;
+    }
     updateRule.mutate(
       {
         id: editingRule.id,
@@ -911,7 +923,11 @@ function RecurringSection() {
               />
             </div>
           </div>
-          <ErrorText error={updateRule.error} />
+          {editError ? (
+            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{editError}</p>
+          ) : (
+            <ErrorText error={updateRule.error} />
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" className="btn-secondary" onClick={() => setEditingRule(null)}>
               Cancelar

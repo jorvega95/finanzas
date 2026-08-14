@@ -1,6 +1,7 @@
 // Cliente HTTP hacia FastAPI. Adjunta el JWT de Supabase en Authorization.
 // Tipos generados con `npm run generate:api` (src/api/schema.d.ts).
 import { supabase } from "../auth/supabase";
+import { translateValidationErrors } from "../lib/apiErrors";
 import { getActiveSpaceId } from "./activeSpace";
 
 export class ApiError extends Error {
@@ -31,7 +32,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     let detail = `Error ${res.status}`;
     try {
       const body = await res.json();
-      if (typeof body.detail === "string") detail = body.detail;
+      if (typeof body.detail === "string") {
+        detail = body.detail;
+      } else {
+        // 422 de Pydantic: lista de errores en inglés (GLO-06).
+        detail = translateValidationErrors(body.detail) ?? detail;
+      }
     } catch {
       // sin cuerpo JSON
     }

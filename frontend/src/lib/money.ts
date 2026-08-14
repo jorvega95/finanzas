@@ -5,3 +5,11 @@ export function formatMoney(amount: string | number, currency = "MXN"): string {
     Number(amount),
   );
 }
+
+// GLO-01: sin aritmética float. Un monto es positivo si es decimal bien formado
+// y tiene al menos un dígito significativo (descarta "0", "0.00", "", "-5").
+export function isPositiveAmount(value: string): boolean {
+  const trimmed = value.trim();
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return false;
+  return /[1-9]/.test(trimmed);
+}

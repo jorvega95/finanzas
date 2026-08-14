@@ -12,7 +12,7 @@ import {
   type TransactionOut,
 } from "../../api/transactions";
 import { useSpace } from "../spaces/SpaceProvider";
-import { formatMoney } from "../../lib/money";
+import { formatMoney, isPositiveAmount } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
 
@@ -108,6 +108,14 @@ export default function TransactionsPage() {
     e.preventDefault();
     if (!editingTxn) return;
     setEditError(null);
+    if (!isPositiveAmount(editAmount)) {
+      setEditError(
+        editingTxn.needs_review
+          ? "El monto debe ser mayor a 0. Si este mes no aplica, usa «Descartar» en la bandeja Por confirmar."
+          : "El monto debe ser mayor a 0.",
+      );
+      return;
+    }
     try {
       await update.mutateAsync({
         id: editingTxn.id,
@@ -214,6 +222,10 @@ export default function TransactionsPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
+    if (!isPositiveAmount(amount)) {
+      setFormError("El monto debe ser mayor a 0.");
+      return;
+    }
     try {
       await create.mutateAsync({
         type,
