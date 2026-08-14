@@ -7,10 +7,13 @@ from fastapi import APIRouter, Query
 
 from app.core.dates import today_in_tz
 from app.core.deps import ActiveSpace, DbSession
+from app.models.catalogs import ExpenseNature
 from app.schemas.dashboard import (
     CategoryBreakdownRow,
     DashboardSummary,
     ForecastSummary,
+    NatureDetail,
+    NatureDetailItem,
     Totals,
     TrendPoint,
     UpcomingItem,
@@ -43,6 +46,28 @@ async def summary(
         by_nature=by_nature,
         trend=[TrendPoint(**point) for point in trend],
         upcoming=[UpcomingItem(**item) for item in upcoming],
+    )
+
+
+@router.get("/by-nature/{nature}", response_model=NatureDetail)
+async def nature_detail(
+    db: DbSession,
+    space_and_member: ActiveSpace,
+    nature: ExpenseNature,
+    month: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}$")] = None,
+) -> NatureDetail:
+    """DSH-06: drill-down de una naturaleza; mismos predicados que DSH-02/03."""
+    space, _ = space_and_member
+    month = month or today_in_tz(space.timezone).strftime("%Y-%m")
+    start, end = svc.month_bounds(month)
+
+    detail = await svc.expenses_by_nature_detail(db, space, nature, start, end)
+    return NatureDetail(
+        nature=detail["nature"],
+        month=month,
+        total=detail["total"],
+        by_category=[CategoryBreakdownRow(**row) for row in detail["by_category"]],
+        items=[NatureDetailItem(**item) for item in detail["items"]],
     )
 
 

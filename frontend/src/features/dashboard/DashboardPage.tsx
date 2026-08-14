@@ -27,14 +27,11 @@ import {
 } from "../../api/dashboard";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
+import { useChartTheme } from "../../lib/chartTheme";
 import { useSpace } from "../spaces/SpaceProvider";
+import NatureDetailModal from "./NatureDetailModal";
+import { CHART_COLORS as COLORS, NATURE_LABELS } from "./nature";
 
-const COLORS = ["#0d9488", "#f59e0b", "#6366f1", "#ef4444", "#10b981", "#8b5cf6", "#f97316", "#06b6d4"];
-const NATURE_LABELS: Record<string, string> = {
-  fixed: "Fijo",
-  variable: "Variable",
-  discretionary: "Discrecional",
-};
 const KIND_ICONS: Record<string, string> = {
   card_due: "💳",
   msi_quota: "📅",
@@ -159,10 +156,21 @@ function BudgetsSection({ month }: { month: string }) {
 export default function DashboardPage() {
   const { activeSpace } = useSpace();
   const [month, setMonth] = useState(currentMonth);
+  const [natureDetail, setNatureDetail] = useState<string | null>(null);
   const dashboard = useDashboard(month);
   const data = dashboard.data;
   const totals = data?.totals;
   const currency = activeSpace.base_currency;
+  const chart = useChartTheme();
+
+  // DSH-06: cada rebanada es navegable; `key` conserva el valor de dominio.
+  const natureData = Object.entries(data?.by_nature ?? {}).map(([key, value]) => ({
+    key,
+    name: NATURE_LABELS[key] ?? key,
+    value: Number(value),
+    amount: value,
+  }));
+  const natureTotal = natureData.reduce((sum, row) => sum + row.value, 0);
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -198,11 +206,17 @@ export default function DashboardPage() {
           <h2 className="mb-3 font-semibold">Tendencia 6 meses</h2>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={data?.trend ?? []}>
-              <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-              <XAxis dataKey="month" fontSize={11} />
-              <YAxis fontSize={11} />
-              <Tooltip formatter={(v) => formatMoney(String(v), currency)} />
-              <Legend />
+              <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+              <XAxis dataKey="month" fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
+              <YAxis fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
+              <Tooltip
+                formatter={(v) => formatMoney(String(v), currency)}
+                cursor={chart.cursorLine}
+                {...chart.tooltip}
+              />
+              <Legend
+                formatter={(value) => <span style={{ color: chart.legend }}>{value}</span>}
+              />
               <Line type="monotone" dataKey="income" name="Ingresos" stroke="#10b981" dot={false} />
               <Line type="monotone" dataKey="expenses" name="Gastos" stroke="#ef4444" dot={false} />
             </LineChart>
@@ -220,9 +234,20 @@ export default function DashboardPage() {
                 data={(data?.by_category ?? []).map((r) => ({ ...r, value: Number(r.total) }))}
                 layout="vertical"
               >
-                <XAxis type="number" fontSize={11} />
-                <YAxis type="category" dataKey="category_name" width={110} fontSize={11} />
-                <Tooltip formatter={(v) => formatMoney(String(v), currency)} />
+                <XAxis type="number" fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
+                <YAxis
+                  type="category"
+                  dataKey="category_name"
+                  width={110}
+                  fontSize={11}
+                  tick={{ fill: chart.tick }}
+                  stroke={chart.axis}
+                />
+                <Tooltip
+                  formatter={(v) => formatMoney(String(v), currency)}
+                  cursor={chart.cursorFill}
+                  {...chart.tooltip}
+                />
                 <Bar dataKey="value" name="Gasto" radius={[0, 4, 4, 0]}>
                   {(data?.by_category ?? []).map((_, index) => (
                     <Cell key={index} fill={COLORS[index % COLORS.length]} />
@@ -233,31 +258,66 @@ export default function DashboardPage() {
           )}
         </section>
 
-        {/* Por naturaleza (CAT-03/DSH-03) */}
+        {/* Por naturaleza (CAT-03/DSH-03), con drill-down (DSH-06) */}
         <section className="card p-5">
           <h2 className="mb-3 font-semibold">Por naturaleza</h2>
-          {Object.keys(data?.by_nature ?? {}).length === 0 ? (
+          {natureData.length === 0 ? (
             <p className="text-sm text-ink-muted dark:text-slate-400">Sin gastos este mes.</p>
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie
-                  data={Object.entries(data?.by_nature ?? {}).map(([key, value]) => ({
-                    name: NATURE_LABELS[key] ?? key,
-                    value: Number(value),
-                  }))}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={50}
-                  label={(entry) => entry.name}
-                >
-                  {Object.keys(data?.by_nature ?? {}).map((_, index) => (
-                    <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(v) => formatMoney(String(v), currency)} />
-              </PieChart>
-            </ResponsiveContainer>
+            <>
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie
+                    data={natureData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={50}
+                    cursor="pointer"
+                    onClick={(_, index) => setNatureDetail(natureData[index].key)}
+                    label={({ name, x, y, textAnchor }) => (
+                      <text
+                        x={x}
+                        y={y}
+                        textAnchor={textAnchor}
+                        dominantBaseline="central"
+                        fill={chart.tick}
+                        fontSize={12}
+                      >
+                        {name}
+                      </text>
+                    )}
+                    labelLine={{ stroke: chart.axis }}
+                  >
+                    {natureData.map((_, index) => (
+                      <Cell key={index} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(v) => formatMoney(String(v), currency)} {...chart.tooltip} />
+                </PieChart>
+              </ResponsiveContainer>
+              {/* Misma acción que la rebanada, accesible por teclado. */}
+              <ul className="mt-3 space-y-1">
+                {natureData.map((row, index) => (
+                  <li key={row.key}>
+                    <button
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-slate-800"
+                      onClick={() => setNatureDetail(row.key)}
+                    >
+                      <span
+                        aria-hidden
+                        className="size-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                      />
+                      <span className="flex-1 text-left">Ver detalle de {row.name.toLowerCase()}</span>
+                      <span className="tabular-nums">{formatMoney(row.amount, currency)}</span>
+                      <span className="w-10 text-right text-xs tabular-nums text-ink-muted dark:text-slate-400">
+                        {natureTotal > 0 ? Math.round((row.value / natureTotal) * 100) : 0}%
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </section>
 
@@ -293,6 +353,13 @@ export default function DashboardPage() {
       </div>
 
       <BudgetsSection month={month} />
+
+      <NatureDetailModal
+        month={month}
+        nature={natureDetail}
+        currency={currency}
+        onClose={() => setNatureDetail(null)}
+      />
     </div>
   );
 }

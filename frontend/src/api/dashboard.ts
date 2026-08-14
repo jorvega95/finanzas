@@ -43,6 +43,39 @@ export function useDashboard(month: string) {
   });
 }
 
+// DSH-06: drill-down de una naturaleza del pie.
+export interface NatureDetailItem {
+  kind: "transaction" | "msi_quota";
+  id: string;
+  date: string;
+  description: string;
+  category_id: string | null;
+  category_name: string;
+  payment_method_name: string | null;
+  amount: string;
+  original_amount: string | null;
+  currency: string;
+  installment_number: number | null;
+  installment_total: number | null;
+}
+
+export interface NatureDetail {
+  nature: string;
+  month: string;
+  total: string;
+  by_category: CategoryRow[];
+  items: NatureDetailItem[];
+}
+
+export function useNatureDetail(month: string, nature: string | null) {
+  return useQuery({
+    queryKey: ["dashboard", "by-nature", month, nature],
+    enabled: nature !== null,
+    queryFn: () =>
+      api<NatureDetail>(`/api/v1/dashboard/by-nature/${nature}?month=${month}`),
+  });
+}
+
 export interface BudgetOut {
   id: string;
   category_id: string;

@@ -36,6 +36,33 @@ class UpcomingItem(BaseModel):
     is_overdue: bool
 
 
+class NatureDetailItem(BaseModel):
+    """DSH-06: un movimiento del drill-down (gasto directo o cuota MSI)."""
+
+    kind: str  # transaction | msi_quota
+    id: uuid.UUID
+    date: dt.date
+    description: str
+    category_id: uuid.UUID | None
+    category_name: str
+    payment_method_name: str | None
+    amount: MoneyOut  # en base (FX-05)
+    original_amount: MoneyOut | None  # solo si la moneda ≠ base
+    currency: str
+    installment_number: int | None = None
+    installment_total: int | None = None
+
+
+class NatureDetail(BaseModel):
+    """DSH-06: desglose de una naturaleza en un mes."""
+
+    nature: str
+    month: str
+    total: MoneyOut
+    by_category: list[CategoryBreakdownRow]
+    items: list[NatureDetailItem]
+
+
 class DashboardSummary(BaseModel):
     month: str
     totals: Totals  # DSH-02: ingresos/gastos/neto del mes (gasto devengado)

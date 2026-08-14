@@ -203,3 +203,145 @@ async def test_dsh03_trend_consistency(client):
     assert by_month["2026-05"]["expenses"] == "100.00"
     assert by_month["2026-06"]["expenses"] == body["totals"]["expenses"] == "250.00"
     assert len(body["trend"]) == 6
+
+
+async def nature_detail(client, ctx, nature, month="2026-06"):
+    res = await client.get(
+        f"/api/v1/dashboard/by-nature/{nature}?month={month}", headers=ctx["headers"]
+    )
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_dsh06_detail_matches_pie(client):
+    """DSH-06: el drill-down cuadra con el agregado del pie y con sus propias
+    categorías; los transfers y las fechas futuras siguen fuera."""
+    ctx = await bootstrap_space(client)
+    await add_expense(client, ctx, "100.00", category="Comida")  # variable
+    await add_expense(client, ctx, "50.00", category="Transporte")  # variable
+    await add_expense(client, ctx, "8000.00", category="Vivienda")  # fixed
+    await add_expense(client, ctx, "300.00", category="Entretenimiento")  # discretionary
+    await add_expense(client, ctx, "999.00", date_str="2026-06-25")  # futura: fuera (TXN-03)
+    await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "transfer",
+            "date": "2026-06-02",
+            "amount": "1000.00",
+            "currency": "MXN",
+            "payment_method_id": ctx["methods"]["Débito"]["id"],
+            "payment_method_to_id": ctx["methods"]["Efectivo"]["id"],
+        },
+    )
+
+    body = await summary(client, ctx)
+    for nature, expected in body["by_nature"].items():
+        detail = await nature_detail(client, ctx, nature)
+        assert detail["nature"] == nature
+        assert detail["month"] == "2026-06"
+        assert Decimal(detail["total"]) == Decimal(expected)
+        assert sum(Decimal(i["amount"]) for i in detail["items"]) == Decimal(expected)
+        assert sum(Decimal(c["total"]) for c in detail["by_category"]) == Decimal(expected)
+
+    variable = await nature_detail(client, ctx, "variable")
+    assert {i["description"] for i in variable["items"]} == {""}
+    assert {i["category_name"] for i in variable["items"]} == {"Comida", "Transporte"}
+    assert [i["kind"] for i in variable["items"]] == ["transaction", "transaction"]
+    # Ordenado por monto desc.
+    assert [i["amount"] for i in variable["items"]] == ["100.00", "50.00"]
+    assert variable["items"][0]["payment_method_name"] == "Efectivo"
+    assert variable["items"][0]["original_amount"] is None  # ya está en base
+
+    fixed = await nature_detail(client, ctx, "fixed")
+    assert Decimal(fixed["total"]) == Decimal("8000.00")
+    assert [c["category_name"] for c in fixed["by_category"]] == ["Vivienda"]
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_dsh06_override_wins_over_category(client):
+    """DSH-06 + CAT-03: el override por transacción manda sobre la categoría."""
+    ctx = await bootstrap_space(client)
+    await add_expense(client, ctx, "100.00", category="Comida")  # variable
+    # Comida es variable, pero esta compra se marca como fija.
+    await add_expense(client, ctx, "700.00", category="Comida", expense_nature_override="fixed")
+
+    variable = await nature_detail(client, ctx, "variable")
+    fixed = await nature_detail(client, ctx, "fixed")
+    assert Decimal(variable["total"]) == Decimal("100.00")
+    assert Decimal(fixed["total"]) == Decimal("700.00")
+    assert [i["amount"] for i in fixed["items"]] == ["700.00"]
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_dsh06_msi_quota_not_parent(client):
+    """DSH-06 + MSI-03: el detalle lista la CUOTA (1,000), nunca la madre."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "12000.00", "Laptop")
+    res = await client.post(
+        "/api/v1/installment-plans",
+        headers=ctx["headers"],
+        json={"transaction_id": txn["id"], "months": 12},
+    )
+    assert res.status_code == 201
+    await close_cycles(client, ctx)
+
+    detail = await nature_detail(client, ctx, "variable")  # Comida = variable
+    assert Decimal(detail["total"]) == Decimal("1000.00")
+    assert len(detail["items"]) == 1
+    quota = detail["items"][0]
+    assert quota["kind"] == "msi_quota"
+    assert quota["amount"] == "1000.00"
+    assert (quota["installment_number"], quota["installment_total"]) == (1, 12)
+    assert quota["description"] == "Laptop"
+    assert quota["category_name"] == "Comida"  # heredada de la compra
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_dsh06_subcategory_rolls_up_and_fx(client, db_session):
+    """DSH-06 + CAT-06/FX-05: el reparto agrupa en la raíz, pero el movimiento
+    conserva su subcategoría y su monto original si la moneda ≠ base."""
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/catalogs/categories",
+        headers=ctx["headers"],
+        json={"name": "Tacos", "kind": "expense", "parent_id": ctx["categories"]["Comida"]["id"]},
+    )
+    sub_id = res.json()["id"]
+    await add_expense(client, ctx, "100.00")
+    await add_expense(client, ctx, "60.00", category_id=sub_id)
+
+    db_session.add(
+        ExchangeRate(base="USD", quote="MXN", date=date(2026, 6, 1), rate=Decimal("18.00"))
+    )
+    await db_session.commit()
+    await add_expense(client, ctx, "10.00", currency="USD", category="Transporte")
+
+    detail = await nature_detail(client, ctx, "variable")
+    by_category = {c["category_name"]: c["total"] for c in detail["by_category"]}
+    assert Decimal(by_category["Comida"]) == Decimal("160.00")  # 100 + 60 subcategoría
+    assert Decimal(by_category["Transporte"]) == Decimal("180.00")  # 10 USD × 18
+    assert "Tacos" in {i["category_name"] for i in detail["items"]}  # el ítem no se colapsa
+
+    usd = next(i for i in detail["items"] if i["currency"] == "USD")
+    assert Decimal(usd["amount"]) == Decimal("180.00")  # base (FX-05)
+    assert Decimal(usd["original_amount"]) == Decimal("10.00")
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_dsh06_requires_membership_and_valid_nature(client):
+    """DSH-06 + GLO-05: no-miembro ⇒ 404; naturaleza inexistente ⇒ 422."""
+    ctx = await bootstrap_space(client)
+    other = await bootstrap_space(client)
+    res = await client.get(
+        "/api/v1/dashboard/by-nature/fixed?month=2026-06",
+        headers={**other["headers"], "X-Space-Id": ctx["space_id"]},
+    )
+    assert res.status_code == 404
+
+    res = await client.get(
+        "/api/v1/dashboard/by-nature/inexistente?month=2026-06", headers=ctx["headers"]
+    )
+    assert res.status_code == 422

@@ -18,7 +18,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.dates import today_in_tz
 from app.models.cards import CardStatement, StatementStatus
-from app.models.catalogs import Category
+from app.models.catalogs import Category, ExpenseNature, PaymentMethod
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus
 from app.models.recurring import RecurringRule
 from app.models.spaces import Space
@@ -130,6 +130,42 @@ async def monthly_totals(
     }
 
 
+async def _space_categories(
+    session: AsyncSession, space_id: uuid.UUID
+) -> dict[uuid.UUID, Category]:
+    return {
+        c.id: c
+        for c in (
+            (await session.execute(select(Category).where(Category.space_id == space_id)))
+            .scalars()
+            .all()
+        )
+    }
+
+
+def _roll_up_to_root(
+    categories: dict[uuid.UUID, Category], rows: list[Any]
+) -> list[dict[str, Any]]:
+    """CAT-06: las subcategorías suman al padre; ordena por total desc."""
+    buckets: dict[uuid.UUID | None, Decimal] = {}
+    for category_id, total in rows:
+        category = categories.get(category_id)
+        root_id = category.parent_id or category.id if category else None
+        buckets[root_id] = buckets.get(root_id, ZERO) + to_money(total)
+
+    result = []
+    for root_id, total in buckets.items():
+        root = categories.get(root_id) if root_id else None
+        result.append(
+            {
+                "category_id": root_id,
+                "category_name": root.name if root else "Sin categoría",
+                "total": total,
+            }
+        )
+    return sorted(result, key=lambda r: r["total"], reverse=True)
+
+
 async def expenses_by_category(
     session: AsyncSession, space: Space, start: dt.date, end: dt.date
 ) -> list[dict[str, Any]]:
@@ -150,31 +186,8 @@ async def expenses_by_category(
         )
     ).all()
 
-    categories = {
-        c.id: c
-        for c in (
-            (await session.execute(select(Category).where(Category.space_id == space.id)))
-            .scalars()
-            .all()
-        )
-    }
-    buckets: dict[uuid.UUID | None, Decimal] = {}
-    for category_id, total in list(rows) + list(msi_rows):
-        category = categories.get(category_id)
-        root_id = category.parent_id or category.id if category else None
-        buckets[root_id] = buckets.get(root_id, ZERO) + to_money(total)
-
-    result = []
-    for root_id, total in buckets.items():
-        root = categories.get(root_id) if root_id else None
-        result.append(
-            {
-                "category_id": root_id,
-                "category_name": root.name if root else "Sin categoría",
-                "total": total,
-            }
-        )
-    return sorted(result, key=lambda r: r["total"], reverse=True)
+    categories = await _space_categories(session, space.id)
+    return _roll_up_to_root(categories, list(rows) + list(msi_rows))
 
 
 async def expenses_by_nature(
@@ -223,6 +236,133 @@ async def expenses_by_nature(
         )
         result[key] = result.get(key, ZERO) + to_money(total)
     return result
+
+
+def _nature_filter(expr: Any, nature: ExpenseNature) -> ColumnElement[bool]:
+    """CAT-03/DSH-06: naturaleza efectiva = COALESCE(override, categoría,
+    'variable') — el NULL cae en `variable`, igual que en el agregado."""
+    if nature is ExpenseNature.variable:
+        return or_(expr == nature, expr.is_(None))
+    matches: ColumnElement[bool] = expr == nature
+    return matches
+
+
+async def expenses_by_nature_detail(
+    session: AsyncSession, space: Space, nature: ExpenseNature, start: dt.date, end: dt.date
+) -> dict[str, Any]:
+    """DSH-06: drill-down de una naturaleza con los MISMOS predicados de
+    DSH-02/03, de modo que Σ movimientos == Σ categorías == total del pie.
+
+    Devuelve el total, el reparto por categoría raíz (CAT-06) y la lista de
+    movimientos: gastos directos + cuotas MSI (MSI-03), nunca la madre.
+    """
+    today = today_in_tz(space.timezone)
+
+    direct_nature = func.coalesce(Transaction.expense_nature_override, Category.expense_nature)
+    direct_rows = (
+        await session.execute(
+            select(
+                Transaction.id,
+                Transaction.date,
+                Transaction.description,
+                Transaction.amount,
+                Transaction.currency,
+                AMOUNT_BASE.label("amount_base"),
+                Transaction.category_id,
+                Category.name.label("category_name"),
+                PaymentMethod.name.label("payment_method_name"),
+            )
+            .join(Category, Transaction.category_id == Category.id)
+            .outerjoin(PaymentMethod, Transaction.payment_method_id == PaymentMethod.id)
+            .where(
+                *expense_predicates(space.id, start, end, today),
+                _nature_filter(direct_nature, nature),
+            )
+        )
+    ).all()
+
+    parent_txn = aliased(Transaction)
+    parent_cat = aliased(Category)
+    msi_nature = func.coalesce(parent_txn.expense_nature_override, parent_cat.expense_nature)
+    msi_rows = (
+        await session.execute(
+            select(
+                Installment.id,
+                Installment.estimated_charge_date.label("date"),
+                Installment.number,
+                InstallmentPlan.months,
+                parent_txn.description,
+                Installment.amount,
+                parent_txn.currency,
+                (Installment.amount * func.coalesce(parent_txn.fx_rate_to_base, 1)).label(
+                    "amount_base"
+                ),
+                parent_txn.category_id,
+                parent_cat.name.label("category_name"),
+                PaymentMethod.name.label("payment_method_name"),
+            )
+            .select_from(Installment)
+            .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
+            .join(parent_txn, InstallmentPlan.transaction_id == parent_txn.id)
+            .join(parent_cat, parent_txn.category_id == parent_cat.id)
+            .join(CardStatement, Installment.statement_id == CardStatement.id)
+            .outerjoin(PaymentMethod, parent_txn.payment_method_id == PaymentMethod.id)
+            .where(
+                InstallmentPlan.space_id == space.id,
+                Installment.status.in_([InstallmentStatus.charged, InstallmentStatus.paid]),
+                CardStatement.period_end >= start,
+                CardStatement.period_end <= end,
+                _nature_filter(msi_nature, nature),
+            )
+        )
+    ).all()
+
+    base_currency = space.base_currency
+    items: list[dict[str, Any]] = []
+    for row in direct_rows:
+        items.append(
+            {
+                "kind": "transaction",
+                "id": row.id,
+                "date": row.date,
+                "description": row.description,
+                "category_id": row.category_id,
+                "category_name": row.category_name,
+                "payment_method_name": row.payment_method_name,
+                "amount": to_money(row.amount_base),
+                "original_amount": to_money(row.amount) if row.currency != base_currency else None,
+                "currency": row.currency,
+            }
+        )
+    for row in msi_rows:
+        items.append(
+            {
+                "kind": "msi_quota",
+                "id": row.id,
+                "date": row.date,
+                "description": row.description,
+                "category_id": row.category_id,
+                "category_name": row.category_name,
+                "payment_method_name": row.payment_method_name,
+                "amount": to_money(row.amount_base),
+                "original_amount": to_money(row.amount) if row.currency != base_currency else None,
+                "currency": row.currency,
+                "installment_number": row.number,
+                "installment_total": row.months,
+            }
+        )
+    items.sort(key=lambda item: (-item["amount"], item["date"]))
+
+    categories = await _space_categories(session, space.id)
+    by_category = _roll_up_to_root(
+        categories, [(item["category_id"], item["amount"]) for item in items]
+    )
+    return {
+        "nature": nature.value,
+        "total": sum((item["amount"] for item in items), ZERO),
+        "by_category": by_category,
+        "items": items,
+    }
 
 
 async def trend(

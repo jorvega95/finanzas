@@ -167,6 +167,7 @@ Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas
 - **DSH-03 · Desgloses:** por categoría (raíz, con drill-down CAT-06), por naturaleza (CAT-03), por método de pago, tendencia 6 meses. Todos calculados en SQL con los mismos predicados de DSH-02 — un solo lugar (vista SQL o CTE compartido) para que ningún número difiera entre widgets.
 - **DSH-04 · Gasto devengado:** el dashboard reporta **gasto devengado** — cuándo compraste, no cuándo pagaste. Una compra con TDC cuenta en su fecha de compra (totales, categorías, presupuestos), no cuando se liquida el statement. v1 NO ofrece vista de flujo de caja; el pago del statement se refleja en la deuda de la tarjeta (TDC-09) y en próximos compromisos (DSH-05), nunca en los agregados de gasto. (Vista de flujo de caja "cuándo pagaste" es backlog.)
 - **DSH-05 · Próximos compromisos:** widget con statements por vencer (TDC-08), cuotas MSI del próximo mes (MSI-06) y recurrentes próximas (REC), ordenados por fecha.
+- **DSH-06 · Drill-down por naturaleza:** cada naturaleza del desglose DSH-03 es navegable: abre el detalle del mes con su total, el reparto por categoría raíz (CAT-06) y la lista de movimientos que lo componen. El detalle usa **exactamente los mismos predicados** que DSH-02/03 —mismos filtros de mes, transfers y madres MSI excluidos, cuotas MSI incluidas con la categoría y naturaleza de su compra— de modo que `Σ movimientos == Σ categorías == total de la naturaleza en el pie`. Cada movimiento reporta su monto en base (FX-05) y también el original si su moneda ≠ base. Naturaleza efectiva = `COALESCE(override de la transacción, naturaleza de la categoría, 'variable')` (CAT-03). Las cuotas MSI se identifican como tales, con su ordinal `n/total`, y se fechan en su `estimated_charge_date` (MSI-04); es un drill-down **read-only**, no un listado editable. El total del detalle es la Σ de los importes ya redondeados por movimiento (GLO-01), lo que garantiza el cuadre interno del modal; frente al agregado del pie (que redondea después de sumar) puede diferir en centavos **solo** cuando hay conversión FX en el mes.
 
 ## 14. Pronóstico de flujo (PRO) — R17
 
@@ -193,7 +194,7 @@ El pronóstico responde "¿con mis ingresos futuros podré pagar lo que se viene
 | R3 tarjetas | TAR-01…06, TDC-01…16, CAT-08 |
 | R4 MSI | MSI-01…10 |
 | R5 crypto | INV-01/02/03/03b/05/06 |
-| R6 dashboard | DSH-01…05 |
+| R6 dashboard | DSH-01…06 |
 | R7 login | ESP-01/02 |
 | R8 espacios | ESP-01…07, GLO-05 |
 | R9 recurrentes | REC-01…05 |
