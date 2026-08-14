@@ -22,6 +22,7 @@ import {
 } from "../../api/investments";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
+import { useChartTheme } from "../../lib/chartTheme";
 import { useSpace } from "../spaces/SpaceProvider";
 
 const KIND_LABELS: Record<string, string> = {
@@ -138,6 +139,7 @@ export default function InvestmentsPage() {
   const [accountKind, setAccountKind] = useState("crypto");
 
   const currency = activeSpace.base_currency;
+  const chart = useChartTheme();
   const data = portfolio.data;
   const lastNetWorth = (netWorth.data ?? []).at(-1);
 
@@ -309,10 +311,20 @@ export default function InvestmentsPage() {
           ) : (
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={(snapshots.data ?? []).map((s) => ({ ...s, value: Number(s.total_value) }))}>
-                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-                <XAxis dataKey="date" fontSize={11} tickFormatter={formatDate} />
-                <YAxis fontSize={11} />
-                <Tooltip formatter={(v) => formatMoney(String(v), currency)} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                <XAxis
+                  dataKey="date"
+                  fontSize={11}
+                  tickFormatter={formatDate}
+                  tick={{ fill: chart.tick }}
+                  stroke={chart.axis}
+                />
+                <YAxis fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
+                <Tooltip
+                  formatter={(v) => formatMoney(String(v), currency)}
+                  cursor={chart.cursorLine}
+                  {...chart.tooltip}
+                />
                 <Line type="monotone" dataKey="value" name="Valor" stroke="#0d9488" dot={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -329,10 +341,20 @@ export default function InvestmentsPage() {
           ) : (
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={(netWorth.data ?? []).map((s) => ({ ...s, value: Number(s.net_worth) }))}>
-                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-                <XAxis dataKey="date" fontSize={11} tickFormatter={formatDate} />
-                <YAxis fontSize={11} />
-                <Tooltip formatter={(v) => formatMoney(String(v), currency)} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                <XAxis
+                  dataKey="date"
+                  fontSize={11}
+                  tickFormatter={formatDate}
+                  tick={{ fill: chart.tick }}
+                  stroke={chart.axis}
+                />
+                <YAxis fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
+                <Tooltip
+                  formatter={(v) => formatMoney(String(v), currency)}
+                  cursor={chart.cursorLine}
+                  {...chart.tooltip}
+                />
                 <Line type="monotone" dataKey="value" name="Patrimonio" stroke="#6366f1" dot={false} />
               </LineChart>
             </ResponsiveContainer>

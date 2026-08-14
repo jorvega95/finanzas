@@ -15,6 +15,7 @@ import {
 import { useForecast, type ForecastEvent } from "../../api/forecast";
 import { formatDate } from "../../lib/dates";
 import { formatMoney } from "../../lib/money";
+import { useChartTheme } from "../../lib/chartTheme";
 import { useSpace } from "../spaces/SpaceProvider";
 
 const HORIZONS = [3, 6, 12];
@@ -38,6 +39,7 @@ const KIND_ICON: Record<ForecastEvent["kind"], string> = {
 export default function ForecastPage() {
   const { activeSpace } = useSpace();
   const currency = activeSpace.base_currency;
+  const chart = useChartTheme();
   const [horizon, setHorizon] = useState(6);
   const [adjustmentInput, setAdjustmentInput] = useState("0");
   const [adjustment, setAdjustment] = useState("0");
@@ -152,12 +154,20 @@ export default function ForecastPage() {
                     <stop offset="95%" stopColor="#0d9488" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-                <XAxis dataKey="date" fontSize={11} tickFormatter={formatDate} />
-                <YAxis fontSize={11} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                <XAxis
+                  dataKey="date"
+                  fontSize={11}
+                  tickFormatter={formatDate}
+                  tick={{ fill: chart.tick }}
+                  stroke={chart.axis}
+                />
+                <YAxis fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
                 <Tooltip
                   formatter={(v) => formatMoney(String(v), currency)}
                   labelFormatter={(l) => formatDate(String(l))}
+                  cursor={chart.cursorLine}
+                  {...chart.tooltip}
                 />
                 <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
                 <Area

@@ -37,9 +37,18 @@ export default function Modal({ open, onClose, title, children, size = "sm" }: M
         className={`card w-full ${SIZE_CLASSES[size]} p-6 shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="modal-title" className="mb-5 font-semibold">
-          {title}
-        </h2>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <h2 id="modal-title" className="font-semibold">
+            {title}
+          </h2>
+          <button
+            aria-label="Cerrar"
+            className="-mr-1 -mt-1 rounded-lg px-2 py-1 text-ink-muted transition hover:bg-slate-100 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
         {children}
       </div>
     </div>
