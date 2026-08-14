@@ -32,5 +32,8 @@ Thumbs.db
 # --- Scripts locales de arranque (varían por entorno de cada dev) ---
 iniciar.bat
 
+# --- Documentos de trabajo locales ---
+STITCH_BRIEF.md
+
 # --- Claude ---
 .claude/settings.local.json
