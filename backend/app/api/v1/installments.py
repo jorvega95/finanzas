@@ -36,10 +36,12 @@ async def create_plan(
 
 
 @router.get("", response_model=list[PlanSummaryOut])
-async def list_plans(db: DbSession, space_and_member: ActiveSpace) -> list[PlanSummaryOut]:
-    """MSI-06: vista por plan."""
+async def list_plans(
+    db: DbSession, space_and_member: ActiveSpace, include_completed: bool = False
+) -> list[PlanSummaryOut]:
+    """MSI-06: vista por plan. MSI-11: oculta planes resueltos por default."""
     space, _ = space_and_member
-    summaries = await svc.plans_summary(db, space.id)
+    summaries = await svc.plans_summary(db, space.id, include_completed=include_completed)
     out: list[PlanSummaryOut] = []
     for item in summaries:
         plan = item["plan"]

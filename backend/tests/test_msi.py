@@ -119,6 +119,63 @@ async def test_msi05_lifecycle_pending_charged_paid(client):
 
 
 @freeze_time("2026-06-20 18:00:00")
+async def test_msi11_completed_plan_hidden_from_list(client):
+    """MSI-11: al pagarse la última cuota, el plan pasa a completed y desaparece
+    de la lista por default (reaparece con include_completed=true)."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    debito = ctx["methods"]["Débito"]["id"]
+    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "600.00")
+    await make_plan(client, ctx, txn["id"], 2)
+
+    closed = await close_cycles(client, ctx)  # cuota 1 (15-jun) -> charged
+    statement_id = closed[0]["id"]
+
+    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    assert len(plans) == 1
+    assert plans[0]["plan"]["status"] == "active"
+
+    await client.post(
+        f"/api/v1/cards/{card['id']}/payments",
+        headers=ctx["headers"],
+        json={
+            "amount": "300.00",
+            "from_payment_method_id": debito,
+            "date": "2026-06-21",
+            "statement_id": statement_id,
+        },
+    )
+    # cuota 1 paid; cuota 2 sigue pending -> plan sigue activo y visible.
+    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    assert len(plans) == 1
+    assert plans[0]["plan"]["status"] == "active"
+
+    with freeze_time("2026-07-20 18:00:00"):
+        closed2 = await close_cycles(client, ctx)  # cuota 2 (15-jul) -> charged
+        statement2_id = closed2[0]["id"]
+        await client.post(
+            f"/api/v1/cards/{card['id']}/payments",
+            headers=ctx["headers"],
+            json={
+                "amount": "300.00",
+                "from_payment_method_id": debito,
+                "date": "2026-07-21",
+                "statement_id": statement2_id,
+            },
+        )
+
+    # Ambas cuotas paid -> plan completed -> oculto por default.
+    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    assert plans == []
+
+    plans = (
+        await client.get("/api/v1/installment-plans?include_completed=true", headers=ctx["headers"])
+    ).json()
+    assert len(plans) == 1
+    assert plans[0]["plan"]["status"] == "completed"
+
+
+@freeze_time("2026-06-20 18:00:00")
 async def test_msi06_projection_month_by_card(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
@@ -194,7 +251,13 @@ async def test_msi01_old_transaction_past_installments_are_paid(client):
     txn = await charge(client, ctx, card["payment_method_id"], "2026-03-05", "900.00", "Refri")
     await make_plan(client, ctx, txn["id"], 3)
 
+    # MSI-11: un plan completed no aparece en la lista por default.
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    assert plans == []
+
+    plans = (
+        await client.get("/api/v1/installment-plans?include_completed=true", headers=ctx["headers"])
+    ).json()
     summary = plans[0]
 
     dates = [i["estimated_charge_date"] for i in summary["installments"]]
@@ -367,7 +430,9 @@ async def test_msi10_projected_payment_date(client):
     )
     assert res.status_code == 201, res.text
 
-    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    plans = (
+        await client.get("/api/v1/installment-plans?include_completed=true", headers=ctx["headers"])
+    ).json()
     summary = plans[0]
     # N==M con charged=True: todas las cuotas paid, plan completed de inmediato.
     assert summary["plan"]["status"] == "completed"
@@ -557,7 +622,13 @@ async def test_msi10_n_equals_m_charged_completes_plan(client):
     assert res.status_code == 201, res.text
     assert res.json()["status"] == "completed"
 
+    # MSI-11: un plan completed no aparece en la lista por default.
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    assert plans == []
+
+    plans = (
+        await client.get("/api/v1/installment-plans?include_completed=true", headers=ctx["headers"])
+    ).json()
     summary = plans[0]
     assert summary["plan"]["status"] == "completed"
     assert summary["paid_count"] == 2

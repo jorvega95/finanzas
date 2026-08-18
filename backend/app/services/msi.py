@@ -435,18 +435,20 @@ async def delete_plan_if_allowed(session: AsyncSession, plan: InstallmentPlan) -
     await session.delete(plan)
 
 
-async def plans_summary(session: AsyncSession, space_id: uuid.UUID) -> list[dict[str, Any]]:
+async def plans_summary(
+    session: AsyncSession, space_id: uuid.UUID, include_completed: bool = False
+) -> list[dict[str, Any]]:
     """MSI-06 por plan: cuotas pagadas/cargadas/restantes, monto restante,
-    fecha de liquidación proyectada."""
+    fecha de liquidación proyectada. MSI-11: oculta planes resueltos por default."""
+    stmt = (
+        select(InstallmentPlan)
+        .options(selectinload(InstallmentPlan.installments))
+        .where(InstallmentPlan.space_id == space_id)
+    )
+    if not include_completed:
+        stmt = stmt.where(InstallmentPlan.status != PlanStatus.completed)
     plans = (
-        (
-            await session.execute(
-                select(InstallmentPlan)
-                .options(selectinload(InstallmentPlan.installments))
-                .where(InstallmentPlan.space_id == space_id)
-                .order_by(InstallmentPlan.start_date.desc())
-            )
-        )
+        (await session.execute(stmt.order_by(InstallmentPlan.start_date.desc())))
         .scalars()
         .unique()
         .all()

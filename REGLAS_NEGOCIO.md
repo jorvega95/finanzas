@@ -98,6 +98,7 @@ Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas
 - **MSI-07 · Liquidación anticipada:** el usuario PUEDE marcar un plan como liquidado: las cuotas `pending` se cancelan y se genera un cargo único por su suma en el statement abierto de la tarjeta. Queda auditado (`status=settled_early`).
 - **MSI-08 · Edición:** editar el monto/meses de un plan solo si ninguna cuota está `charged`; después, solo MSI-07 o ajustes manuales cuota por cuota. Borrar la transacción de compra borra el plan completo solo si todas las cuotas están `pending`; si no, se bloquea con mensaje.
 - **MSI-09:** compras MSI en moneda ≠ moneda de la tarjeta no se soportan en v1 (validación al alta).
+- **MSI-11 · Vista MSI: ocultar planes completados:** la lista de planes (`GET /installment-plans`, MSI-06) excluye por default los planes en `status = completed` — un plan totalmente pagado ya no tiene nada que dar seguimiento. Parámetro `include_completed=true` los reincluye (mismo patrón que `include_inactive` en catálogos/tarjetas/recurrentes). Los planes `settled_early` (MSI-07) siguen visibles: pueden conservar una cuota `charged` aún no pagada en el ciclo abierto.
 - **MSI-10 · Registro por cuota en curso:** permite registrar compras MSI anteriores al sistema aportando solo la información visible en el estado de cuenta. Campos requeridos: `description`, `credit_card_id`, `category_id`, `current_number` (N, ej. 6), `total_months` (M, ej. 12), `monthly_amount` (monto de la cuota, ej. 2692.00), `currency`, `current_is_charged` (si la cuota N ya aparece en el **último estado de cuenta cerrado**). El sistema: (1) crea la transacción-madre excluida de agregados (MSI-03), con `date` = fecha estimada de la primera cuota; (2) `total_amount = monthly_amount × total_months` (aproximado, última cuota absorbe residuo — MSI-02); (3) genera el calendario completo proyectando desde la cuota N con el corte *vigente* de la tarjeta; (4) asigna statuses según `current_is_charged`: **`true`** → cuotas 1..N `paid` (N ya viene contabilizada en el `opening_balance` / Pago pendiente, no se suma de nuevo); cuota N+1 `charged` asignada al statement abierto del ciclo en curso → entra a Ciclo en curso; cuotas N+2..M `pending`; caso borde N==M: todas `paid`, plan `completed` al crearse. **`false`** → cuotas 1..N-1 `paid`; cuota N `charged` asignada al statement abierto → entra a Ciclo en curso; cuotas N+1..M `pending`. Aplican MSI-02, MSI-03, MSI-09. Restricción: 1 ≤ N ≤ M ≤ 60. **Semántica del ancla:** `current_is_charged=true` → ancla en el corte más recientemente cerrado (`period_end ≤ hoy`); `current_is_charged=false` → ancla en el corte que cierra el ciclo actualmente abierto (el próximo corte futuro cuando hoy no es día de corte, o el siguiente si hoy sí lo es).
 
 ## 6. Recurrentes (REC) — R9
@@ -193,7 +194,7 @@ El pronóstico responde "¿con mis ingresos futuros podré pagar lo que se viene
 | R1 gastos | TXN-01…09, GLO-01/02 |
 | R2 catálogos | CAT-01…08 |
 | R3 tarjetas | TAR-01…06, TDC-01…16, CAT-08 |
-| R4 MSI | MSI-01…10 |
+| R4 MSI | MSI-01…11 |
 | R5 crypto | INV-01/02/03/03b/05/06 |
 | R6 dashboard | DSH-01…06 |
 | R7 login | ESP-01/02 |
