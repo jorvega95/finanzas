@@ -29,7 +29,8 @@ import { formatDate } from "../../lib/dates";
 
 const FREQ_LABELS: Record<string, string> = {
   weekly: "Semanal",
-  biweekly: "Quincenal",
+  biweekly: "Catorcena (cada 14 días)",
+  semimonthly: "Quincenal (15 y fin de mes)",
   monthly: "Mensual",
   yearly: "Anual",
 };

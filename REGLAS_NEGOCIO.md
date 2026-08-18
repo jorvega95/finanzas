@@ -102,11 +102,12 @@ Toda tarjeta tiene un tipo (CAT-08) cuyo `behavior` define su modelo. Las reglas
 
 ## 6. Recurrentes (REC) — R9
 
-- **REC-01 · Regla:** plantilla de transacción (tipo, monto, moneda, categoría, método, descripción) + `frequency` (`weekly | biweekly | monthly | yearly`), `start_date`, `end_date?` o `max_occurrences?`, `day_rule` para mensual (`día N` con ajuste a último día si el mes es corto, o `último día`).
+- **REC-01 · Regla:** plantilla de transacción (tipo, monto, moneda, categoría, método, descripción) + `frequency` (`weekly | biweekly | semimonthly | monthly | yearly`), `start_date`, `end_date?` o `max_occurrences?`, `day_rule` para mensual (`día N` con ajuste a último día si el mes es corto, o `último día`). **`biweekly` ("catorcena")** avanza `start_date + 14 días` de forma continua — se va desalineando del calendario, es para pagos que literalmente ocurren cada 14 días naturales (no para nómina quincenal). **`semimonthly` ("quincena")** son dos fechas fijas por mes (día 15 y último día del mes, ajustado a 28/29 en febrero) — es la que corresponde a nómina quincenal mexicana; ver REC-06. `month_day`/`use_last_day` solo aplican a `monthly`.
 - **REC-02 · Generación:** job diario (00:30 tz del espacio) genera las instancias con `scheduled_date ≤ hoy`. Idempotencia: constraint único `(recurring_rule_id, scheduled_date)` — re-ejecutar el job nunca duplica.
 - **REC-03 · Revisión:** toda instancia generada nace con `needs_review=true` y aparece en una bandeja "Por confirmar". El usuario confirma (1 tap), ajusta monto (caso luz/agua con monto variable: la regla PUEDE marcarse `amount_is_estimate`) o descarta (se crea tombstone para que REC-02 no la regenere).
 - **REC-04 · Cambios a la regla:** editar una regla afecta solo instancias futuras; las generadas no se tocan. Pausar (`is_active=false`) detiene generación sin borrar historial. Eliminar físicamente la regla es válido; las instancias ya confirmadas se conservan con `recurring_rule_id=NULL` (trazabilidad del historial sin la regla). Los tombstones se borran en cascada. Si la regla apunta a categoría/método desactivado, se pausa automáticamente y se notifica.
 - **REC-05 · Catch-up:** si el job no corrió N días (downtime), genera todas las instancias faltantes hasta hoy, en orden.
+- **REC-06 · `semimonthly` (quincena fiscal):** ocurrencias fijas en día 15 y último día natural de cada mes (no se suman días desde `start_date`, se calcula por calendario como en `monthly`). La primera ocurrencia es la primera de esas dos fechas `≥ start_date` (si `start_date` cae después del 15 de su mes, esa primera quincena se salta y arranca en el último día de ese mismo mes). `month_day`/`use_last_day` no aplican — se ignoran/no se piden en el alta.
 
 ## 7. Multimoneda (FX) — R11
 
@@ -197,7 +198,7 @@ El pronóstico responde "¿con mis ingresos futuros podré pagar lo que se viene
 | R6 dashboard | DSH-01…06 |
 | R7 login | ESP-01/02 |
 | R8 espacios | ESP-01…07, GLO-05 |
-| R9 recurrentes | REC-01…05 |
+| R9 recurrentes | REC-01…06 |
 | R10 presupuestos | PRE-01…04 |
 | R11 multimoneda | FX-01…05 |
 | R12 patrimonio | PAT-01/02 |
@@ -220,3 +221,4 @@ El pronóstico responde "¿con mis ingresos futuros podré pagar lo que se viene
 10. **PAT-01:** `patrimonio = inversiones + saldos de tarjetas no-crédito − deuda de crédito`; al cambiar un saldo (nuevo gasto/ingreso) el siguiente snapshot lo refleja.
 11. **PRO-05 (sobregiro):** TDC con `due_date` el día 17 y nómina recurrente el día 15. Si el ingreso acumulado antes del 17 + caja inicial no cubre el pago del statement ⇒ la obligación se marca **no cubierta** con el faltante exacto y se reporta el primer sobregiro; si la nómina alcanza ⇒ sin sobregiro. Una compra MSI cuyas cuotas caen en cortes futuros (PRO-03) empuja el sobregiro al mes correcto. El pronóstico no materializa statements (conteo de `card_statements` constante antes/después).
 12. **TDC-16:** reembolso (`income`) el día después del corte con un statement `closed` pendiente cuyo `due_date` aún no pasa ⇒ se resta de ese `computed_total`, no del ciclo abierto siguiente. Mismo reembolso sin ningún statement pendiente en esa ventana (tarjeta recién creada, o fecha posterior al `due_date`) ⇒ cae en la asignación normal de TDC-05.
+13. **REC-06:** regla `semimonthly` con `start_date` día 20 ⇒ la primera ocurrencia es el último día de ese mes (se salta la quincena del 15 ya pasada), luego alterna 15/último día; en febrero cae en 28 (no bisiesto) o 29 (bisiesto), nunca 30/31.

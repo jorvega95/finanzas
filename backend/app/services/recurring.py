@@ -1,4 +1,4 @@
-"""Transacciones recurrentes. Implementa REC-01..REC-05.
+"""Transacciones recurrentes. Implementa REC-01..REC-06.
 
 Idempotencia por (recurring_rule_id, scheduled_date) — constraint único.
 """
@@ -53,6 +53,24 @@ def occurrences(rule: RecurringRule, until: date) -> Iterator[date]:
                 return
             yield current
             current += step
+    elif rule.frequency == RecurringFrequency.semimonthly:
+        # REC-06: fechas fijas por calendario (día 15 y último día del mes),
+        # nunca "start_date + 14 días" — evita el desfase de `biweekly`.
+        year, month = rule.start_date.year, rule.start_date.month
+        while True:
+            last = calendar.monthrange(year, month)[1]
+            for day in sorted({15, last}):
+                occurrence = date(year, month, day)
+                if occurrence < rule.start_date:
+                    continue
+                if occurrence > until:
+                    return
+                if not _capped(occurrence):
+                    return
+                yield occurrence
+            month += 1
+            if month == 13:
+                month, year = 1, year + 1
     elif rule.frequency == RecurringFrequency.monthly:
         year, month = rule.start_date.year, rule.start_date.month
         while True:

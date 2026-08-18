@@ -160,7 +160,10 @@ async def test_rec01_weekly_and_end_date(client):
 @freeze_time("2026-06-10 18:00:00")
 async def test_rec_income_create_and_confirm(client):
     """Ingreso recurrente: instancia generada nace con needs_review=True (REC-03)
-    y al confirmar queda como transacción de tipo income normal."""
+    y al confirmar queda como transacción de tipo income normal.
+
+    Usa `biweekly` ("catorcena", REC-01) — no es la frecuencia de nómina
+    quincenal mexicana, ver test_rec06_semimonthly_* para esa."""
     ctx = await bootstrap_space(client)
     income_cat_id = ctx["categories"]["Nómina"]["id"]
     method_id = ctx["methods"]["Débito"]["id"]
@@ -172,7 +175,7 @@ async def test_rec_income_create_and_confirm(client):
             "type": "income",
             "amount": "15000.00",
             "currency": "MXN",
-            "description": "Nómina quincenal",
+            "description": "Pago cada 14 días",
             "category_id": income_cat_id,
             "payment_method_id": method_id,
             "frequency": "biweekly",
@@ -198,6 +201,64 @@ async def test_rec_income_create_and_confirm(client):
     assert res.status_code == 200
     assert res.json()["needs_review"] is False
     assert res.json()["type"] == "income"
+
+
+@freeze_time("2026-04-10 18:00:00")
+async def test_rec06_semimonthly_skips_first_half_when_start_after_15(client):
+    """Caso obligatorio 13 (REC-06): start_date día 20 salta la quincena del 15
+    ya pasada y arranca en el último día de ese mes; alterna 15/último por
+    calendario (no start_date + 14 días), y feb cae en 28 (no bisiesto)."""
+    ctx = await bootstrap_space(client)
+    await client.post(
+        "/api/v1/recurring-rules",
+        headers=ctx["headers"],
+        json=rule_payload(
+            ctx,
+            type="income",
+            description="Nómina quincenal",
+            category_id=ctx["categories"]["Nómina"]["id"],
+            payment_method_id=ctx["methods"]["Débito"]["id"],
+            frequency="semimonthly",
+            start_date="2026-01-20",
+            month_day=None,
+        ),
+    )
+    assert await generate(client, ctx) == 5
+    assert await generate(client, ctx) == 0  # REC-02: idempotente
+
+    res = await client.get("/api/v1/transactions", headers=ctx["headers"])
+    dates = sorted(t["date"] for t in res.json()["items"])
+    assert dates == [
+        "2026-01-31",
+        "2026-02-15",
+        "2026-02-28",
+        "2026-03-15",
+        "2026-03-31",
+    ]
+
+
+@freeze_time("2028-02-29 18:00:00")
+async def test_rec06_semimonthly_leap_february(client):
+    """REC-06: en año bisiesto la ocurrencia de fin de mes cae en 29 de feb."""
+    ctx = await bootstrap_space(client)
+    await client.post(
+        "/api/v1/recurring-rules",
+        headers=ctx["headers"],
+        json=rule_payload(
+            ctx,
+            type="income",
+            description="Nómina quincenal",
+            category_id=ctx["categories"]["Nómina"]["id"],
+            payment_method_id=ctx["methods"]["Débito"]["id"],
+            frequency="semimonthly",
+            start_date="2028-01-01",
+            month_day=None,
+        ),
+    )
+    assert await generate(client, ctx) == 4
+    res = await client.get("/api/v1/transactions", headers=ctx["headers"])
+    dates = sorted(t["date"] for t in res.json()["items"])
+    assert dates == ["2028-01-15", "2028-01-31", "2028-02-15", "2028-02-29"]
 
 
 @freeze_time("2026-06-10 18:00:00")

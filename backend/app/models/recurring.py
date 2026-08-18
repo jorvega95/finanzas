@@ -26,7 +26,8 @@ from app.models.transactions import TransactionType
 
 class RecurringFrequency(enum.StrEnum):
     weekly = "weekly"
-    biweekly = "biweekly"
+    biweekly = "biweekly"  # REC-01: "catorcena", start_date + 14 días continuos.
+    semimonthly = "semimonthly"  # REC-06: quincena fiscal, días 15 y último de cada mes.
     monthly = "monthly"
     yearly = "yearly"
 
@@ -67,7 +68,7 @@ class RecurringRule(Base, AuditMixin):
 
     # Schedule (REC-01).
     frequency: Mapped[RecurringFrequency] = mapped_column(
-        Enum(RecurringFrequency, name="recurring_frequency", native_enum=False, length=10),
+        Enum(RecurringFrequency, name="recurring_frequency", native_enum=False, length=12),
         nullable=False,
     )
     start_date: Mapped[date] = mapped_column(Date, nullable=False)

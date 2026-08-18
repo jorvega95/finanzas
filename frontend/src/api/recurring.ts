@@ -1,4 +1,4 @@
-// Reglas recurrentes (REC-01..05).
+// Reglas recurrentes (REC-01..06).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 
@@ -11,7 +11,7 @@ export interface RecurringRuleOut {
   description: string;
   category_id: string | null;
   payment_method_id: string | null;
-  frequency: "weekly" | "biweekly" | "monthly" | "yearly";
+  frequency: "weekly" | "biweekly" | "semimonthly" | "monthly" | "yearly";
   start_date: string;
   end_date: string | null;
   max_occurrences: number | null;
