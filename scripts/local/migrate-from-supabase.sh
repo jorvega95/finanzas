@@ -43,17 +43,40 @@ if [[ $(local_q -Atc "SELECT count(*) FROM public.profiles") != 0 ]]; then
   local_q -c "TRUNCATE $tables CASCADE" >/dev/null
 fi
 
-# La copia y la verificación exigen el mismo esquema en ambos lados. Si
-# Supabase va atrasado, se baja la local (vacía) a su versión, se copia y
-# luego se sube la local a head: Supabase nunca se modifica.
-info "Comprobando versiones de esquema..."
+# La copia y la verificación exigen el mismo esquema en ambos lados. No basta
+# con alembic_version: en Supabase pueden haberse aplicado cambios a mano sin
+# actualizarla. Se compara la estructura real (columnas y tipos) y se elige la
+# versión local que coincida: head, o la que declara Supabase. Supabase nunca
+# se modifica.
+FINGERPRINT="SELECT table_name, column_name, data_type,
+  coalesce(character_maximum_length::text, ''), coalesce(numeric_precision::text, ''),
+  coalesce(numeric_scale::text, ''), is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name <> 'alembic_version'
+ORDER BY 1, 2"
+remote_psql -At -c "$FINGERPRINT" > "$WORK/fp_remote.txt"
+local_fp() { local_q -At -c "$FINGERPRINT" > "$WORK/fp_local.txt"; cmp -s "$WORK/fp_remote.txt" "$WORK/fp_local.txt"; }
+
+info "Comprobando esquemas..."
 src_ver=$(remote_psql -Atc "SELECT version_num FROM public.alembic_version")
-dst_ver=$(local_q -Atc "SELECT version_num FROM public.alembic_version")
-if [[ "$src_ver" != "$dst_ver" ]]; then
-  info "Supabase=$src_ver, local=$dst_ver: bajando la base local a $src_ver para copiar..."
-  local_alembic downgrade "$src_ver" \
-    || fail "No se pudo bajar la local a $src_ver (¿Supabase va adelantado? actualiza el código)"
+local_alembic upgrade head >/dev/null 2>&1 || fail "alembic upgrade head falló en la base local"
+head_ver=$(local_q -Atc "SELECT version_num FROM public.alembic_version")
+if local_fp; then
+  copy_ver=$head_ver
+  [[ "$src_ver" == "$head_ver" ]] \
+    || info "Supabase dice $src_ver pero su estructura ya es $head_ver; se copia en $head_ver"
+else
+  info "Supabase=$src_ver, local=$head_ver: probando la base local en $src_ver..."
+  local_alembic downgrade "$src_ver" >/dev/null 2>&1 \
+    || fail "No se pudo bajar la local a $src_ver"
+  if ! local_fp; then
+    diff "$WORK/fp_remote.txt" "$WORK/fp_local.txt" | head -40
+    local_alembic upgrade head >/dev/null 2>&1
+    fail "La estructura de Supabase no coincide con ninguna versión local (arriba: < Supabase, > local)"
+  fi
+  copy_ver=$src_ver
 fi
+info "Esquemas idénticos en $copy_ver"
 
 # --- Fase 0: respaldo final completo de Supabase (red de seguridad) -------
 mkdir -p "$BACKUP_DIR"
@@ -81,7 +104,7 @@ cat > "$WORK/gen.sql" <<'SQL'
 SELECT string_agg(q, E'\nUNION ALL\n' ORDER BY t) || E'\nORDER BY 1;'
 FROM (
   SELECT c.relname AS t, format(
-    $f$SELECT %L AS tabla, count(*)::text AS filas, %s AS sumas, md5(coalesce(string_agg(x::text, '' ORDER BY x::text), '')) AS md5 FROM public.%I x$f$,
+    $f$SELECT %L AS tabla, count(*)::text AS filas, %s AS sumas, md5(coalesce(string_agg(__row, '' ORDER BY __row), '')) AS md5 FROM (SELECT x.*, ROW(%s)::text AS __row FROM public.%I x) x$f$,
     c.relname,
     coalesce(
       (SELECT string_agg(format('coalesce(sum(%I),0)::text', a.attname), $s$ || '|' || $s$ ORDER BY a.attnum)
@@ -89,6 +112,9 @@ FROM (
        WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
          AND a.atttypid IN ('numeric'::regtype, 'int4'::regtype, 'int8'::regtype)),
       $d$'-'$d$),
+    (SELECT string_agg(format('x.%I', a.attname), ', ' ORDER BY a.attname)
+     FROM pg_attribute a
+     WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
     c.relname) AS q
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname <> 'alembic_version'
@@ -107,8 +133,8 @@ printf '%-28s %8s\n' TABLA FILAS
 awk -F'\t' '{ printf "%-28s %8s\n", $1, $2 }' "$WORK/local.tsv"
 info "Verificación OK: conteos, sumas y md5 idénticos en $(wc -l < "$WORK/local.tsv") tablas"
 
-if [[ "$src_ver" != "$dst_ver" ]]; then
-  info "Subiendo la base local de $src_ver a la versión actual del código..."
+if [[ "$copy_ver" != "$head_ver" ]]; then
+  info "Subiendo la base local de $copy_ver a $head_ver..."
   local_alembic upgrade head
 fi
 
