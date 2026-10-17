@@ -32,7 +32,7 @@ SUPABASE_DB_URL='postgresql://postgres.<ref>:<pass>@<host>:5432/postgres' \
 ```
 
 - Hace un respaldo completo de Supabase en `~/Documents/finanzas-backups/`.
-- Copia los datos y verifica **cada tabla** (conteo, sumas de columnas
+- Copia los datos (sin sudo) y verifica **cada tabla** (conteo, sumas de columnas
   numéricas y md5 del contenido). Si algo no coincide, se detiene.
 - Fija `LOCAL_USER_ID` con tu perfil y arranca el servicio.
 - Sin `SUPABASE_DB_URL` usa el `DATABASE_URL` de `backend/.env`.

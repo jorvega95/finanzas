@@ -9,6 +9,7 @@
 # Si SUPABASE_DB_URL no está definido se toma DATABASE_URL de backend/.env.
 # Usa la conexión directa o el *session* pooler (puerto 5432), no el de 6543.
 # --force: vacía la base local antes de copiar (si ya tiene datos).
+# No necesita sudo.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -57,6 +58,50 @@ ORDER BY 1, 2"
 remote_psql -At -c "$FINGERPRINT" > "$WORK/fp_remote.txt"
 local_fp() { local_q -At -c "$FINGERPRINT" > "$WORK/fp_local.txt"; cmp -s "$WORK/fp_remote.txt" "$WORK/fp_local.txt"; }
 
+# Deriva típica: una migración posterior aplicada a mano en Supabase sin
+# subir alembic_version (p. ej. 0015 ensancha recurring_rules.frequency). Si
+# la ÚNICA diferencia son varchar más largos en Supabase, se ensanchan en la
+# local y se copian los CHECK de esas tablas tal cual están en Supabase. Luego
+# `alembic upgrade head` aplica las migraciones reales sobre los datos.
+fp_row() { awk -F'|' -v t="$2" -v c="$3" '$1 == t && $2 == c' "$1"; }
+
+# (Dentro de los `while read`, psql va con </dev/null para no comerse la
+# entrada del bucle.)
+reconcile_widened_columns() {
+  local keys_r keys_l t c typ rlen llen
+  keys_r=$(cut -d'|' -f1,2 "$WORK/fp_remote.txt")
+  keys_l=$(cut -d'|' -f1,2 "$WORK/fp_local.txt")
+  [[ "$keys_r" == "$keys_l" ]] || return 1
+  local -a tables=()
+  while IFS='|' read -r t c typ rlen _; do
+    llen=$(fp_row "$WORK/fp_local.txt" "$t" "$c" | cut -d'|' -f4)
+    [[ "$typ" == "character varying" && -n "$rlen" && -n "$llen" ]] || return 1
+    (( rlen > llen )) || return 1
+    # Las demás columnas de la fila (nulabilidad, etc.) deben coincidir.
+    [[ "$(fp_row "$WORK/fp_remote.txt" "$t" "$c" | cut -d'|' -f5-)" \
+       == "$(fp_row "$WORK/fp_local.txt" "$t" "$c" | cut -d'|' -f5-)" ]] || return 1
+    tables+=("$t")
+    info "Supabase tiene $t.$c como varchar($rlen) (local: $llen); se ensancha en local"
+    local_q -qc "ALTER TABLE public.\"$t\" ALTER COLUMN \"$c\" TYPE varchar($rlen)" </dev/null
+  done < <(comm -23 "$WORK/fp_remote.txt" "$WORK/fp_local.txt")
+  (( ${#tables[@]} )) || return 1
+  local name def
+  for t in $(printf '%s\n' "${tables[@]}" | sort -u); do
+    # Los CHECK locales viejos rechazarían los valores nuevos: se reemplazan
+    # por los de Supabase.
+    while read -r name; do
+      [[ -n "$name" ]] && local_q -qc "ALTER TABLE public.\"$t\" DROP CONSTRAINT \"$name\"" </dev/null
+    done < <(local_q -At -c "SELECT conname FROM pg_constraint WHERE conrelid = 'public.$t'::regclass AND contype = 'c'")
+    while IFS=$'\t' read -r name def; do
+      [[ -n "$name" ]] || continue
+      info "Copiando el CHECK $name de Supabase"
+      local_q -qc "ALTER TABLE public.\"$t\" ADD CONSTRAINT \"$name\" $def" </dev/null
+    done < <(remote_psql -At -F $'\t' -c "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint
+               WHERE conrelid = 'public.$t'::regclass AND contype = 'c' ORDER BY conname")
+  done
+  local_fp
+}
+
 info "Comprobando esquemas..."
 src_ver=$(remote_psql -Atc "SELECT version_num FROM public.alembic_version")
 local_alembic upgrade head >/dev/null 2>&1 || fail "alembic upgrade head falló en la base local"
@@ -69,9 +114,9 @@ else
   info "Supabase=$src_ver, local=$head_ver: probando la base local en $src_ver..."
   local_alembic downgrade "$src_ver" >/dev/null 2>&1 \
     || fail "No se pudo bajar la local a $src_ver"
-  if ! local_fp; then
-    diff "$WORK/fp_remote.txt" "$WORK/fp_local.txt" | head -40
-    local_alembic upgrade head >/dev/null 2>&1
+  if ! local_fp && ! reconcile_widened_columns; then
+    diff "$WORK/fp_remote.txt" "$WORK/fp_local.txt" | head -40 || true
+    local_alembic upgrade head >/dev/null 2>&1 || true
     fail "La estructura de Supabase no coincide con ninguna versión local (arriba: < Supabase, > local)"
   fi
   copy_ver=$src_ver
@@ -91,10 +136,10 @@ pg_dump "$SRC" --data-only --schema=public --exclude-table=public.alembic_versio
   --no-owner --no-privileges -f "$WORK/data.sql"
 
 info "Restaurando en la base local..."
-# replica: no dispara triggers ni valida FKs durante la carga (hay FKs
-# circulares profiles <-> spaces); requiere superusuario, de ahí el sudo.
-{ echo "SET session_replication_role = replica;"; cat "$WORK/data.sql"; } \
-  | sudo -u postgres psql -X -q -1 -v ON_ERROR_STOP=1 -d "$DB_NAME" >/dev/null
+# pg_dump ordena las tablas por dependencias de FK. La única circular es
+# categories -> categories (padre), y Postgres valida esa FK al final de cada
+# COPY, así que basta tu propio usuario. -1: todo o nada.
+local_q -q -1 -f "$WORK/data.sql" >/dev/null
 
 # --- Verificación -----------------------------------------------------------
 info "Verificando..."
