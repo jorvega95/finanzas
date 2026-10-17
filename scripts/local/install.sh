@@ -32,7 +32,7 @@ info "Compilando frontend..."
 (cd "$RAIZ/frontend" && { [[ -d node_modules ]] || npm ci; } && VITE_API_URL= npm run build >/dev/null)
 
 info "Aplicando migraciones..."
-(cd "$RAIZ/backend" && set -a && source <(grep -E '^(DATABASE_URL|AUTH_MODE|LOCAL_USER_ID)=' "$ENV_FILE") && set +a && uv run alembic upgrade head)
+local_alembic upgrade head
 
 # --- systemd --user ---------------------------------------------------------
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"

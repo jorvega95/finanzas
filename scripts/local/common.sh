@@ -22,6 +22,13 @@ fi
 # psql/pg_dump contra la base local por socket (auth peer, sin contraseña).
 local_psql() { psql -h "$PG_SOCKET_DIR" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"; }
 
+# alembic contra la base local con la config del servicio (ENV_FILE).
+local_alembic() {
+  (cd "$RAIZ/backend" && set -a \
+    && source <(grep -E '^(DATABASE_URL|AUTH_MODE|LOCAL_USER_ID)=' "$ENV_FILE") \
+    && set +a && uv run alembic "$@")
+}
+
 # Lee una clave de ENV_FILE sin hacer source (no ejecuta su contenido).
 env_get() { [[ -f "$ENV_FILE" ]] && sed -n "s/^$1=//p" "$ENV_FILE" | tail -n1; }
 

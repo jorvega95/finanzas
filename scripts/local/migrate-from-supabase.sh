@@ -33,11 +33,6 @@ trap 'rm -rf "$WORK"' EXIT
 remote_psql() { PGTZ=UTC psql "$SRC" -X -v ON_ERROR_STOP=1 "$@"; }
 local_q() { PGTZ=UTC local_psql -X "$@"; }
 
-info "Comprobando versiones de esquema..."
-src_ver=$(remote_psql -Atc "SELECT version_num FROM public.alembic_version")
-dst_ver=$(local_q -Atc "SELECT version_num FROM public.alembic_version")
-[[ "$src_ver" == "$dst_ver" ]] || fail "Esquema distinto: Supabase=$src_ver local=$dst_ver (corre alembic upgrade en ambos)"
-
 info "Deteniendo el servicio local mientras se copia..."
 systemctl --user stop finanzas.service 2>/dev/null || true
 
@@ -46,6 +41,18 @@ if [[ $(local_q -Atc "SELECT count(*) FROM public.profiles") != 0 ]]; then
   info "Vaciando base local (--force)..."
   tables=$(local_q -Atc "SELECT string_agg(format('public.%I', tablename), ', ') FROM pg_tables WHERE schemaname='public' AND tablename <> 'alembic_version'")
   local_q -c "TRUNCATE $tables CASCADE" >/dev/null
+fi
+
+# La copia y la verificación exigen el mismo esquema en ambos lados. Si
+# Supabase va atrasado, se baja la local (vacía) a su versión, se copia y
+# luego se sube la local a head: Supabase nunca se modifica.
+info "Comprobando versiones de esquema..."
+src_ver=$(remote_psql -Atc "SELECT version_num FROM public.alembic_version")
+dst_ver=$(local_q -Atc "SELECT version_num FROM public.alembic_version")
+if [[ "$src_ver" != "$dst_ver" ]]; then
+  info "Supabase=$src_ver, local=$dst_ver: bajando la base local a $src_ver para copiar..."
+  local_alembic downgrade "$src_ver" \
+    || fail "No se pudo bajar la local a $src_ver (¿Supabase va adelantado? actualiza el código)"
 fi
 
 # --- Fase 0: respaldo final completo de Supabase (red de seguridad) -------
@@ -99,6 +106,11 @@ fi
 printf '%-28s %8s\n' TABLA FILAS
 awk -F'\t' '{ printf "%-28s %8s\n", $1, $2 }' "$WORK/local.tsv"
 info "Verificación OK: conteos, sumas y md5 idénticos en $(wc -l < "$WORK/local.tsv") tablas"
+
+if [[ "$src_ver" != "$dst_ver" ]]; then
+  info "Subiendo la base local de $src_ver a la versión actual del código..."
+  local_alembic upgrade head
+fi
 
 # --- LOCAL_USER_ID (GLO-07) -------------------------------------------------
 mapfile -t profiles < <(local_q -At -F $'\t' -c "SELECT id, coalesce(email,''), display_name FROM public.profiles ORDER BY created_at")
