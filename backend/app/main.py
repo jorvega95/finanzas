@@ -4,12 +4,15 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import RequestResponseEndpoint
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1 import api_router
 from app.core.config import settings
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost"}
 
 
 @asynccontextmanager
@@ -59,6 +62,9 @@ def create_app() -> FastAPI:
             response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
         return response
 
+    if settings.auth_mode == "local":
+        add_local_guards(app)
+
     app.include_router(api_router)
 
     @app.get("/health", tags=["meta"])
@@ -69,6 +75,28 @@ def create_app() -> FastAPI:
         mount_frontend(app, Path(settings.frontend_dist))
 
     return app
+
+
+def add_local_guards(app: FastAPI) -> None:
+    """GLO-07: without auth, only the local browser may talk to the API.
+
+    - Host must be loopback: blocks DNS rebinding (evil.com -> 127.0.0.1).
+    - A present Origin must be loopback: blocks cross-site form/fetch POSTs
+      (CSRF) that the browser would send without a CORS preflight.
+    """
+
+    @app.middleware("http")
+    async def reject_foreign_origin(
+        request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        origin = request.headers.get("origin")
+        if origin is not None:
+            host = origin.split("://", 1)[-1].rsplit(":", 1)[0].strip("[]")
+            if host not in LOOPBACK_HOSTS:
+                return JSONResponse({"detail": "Forbidden origin"}, status_code=403)
+        return await call_next(request)
+
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=sorted(LOOPBACK_HOSTS))
 
 
 def mount_frontend(app: FastAPI, dist: Path) -> None:

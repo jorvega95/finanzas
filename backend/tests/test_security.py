@@ -220,3 +220,29 @@ async def test_glo07_local_mode_without_user_id_fails_at_startup(monkeypatch):
     with pytest.raises(RuntimeError, match="LOCAL_USER_ID"):
         async with lifespan(app):
             pass
+
+
+async def test_glo07_local_mode_rejects_foreign_host_and_origin(monkeypatch):
+    """DNS rebinding (Host ajeno) y CSRF (Origin ajeno) se bloquean sin auth."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.config import settings
+    from app.main import create_app
+
+    monkeypatch.setattr(settings, "auth_mode", "local")
+    monkeypatch.setattr(settings, "local_user_id", uuid.uuid4())
+    local_app = create_app()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=local_app), base_url="http://127.0.0.1:8765"
+    ) as c:
+        assert (await c.get("/health")).status_code == 200
+        ok = await c.get("/health", headers={"Origin": "http://localhost:5173"})
+        assert ok.status_code == 200
+        csrf = await c.post("/api/v1/transactions", headers={"Origin": "https://evil.com"})
+        assert csrf.status_code == 403
+        tricky = await c.get("/health", headers={"Origin": "http://127.0.0.1.evil.com"})
+        assert tricky.status_code == 403
+
+    async with AsyncClient(transport=ASGITransport(app=local_app), base_url="http://evil.com") as c:
+        assert (await c.get("/health")).status_code == 400
