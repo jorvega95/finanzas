@@ -14,6 +14,7 @@ Create Date: 2026-06-13
 import sqlalchemy as sa
 
 from alembic import op
+from app.db.rls import supports_rls
 
 revision = "0008"
 down_revision = "0007"
@@ -126,6 +127,7 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         )
 
+    if supports_rls(bind):
         # RLS (GLO-05): card_types + rename the renamed table's policy.
         op.execute("ALTER TABLE public.card_types ENABLE ROW LEVEL SECURITY;")
         op.execute(
@@ -144,12 +146,13 @@ def downgrade() -> None:
     bind = op.get_bind()
     is_pg = bind.dialect.name == "postgresql"
 
-    if is_pg:
+    if supports_rls(bind):
         op.execute(
             "ALTER POLICY cards_space_isolation ON public.cards "
             "RENAME TO credit_cards_space_isolation;"
         )
         op.execute("DROP POLICY IF EXISTS card_types_space_isolation ON public.card_types;")
+    if is_pg:
         op.drop_constraint("fk_cards_card_type", "cards", type_="foreignkey")
 
     op.drop_constraint("ck_card_payment_rule", "cards", type_="check")

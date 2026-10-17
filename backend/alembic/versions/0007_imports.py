@@ -8,6 +8,7 @@ Create Date: 2026-06-11
 import sqlalchemy as sa
 
 from alembic import op
+from app.db.rls import supports_rls
 
 revision = "0007"
 down_revision = "0006"
@@ -42,7 +43,7 @@ def upgrade() -> None:
     op.create_index("ix_import_batches_space_id", "import_batches", ["space_id"])
 
     bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
+    if supports_rls(bind):
         op.execute("ALTER TABLE public.import_batches ENABLE ROW LEVEL SECURITY;")
         op.execute(
             """
@@ -54,6 +55,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
+    if supports_rls(bind):
         op.execute("DROP POLICY IF EXISTS import_batches_space_isolation ON public.import_batches;")
     op.drop_table("import_batches")

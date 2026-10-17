@@ -13,6 +13,7 @@ Create Date: 2026-06-21
 import sqlalchemy as sa
 
 from alembic import op
+from app.db.rls import supports_rls
 
 revision = "0011"
 down_revision = "0010"
@@ -43,7 +44,7 @@ def upgrade() -> None:
     op.create_index("ix_card_layouts_space_id", "card_layouts", ["space_id"])
 
     bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
+    if supports_rls(bind):
         op.execute("ALTER TABLE public.card_layouts ENABLE ROW LEVEL SECURITY;")
         op.execute(
             """
@@ -55,6 +56,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
+    if supports_rls(bind):
         op.execute("DROP POLICY IF EXISTS card_layouts_owner_only ON public.card_layouts;")
     op.drop_table("card_layouts")

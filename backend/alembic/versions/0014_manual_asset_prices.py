@@ -16,6 +16,7 @@ Create Date: 2026-07-20
 import sqlalchemy as sa
 
 from alembic import op
+from app.db.rls import supports_rls
 
 revision = "0014"
 down_revision = "0013"
@@ -60,6 +61,8 @@ def upgrade() -> None:
     # Las filas 'manual' huérfanas en la caché ya no deben tratarse como eternas.
     op.execute("DELETE FROM public.asset_prices WHERE source = 'manual';")
 
+    if not supports_rls(bind):
+        return
     op.execute("ALTER TABLE public.manual_asset_prices ENABLE ROW LEVEL SECURITY;")
     op.execute(
         """
@@ -71,7 +74,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
+    if supports_rls(bind):
         op.execute(
             "DROP POLICY IF EXISTS manual_asset_prices_space_isolation "
             "ON public.manual_asset_prices;"

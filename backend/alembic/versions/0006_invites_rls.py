@@ -12,6 +12,7 @@ Create Date: 2026-06-11
 import sqlalchemy as sa
 
 from alembic import op
+from app.db.rls import supports_rls
 
 revision = "0006"
 down_revision = "0005"
@@ -61,7 +62,7 @@ def upgrade() -> None:
 
     # --- RLS (solo Postgres/Supabase) -------------------------------------
     bind = op.get_bind()
-    if bind.dialect.name != "postgresql":
+    if not supports_rls(bind):
         return
 
     op.execute(
@@ -130,7 +131,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
+    if supports_rls(bind):
         for table in SPACE_TABLES:
             op.execute(f"DROP POLICY IF EXISTS {table}_space_isolation ON public.{table};")
             op.execute(f"ALTER TABLE public.{table} DISABLE ROW LEVEL SECURITY;")
