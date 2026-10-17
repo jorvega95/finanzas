@@ -4,7 +4,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { setActiveSpaceId } from "../../api/activeSpace";
 import { useMe, type MeOut, type SpaceOut } from "../../api/me";
-import { useAuth } from "../../auth/AuthProvider";
 
 interface SpaceContextValue {
   me: MeOut;
@@ -15,8 +14,7 @@ interface SpaceContextValue {
 const SpaceContext = createContext<SpaceContextValue | null>(null);
 
 export function SpaceProvider({ children }: { children: ReactNode }) {
-  const { session } = useAuth();
-  const me = useMe(Boolean(session));
+  const me = useMe(true);
   const queryClient = useQueryClient();
   const [spaceId, setSpaceId] = useState<string | null>(null);
 

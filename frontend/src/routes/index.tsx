@@ -1,8 +1,6 @@
 // Rutas por feature (src/features/*).
 import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
-import { useAuth } from "../auth/AuthProvider";
 import AppLayout from "../components/AppLayout";
-import LoginPage from "../features/auth/LoginPage";
 import CardsPage from "../features/cards/CardsPage";
 import DashboardPage from "../features/dashboard/DashboardPage";
 import ForecastPage from "../features/forecast/ForecastPage";
@@ -12,16 +10,8 @@ import SettingsPage from "../features/settings/SettingsPage";
 import { SpaceProvider } from "../features/spaces/SpaceProvider";
 import TransactionsPage from "../features/transactions/TransactionsPage";
 
-function Protected() {
-  const { session, loading, configured } = useAuth();
-  if (loading) {
-    return (
-      <main className="grid min-h-screen place-items-center text-sm text-ink-muted">
-        Cargando…
-      </main>
-    );
-  }
-  if (!configured || !session) return <Navigate to="/login" replace />;
+// GLO-07: modo local mono-usuario, sin login; el backend resuelve al dueño.
+function Root() {
   return (
     <SpaceProvider>
       <Outlet />
@@ -30,9 +20,9 @@ function Protected() {
 }
 
 export const router = createBrowserRouter([
-  { path: "/login", element: <LoginPage /> },
+  { path: "/login", element: <Navigate to="/" replace /> },
   {
-    element: <Protected />,
+    element: <Root />,
     children: [
       {
         element: <AppLayout />,

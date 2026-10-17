@@ -13,7 +13,8 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import verify_supabase_jwt
+from app.core.config import settings
+from app.core.security import verify_jwt
 from app.db.session import SessionLocal
 from app.models.spaces import Profile, Space, SpaceMember, SpaceRole
 from app.services.spaces import provision_profile
@@ -31,14 +32,19 @@ async def get_current_user(
     db: DbSession,
     authorization: Annotated[str | None, Header()] = None,
 ) -> Profile:
-    """Verify the Supabase JWT and lazily provision the profile (ESP-01).
+    """Resolve the acting user and lazily provision the profile (ESP-01).
 
-    Supabase owns signup; our first sight of a user is their first
-    authenticated request, so provisioning happens here.
+    GLO-07: in local mode every request acts as LOCAL_USER_ID, no token.
+    In jwt mode the Bearer token's `sub` is the user id.
     """
+    if settings.auth_mode == "local":
+        if settings.local_user_id is None:  # validated at startup (main.lifespan)
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "LOCAL_USER_ID missing")
+        return await provision_profile(db, settings.local_user_id, settings.local_user_email, None)
+
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
-    claims = verify_supabase_jwt(authorization.split(" ", 1)[1])
+    claims = verify_jwt(authorization.split(" ", 1)[1])
     try:
         user_id = uuid.UUID(claims["sub"])
     except (KeyError, ValueError) as exc:

@@ -1,6 +1,5 @@
-// Cliente HTTP hacia FastAPI. Adjunta el JWT de Supabase en Authorization.
+// Cliente HTTP hacia FastAPI (mismo origen; modo local sin token, GLO-07).
 // Tipos generados con `npm run generate:api` (src/api/schema.d.ts).
-import { supabase } from "../auth/supabase";
 import { translateValidationErrors } from "../lib/apiErrors";
 import { getActiveSpaceId } from "./activeSpace";
 
@@ -14,16 +13,13 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const session = supabase ? (await supabase.auth.getSession()).data.session : null;
-  const token = session?.access_token;
   const spaceId = getActiveSpaceId();
-  // Sin VITE_API_URL se usa el proxy de Vite (/api -> :8000).
+  // Sin VITE_API_URL: mismo origen (FastAPI sirve la SPA) o proxy de Vite.
   const base = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
   const res = await fetch(`${base}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(spaceId ? { "X-Space-Id": spaceId } : {}),
       ...init.headers,
     },

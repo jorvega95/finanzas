@@ -1,6 +1,5 @@
 // Wizard de importación CSV (IMP-01..06) y export (IMP-07).
 import { useRef, useState } from "react";
-import { supabase } from "../../auth/supabase";
 import { getActiveSpaceId } from "../../api/activeSpace";
 import { usePaymentMethods } from "../../api/catalogs";
 import {
@@ -22,12 +21,10 @@ const BATCH_STATUS: Record<string, string> = {
 };
 
 async function download(path: string, fileName: string) {
-  // IMP-07: descarga autenticada vía fetch + blob.
-  const session = supabase ? (await supabase.auth.getSession()).data.session : null;
+  // IMP-07: descarga vía fetch + blob (necesita el header X-Space-Id).
   const spaceId = getActiveSpaceId();
   const res = await fetch(path, {
     headers: {
-      ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
       ...(spaceId ? { "X-Space-Id": spaceId } : {}),
     },
   });

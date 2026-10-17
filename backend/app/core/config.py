@@ -1,3 +1,6 @@
+import uuid
+from typing import Literal
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,11 +18,17 @@ class Settings(BaseSettings):
     # Jobs (REC-02, FX-02): enable once the DB is configured.
     scheduler_enabled: bool = False
 
-    # Supabase Auth (verificación de JWT, ver app/core/security.py).
-    # Proyectos nuevos (JWT Signing Keys asimétricas): solo SUPABASE_URL.
-    # Proyectos legacy (HS256): además SUPABASE_JWT_SECRET.
-    supabase_url: str = ""
-    supabase_jwt_secret: str = ""
+    # Auth (GLO-07). "local": mono-usuario sin token, todo actúa como
+    # LOCAL_USER_ID (solo con el servidor en 127.0.0.1). "jwt": Bearer HS256
+    # firmado con JWT_SECRET (tests y un futuro cliente remoto/móvil).
+    auth_mode: Literal["local", "jwt"] = "local"
+    local_user_id: uuid.UUID | None = None
+    local_user_email: str | None = None
+    jwt_secret: str = ""
+
+    # Frontend compilado (frontend/dist) servido por FastAPI (GLO-07). Vacío =
+    # no se sirve (desarrollo con Vite en :5173).
+    frontend_dist: str = ""
 
     # Precios (INV-03) — la key jamás sale del backend
     coingecko_api_key: str = ""
@@ -37,6 +46,8 @@ class Settings(BaseSettings):
         """
         if self.env != "dev" and self.database_url == DEV_DATABASE_URL:
             raise ValueError(f"DATABASE_URL debe definirse explícitamente cuando ENV={self.env!r}")
+        if self.auth_mode == "jwt" and not self.jwt_secret:
+            raise ValueError("AUTH_MODE=jwt requiere JWT_SECRET")
         return self
 
 

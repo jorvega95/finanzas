@@ -23,7 +23,7 @@ class SpaceRole(enum.StrEnum):
 
 
 class Profile(Base, TimestampMixin):
-    """Mirror of auth.users (Supabase). id == JWT `sub` (ESP-01)."""
+    """Account owner. id == LOCAL_USER_ID or the JWT `sub` (ESP-01, GLO-07)."""
 
     __tablename__ = "profiles"
 

@@ -1,6 +1,6 @@
 """Test fixtures: in-memory SQLite DB, app client and JWT helpers.
 
-Production runs on Postgres (Supabase); tests use SQLite + aiosqlite with the
+Production runs on a local Postgres (GLO-07); tests use SQLite + aiosqlite with the
 same SQLAlchemy models (portable types only — enforced by convention).
 """
 
@@ -8,7 +8,9 @@ import os
 import uuid
 from datetime import UTC, datetime, timedelta
 
-os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret-0123456789abcdef0123456789abcdef")
+# Los tests usan AUTH_MODE=jwt para simular varios usuarios (permisos, 404).
+os.environ["AUTH_MODE"] = "jwt"
+os.environ["JWT_SECRET"] = "test-secret-0123456789abcdef0123456789abcdef"
 
 import jwt as pyjwt
 import pytest
@@ -70,7 +72,7 @@ async def client(session_factory):
 
 def make_token(user_id: uuid.UUID | None = None, email: str = "user@example.com") -> str:
     # exp/iat son obligatorios en la verificación (app.core.security.REQUIRED_CLAIMS),
-    # igual que en los tokens que emite Supabase. El exp es deliberadamente
+    # igual que en cualquier token emitido. El exp es deliberadamente
     # amplio: varios tests avanzan el reloj con freeze_time y la expiración del
     # token no es lo que están probando.
     now = datetime.now(UTC)

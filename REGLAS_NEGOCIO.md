@@ -8,14 +8,16 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 - **GLO-02 · Fechas de negocio:** la lógica de ciclos, MSI, recurrentes y presupuestos opera con `date` (sin hora ni timezone). La conversión de "ahora" a `date` usa la timezone del espacio (`spaces.timezone`, default `America/Mexico_City`). Los `created_at`/`updated_at` sí son `timestamptz`.
 - **GLO-03 · Soft-delete:** catálogos, tarjetas y cuentas de inversión nunca se borran físicamente si tienen registros asociados; se desactivan (`is_active=false`). Borrado físico solo si no tienen referencias.
 - **GLO-04 · Auditoría:** toda entidad lleva `created_by`, `created_at`, `updated_at`. Las transacciones además `updated_by`.
-- **GLO-05 · Aislamiento:** ninguna query de negocio cruza espacios. Toda tabla de dominio lleva `space_id` y RLS activa; FastAPI filtra siempre por el espacio activo de la sesión.
+- **GLO-05 · Aislamiento:** ninguna query de negocio cruza espacios. Toda tabla de dominio lleva `space_id`; FastAPI filtra siempre por el espacio activo de la sesión. RLS es segunda capa solo en despliegues hospedados con esquema `auth` (Supabase); en modo local (GLO-07) las migraciones la omiten y el filtrado de FastAPI es la única capa.
 - **GLO-06 · Errores legibles:** la UI NO DEBE mostrar códigos crudos (`Error 422`, `Error 500`). Todo error de validación de FastAPI (`detail` como lista de errores de Pydantic) se traduce en el cliente a una frase en es-MX que nombre el campo y la condición violada (`"El monto debe ser mayor a 0."`); ver `src/lib/apiErrors.ts`. Las restricciones que el usuario puede violar tecleando (monto ≤ 0, texto vacío, rangos) DEBEN además validarse en el formulario antes de enviar, y cuando exista una alternativa de negocio para lo que el usuario intentaba, el mensaje la señala (p. ej. monto 0 en un recurrente ⇒ descartar la instancia o pausar la regla).
+- **GLO-07 · Modo local mono-usuario:** la app corre en la máquina del dueño, sin proveedor de auth externo. Con `AUTH_MODE=local` el backend NO DEBE exigir token: toda petición actúa como el perfil `LOCAL_USER_ID` (provisionado según ESP-01 si no existe). El servidor DEBE escuchar solo en `127.0.0.1`; exponerlo a la red requiere volver a `AUTH_MODE=jwt`. El frontend se sirve compilado desde el mismo FastAPI (mismo origen, sin CORS). El modelo de espacios/roles (ESP-*) se conserva intacto.
+- **GLO-08 · Respaldos:** sin proveedor gestionado, la base local DEBE respaldarse automáticamente a diario (`pg_dump -Fc`), conservando 14 respaldos diarios y 12 mensuales. Un respaldo solo cuenta si `pg_restore --list` lo lee sin error.
 
 ---
 
 ## 1. Usuarios y espacios (ESP) — R7, R8
 
-- **ESP-01:** al completar el registro (cualquier proveedor) se crea automáticamente: `profile` + espacio `type=personal` llamado "Personal" + membresía `owner` + catálogos seed (CAT-02). El espacio personal NO DEBE poder eliminarse ni transferirse; es el fallback de `default_space_id`.
+- **ESP-01:** al completar el registro (cualquier proveedor; en modo local GLO-07, en la primera petición del `LOCAL_USER_ID`) se crea automáticamente: `profile` + espacio `type=personal` llamado "Personal" + membresía `owner` + catálogos seed (CAT-02). El espacio personal NO DEBE poder eliminarse ni transferirse; es el fallback de `default_space_id`.
 - **ESP-02:** un usuario PUEDE tener máximo 1 espacio personal y N espacios compartidos.
 - **ESP-03 · Roles y permisos:**
 
@@ -52,7 +54,7 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 - **TXN-04 · Moneda:** `currency` ∈ ISO-4217 soportadas (v1: MXN, USD; crypto se maneja en inversiones, no en transacciones). Al crear/editar, se persiste `fx_rate_to_base` según FX-03 — el agregado nunca re-consulta tasas históricas.
 - **TXN-05 · Edición/borrado:** editable por cualquier editor/owner del espacio. Si la transacción tiene plan MSI asociado, ver MSI-08. Si proviene de regla recurrente o import, editarla la desvincula de regeneraciones futuras (mantiene `recurring_rule_id`/`import_batch_id` para trazabilidad).
 - **TXN-06 · TDC:** una transacción con método de pago de tipo `credit_card` se asigna a un ciclo de facturación según TDC-05 (salvo TDC-16 para ingresos) (el gasto cuenta en los agregados devengados —totales, reportes por categoría y presupuestos— en su fecha de compra, DSH-04; su liquidación se refleja en la deuda de la tarjeta, TDC-09, no en los agregados de gasto).
-- **TXN-07 · Adjuntos (v2+):** preparar `attachment_url` (ticket/factura, Supabase Storage). No bloqueante para v1.
+- **TXN-07 · Adjuntos (v2+):** preparar `attachment_url` (ticket/factura, almacenamiento en disco local). No bloqueante para v1.
 - **TXN-08 · Balance en transferencias:** una transferencia cuyo `payment_method_id` (origen) pertenece a una tarjeta de behavior `debit`/`prepaid` se rechaza (422) si `amount > saldo_disponible`, salvo `allow_overdraft=true` en esa tarjeta. No aplica cuando el origen es efectivo, transferencia bancaria u otro método sin tarjeta vinculada (sin `card_id`).
 - **TXN-09 · Transferencia a TDC como pago:** si `payment_method_to_id` pertenece a una tarjeta de behavior `credit`, `create_transaction` enruta internamente como pago: abona `amount` a `paid_amount` del statement cerrado más antiguo con saldo pendiente; si no existe ninguno, abona al statement abierto del ciclo actual. El campo opcional `target_statement_id` en el request permite elegir el statement exacto. La transacción se crea siempre como `type=transfer` para trazabilidad (TXN-02). Aplica también al editar (update).
 - **TXN-10 · Filtro por método de pago:** el listado de transacciones filtrado por `payment_method_id` DEBE incluir las transferencias en las que el método sea origen **o** destino (`payment_method_to_id`). El filtro representa "movimientos que tocan el método", no solo egresos desde él; sin esto un pago de TDC (TDC-10, TXN-09) queda invisible al filtrar por la tarjeta pagada. No altera agregados: los transfers siguen excluidos de ingresos/gastos (TXN-02, DSH-02).
@@ -197,7 +199,7 @@ El pronóstico responde "¿con mis ingresos futuros podré pagar lo que se viene
 | R4 MSI | MSI-01…11 |
 | R5 crypto | INV-01/02/03/03b/05/06 |
 | R6 dashboard | DSH-01…06 |
-| R7 login | ESP-01/02 |
+| R7 login | ESP-01/02, GLO-07 |
 | R8 espacios | ESP-01…07, GLO-05 |
 | R9 recurrentes | REC-01…06 |
 | R10 presupuestos | PRE-01…04 |

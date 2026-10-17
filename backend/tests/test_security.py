@@ -180,3 +180,43 @@ async def test_jwt_without_exp_is_rejected(client):
 async def test_valid_token_still_accepted(client):
     res = await client.get("/api/v1/me", headers=auth_headers())
     assert res.status_code == 200
+
+
+# --- GLO-07: modo local mono-usuario --------------------------------------
+
+
+async def test_glo07_local_mode_acts_as_local_user_without_token(client, monkeypatch):
+    """Sin token, toda petición actúa como LOCAL_USER_ID (provisionado, ESP-01)."""
+    from app.core.config import settings
+
+    owner = uuid.uuid4()
+    monkeypatch.setattr(settings, "auth_mode", "local")
+    monkeypatch.setattr(settings, "local_user_id", owner)
+
+    first = await client.get("/api/v1/me")
+    assert first.status_code == 200, first.text
+    assert first.json()["profile"]["id"] == str(owner)
+    assert [s["name"] for s in first.json()["spaces"]] == ["Personal"]
+
+    # Idempotente y el token de otro usuario se ignora.
+    again = await client.get("/api/v1/me", headers=auth_headers(uuid.uuid4()))
+    assert again.json()["profile"]["id"] == str(owner)
+    assert len(again.json()["spaces"]) == 1
+
+
+async def test_glo07_jwt_mode_still_requires_token(client):
+    res = await client.get("/api/v1/me")
+    assert res.status_code == 401
+
+
+async def test_glo07_local_mode_without_user_id_fails_at_startup(monkeypatch):
+    import pytest
+
+    from app.core.config import settings
+    from app.main import app, lifespan
+
+    monkeypatch.setattr(settings, "auth_mode", "local")
+    monkeypatch.setattr(settings, "local_user_id", None)
+    with pytest.raises(RuntimeError, match="LOCAL_USER_ID"):
+        async with lifespan(app):
+            pass

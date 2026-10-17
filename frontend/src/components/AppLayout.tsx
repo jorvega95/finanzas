@@ -1,7 +1,6 @@
 // Shell de la app: sidebar de navegación + header con espacio activo,
-// toggle de tema y cierre de sesión.
+// y toggle de tema.
 import { NavLink, Outlet } from "react-router-dom";
-import { useAuth } from "../auth/AuthProvider";
 import { useSpace } from "../features/spaces/SpaceProvider";
 import { useTheme } from "../lib/theme";
 import NotificationBell from "./NotificationBell";
@@ -17,7 +16,6 @@ const NAV = [
 ];
 
 export default function AppLayout() {
-  const { signOut } = useAuth();
   const { theme, toggle } = useTheme();
   const { me, activeSpace, setActiveSpace } = useSpace();
 
@@ -73,9 +71,6 @@ export default function AppLayout() {
             <NotificationBell />
             <button onClick={toggle} className="btn-secondary" aria-label="Cambiar tema">
               {theme === "dark" ? "☀️" : "🌙"}
-            </button>
-            <button onClick={() => void signOut()} className="btn-secondary">
-              Salir
             </button>
           </div>
         </header>

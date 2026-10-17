@@ -1,7 +1,7 @@
 [project]
 name = "finanzas-backend"
 version = "0.1.0"
-description = "API de finanzas personales (FastAPI + Supabase)"
+description = "API de finanzas personales (FastAPI + Postgres local)"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
