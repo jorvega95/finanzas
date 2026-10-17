@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Lanzador de escritorio (GLO-07): asegura el servicio y abre/enfoca la
+# ventana app de Brave. Lo instala scripts/local/install.sh en ~/.local/bin.
+set -euo pipefail
+PORT="${FINANZAS_PORT:-8765}"
+APP_URL="http://127.0.0.1:$PORT"
+WINDOW_TITLE="Finanzas"
+BRAVE_PROFILE_DIR="$HOME/.local/share/finanzas-webapp/brave-profile"
+
+notificar_error() {
+  command -v notify-send >/dev/null && notify-send -u critical "Finanzas" "$1"
+  echo "[ERROR] $1" >&2
+}
+
+if ! curl -sf -o /dev/null "$APP_URL/health"; then
+  systemctl --user start finanzas.service
+  for _ in $(seq 60); do curl -sf -o /dev/null "$APP_URL/health" && break; sleep 0.5; done
+  if ! curl -sf -o /dev/null "$APP_URL/health"; then
+    notificar_error "El servicio no arrancó. Revisa: journalctl --user -u finanzas -n 50"
+    exit 1
+  fi
+fi
+
+# Enfocar por título exacto: el helper de Omarchy (sin distinguir mayúsculas)
+# confunde esta ventana con la de un editor abierto en la carpeta "finanzas".
+existing_addr=$(hyprctl clients -j 2>/dev/null | jq -r --arg t "$WINDOW_TITLE" '.[] | select(.title == $t) | .address' | head -n1)
+if [[ -n "$existing_addr" ]]; then
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:$existing_addr\" })" >/dev/null 2>&1 \
+    || hyprctl dispatch focuswindow "address:$existing_addr"
+else
+  # Perfil aislado: siempre abre como ventana app independiente.
+  mkdir -p "$BRAVE_PROFILE_DIR"
+  exec setsid uwsm-app -- brave --app="$APP_URL" --user-data-dir="$BRAVE_PROFILE_DIR"
+fi

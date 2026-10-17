@@ -1,0 +1,7 @@
+[Unit]
+Description=Respaldo diario de Finanzas (GLO-08)
+
+[Service]
+Type=oneshot
+Environment=FINANZAS_BACKUP_DIR=@BACKUP_DIR@
+ExecStart=@RAIZ@/scripts/local/backup.sh

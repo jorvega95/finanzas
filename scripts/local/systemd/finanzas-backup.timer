@@ -1,0 +1,10 @@
+[Unit]
+Description=Respaldo diario de Finanzas (GLO-08)
+
+[Timer]
+OnCalendar=*-*-* 13:00
+# Si la laptop estaba apagada a esa hora, respalda al encender.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

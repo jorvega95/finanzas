@@ -1,0 +1,16 @@
+[Unit]
+Description=Finanzas (FastAPI + SPA, modo local GLO-07)
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=@RAIZ@/backend
+# finanzas.env tiene prioridad sobre backend/.env (de ahí solo se toman las
+# API keys de precios/FX que no estén definidas aquí).
+EnvironmentFile=@ENV_FILE@
+ExecStart=@RAIZ@/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port @PORT@
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

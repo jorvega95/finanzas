@@ -1,6 +1,6 @@
 # CLAUDE.md — Finanzas
 
-App de finanzas personales multi-tenant. Monorepo: `backend/` (FastAPI + SQLAlchemy async + Supabase Postgres/Auth) y `frontend/` (React 18 + TypeScript + Vite + Tailwind v4 + TanStack Query).
+App de finanzas personales de uso local (mono-usuario, GLO-07; el modelo multi-tenant de espacios se conserva). Monorepo: `backend/` (FastAPI + SQLAlchemy async + Postgres local) y `frontend/` (React 18 + TypeScript + Vite + Tailwind v4 + TanStack Query).
 
 ## Documentos fuente de verdad (locales, gitignored — SÍ existen en disco)
 
@@ -31,9 +31,10 @@ Si una decisión no está cubierta por una regla, propónla al usuario y, si se 
 
 ## Arquitectura (resumen)
 
-- El frontend usa Supabase **solo para auth** (`src/auth/supabase.ts`); todos los datos van por FastAPI con el JWT en `Authorization` (`src/api/client.ts`).
-- FastAPI **verifica** JWTs de Supabase (`app/core/security.py`), no los emite.
-- RLS en Postgres como segunda capa de defensa; FastAPI filtra primero.
+- **Modo local (GLO-07)**: sin login. `AUTH_MODE=local` ⇒ toda petición actúa como `LOCAL_USER_ID` (`app/core/deps.py`). `AUTH_MODE=jwt` (HS256, `app/core/security.py`) queda para los tests y un posible cliente móvil futuro.
+- FastAPI sirve el frontend compilado (`FRONTEND_DIST`, `mount_frontend` en `app/main.py`) en el mismo origen; corre como servicio `systemd --user` en `127.0.0.1:8765`. Instalación y migración: `GUIA_INICIO.md` y `scripts/local/`.
+- RLS: solo se aplica si existe `auth.uid()` (Supabase, `app/db/rls.py`); en local FastAPI es la única capa de aislamiento (GLO-05).
+- Respaldos diarios con rotación vía timer de systemd (GLO-08, `scripts/local/backup.sh`).
 - Jobs en APScheduler (`app/jobs/scheduler.py`): recurrentes, cierre de statements, FX, snapshots.
 - Tipos del frontend generados del OpenAPI: `npm run generate:api` (no escribir tipos de API a mano).
 
@@ -97,12 +98,12 @@ backend/app/
   jobs/          APScheduler
 frontend/src/
   features/      vertical slices: transactions, catalogs, cards, msi, investments, dashboard, spaces, settings
-  api/ auth/ lib/ routes/ components/ui/
+  api/ lib/ routes/ components/ui/
 ```
 
 ## Estado actual
 
-Scaffold de Fase 0 (ver PLAN.md §6). Nada implementado aún: los servicios son stubs con `NotImplementedError` y referencia a sus reglas. Siguiente: Supabase project + login + migración inicial (`profiles`, `spaces`, `space_members`) + seed ESP-01/CAT-02.
+App en uso personal semanal. Migrada de Supabase a Postgres local + servicio systemd (GLO-07/GLO-08). Opción abierta a futuro: un cliente móvil para registrar gastos (requeriría `AUTH_MODE=jwt` y exponer el servidor de forma segura, p. ej. Tailscale).
 
 ## Git
 
