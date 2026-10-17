@@ -20,7 +20,7 @@ lanzador de escritorio. Sin login: la app actúa siempre como tu perfil
 ## Instalación (una vez)
 
 ```bash
-scripts/local/setup-postgres.sh      # pide sudo: instala Postgres y crea la base
+scripts/local/setup-postgres.sh      # SIN sudo delante (lo pide solo): instala Postgres y crea la base
 scripts/local/install.sh             # build + migraciones + servicio + lanzador
 ```
 

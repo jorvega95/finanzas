@@ -12,6 +12,13 @@ BACKUP_DIR="${FINANZAS_BACKUP_DIR:-$HOME/Documents/finanzas-backups}"
 info() { printf '\033[1;34m[finanzas]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[finanzas] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Con sudo, $USER/$HOME serían los de root: rol de Postgres, config y
+# servicio systemd --user quedarían bajo root. Cada script pide sudo solo
+# en los pasos que lo necesitan.
+if [[ $EUID -eq 0 ]]; then
+  fail "No corras este script con sudo; ejecútalo como tu usuario (pedirá sudo cuando haga falta)"
+fi
+
 # psql/pg_dump contra la base local por socket (auth peer, sin contraseña).
 local_psql() { psql -h "$PG_SOCKET_DIR" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"; }
 
