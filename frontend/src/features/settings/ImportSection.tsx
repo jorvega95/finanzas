@@ -87,8 +87,8 @@ export default function ImportSection() {
 
   return (
     <section className="card p-5">
-      <h2 className="mb-1 font-semibold">Importar estado de cuenta (CSV)</h2>
-      <p className="mb-4 text-xs text-ink-muted dark:text-slate-400">
+      <h2 className="mb-1 text-base font-semibold tracking-tight">Importar estado de cuenta (CSV)</h2>
+      <p className="mb-4 text-xs text-ink-muted">
         Sube el CSV de tu banco, mapea las columnas y revisa antes de confirmar.
         Nada se guarda hasta que confirmes.
       </p>
@@ -104,7 +104,7 @@ export default function ImportSection() {
         <button className="btn-secondary" onClick={() => fileInput.current?.click()}>
           📄 Elegir archivo
         </button>
-        {fileName && <span className="text-sm text-ink-muted dark:text-slate-400">{fileName}</span>}
+        {fileName && <span className="text-sm text-ink-muted">{fileName}</span>}
       </div>
 
       {headers.length > 0 && (
@@ -194,14 +194,14 @@ export default function ImportSection() {
 
       {preview && (
         <div className="mt-4">
-          <p className="mb-2 text-sm text-ink-muted dark:text-slate-400">
+          <p className="mb-2 text-sm text-ink-muted">
             {preview.total} filas · {preview.duplicates} posibles duplicados (des-seleccionados) ·{" "}
             {preview.invalid} con error
           </p>
-          <div className="max-h-72 overflow-y-auto rounded-lg border border-line dark:border-slate-800">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-card dark:bg-slate-900">
-                <tr className="text-left text-xs text-ink-muted dark:text-slate-400">
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-line">
+            <table className="tabular w-full text-sm">
+              <thead className="sticky top-0 bg-card">
+                <tr className="border-b border-line text-left text-xs font-medium uppercase tracking-wide text-ink-subtle">
                   <th className="p-2">✓</th>
                   <th className="p-2">Fecha</th>
                   <th className="p-2">Descripción</th>
@@ -214,7 +214,7 @@ export default function ImportSection() {
                 {preview.rows.map((row: PreviewRow, index) => (
                   <tr
                     key={row.row}
-                    className={`border-t border-line dark:border-slate-800 ${
+                    className={`border-t border-line ${
                       row.error ? "opacity-50" : ""
                     }`}
                   >
@@ -272,14 +272,14 @@ export default function ImportSection() {
 
       {/* Historial de batches con rollback (IMP-04) */}
       {(batches.data ?? []).length > 0 && (
-        <div className="mt-5 border-t border-line pt-4 dark:border-slate-800">
+        <div className="mt-5 border-t border-line pt-4">
           <h3 className="mb-2 text-sm font-medium">Importaciones</h3>
           <ul className="space-y-1 text-sm">
             {(batches.data ?? []).map((b) => (
               <li key={b.id} className="flex items-center justify-between">
                 <span>
                   {b.file_name}{" "}
-                  <span className="text-xs text-ink-muted dark:text-slate-400">
+                  <span className="text-xs text-ink-muted">
                     · {b.row_count} filas · {BATCH_STATUS[b.status]}
                   </span>
                 </span>
@@ -298,8 +298,8 @@ export default function ImportSection() {
       )}
 
       {/* Export (IMP-07) */}
-      <div className="mt-5 flex flex-wrap gap-2 border-t border-line pt-4 dark:border-slate-800">
-        <span className="self-center text-sm text-ink-muted dark:text-slate-400">
+      <div className="mt-5 flex flex-wrap gap-2 border-t border-line pt-4">
+        <span className="self-center text-sm text-ink-muted">
           Exportar mis datos:
         </span>
         <button

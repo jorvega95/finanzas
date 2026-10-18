@@ -29,13 +29,14 @@ import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import { useChartTheme } from "../../lib/chartTheme";
 import { useSpace } from "../spaces/SpaceProvider";
+import Icon, { type IconName } from "../../components/ui/Icon";
 import NatureDetailModal from "./NatureDetailModal";
 import { CHART_COLORS as COLORS, NATURE_LABELS } from "./nature";
 
-const KIND_ICONS: Record<string, string> = {
-  card_due: "💳",
-  msi_quota: "📅",
-  recurring: "🔁",
+const KIND_ICONS: Record<string, IconName> = {
+  card_due: "card",
+  msi_quota: "calendar",
+  recurring: "refresh",
 };
 
 function currentMonth(): string {
@@ -74,7 +75,7 @@ function BudgetsSection({ month }: { month: string }) {
   return (
     <section className="card p-5">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-semibold">Presupuestos</h2>
+        <h2 className="text-sm font-semibold">Presupuestos</h2>
         <button
           className="btn-secondary text-xs"
           onClick={() => copyBudgets.mutate({ from_month: prevMonth(month), to_month: month })}
@@ -111,7 +112,7 @@ function BudgetsSection({ month }: { month: string }) {
       )}
 
       {(budgets.data ?? []).length === 0 ? (
-        <p className="text-sm text-ink-muted dark:text-slate-400">
+        <p className="text-sm text-ink-muted">
           Sin presupuestos este mes.
         </p>
       ) : (
@@ -125,18 +126,18 @@ function BudgetsSection({ month }: { month: string }) {
               <li key={row.budget.id}>
                 <div className="mb-1 flex items-center justify-between text-sm">
                   <span className="font-medium">{row.category_name}</span>
-                  <span className={over ? "text-red-600 dark:text-red-400" : "text-ink-muted dark:text-slate-400"}>
+                  <span className={over ? "text-red-600 dark:text-red-400" : "text-ink-muted"}>
                     {formatMoney(row.consumed)} / {formatMoney(row.budget.amount)}
                     <button
                       aria-label="Eliminar presupuesto"
                       className="ml-2 text-xs text-ink-muted hover:text-red-600"
                       onClick={() => deleteBudget.mutate(row.budget.id)}
                     >
-                      ✕
+                      <Icon name="x" className="inline size-3.5 align-[-2px]" />
                     </button>
                   </span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div
                     className={`h-full rounded-full transition-all ${
                       over ? "bg-red-500" : ratio >= 0.8 ? "bg-amber-500" : "bg-accent"
@@ -175,7 +176,10 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">Dashboard</h1>
+        <div>
+          <h1 className="page-title">Dashboard</h1>
+          <p className="page-subtitle">Gasto devengado del mes y lo que viene.</p>
+        </div>
         <input
           type="month"
           className="input w-auto"
@@ -185,15 +189,15 @@ export default function DashboardPage() {
       </div>
 
       {/* Totales del mes (DSH-02) */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid gap-3 sm:grid-cols-3">
         {[
           ["Ingresos", totals?.income, "text-emerald-600 dark:text-emerald-400"],
           ["Gastos", totals?.expenses, "text-red-600 dark:text-red-400"],
           ["Neto", totals?.net, ""],
         ].map(([label, value, color]) => (
-          <div key={label as string} className="card p-4">
-            <p className="text-xs text-ink-muted dark:text-slate-400">{label}</p>
-            <p className={`text-xl font-semibold ${color}`}>
+          <div key={label as string} className="card p-5">
+            <p className="text-sm text-ink-muted">{label}</p>
+            <p className={`tabular mt-2 text-2xl font-semibold tracking-tight ${color}`}>
               {value !== undefined ? formatMoney(value as string, currency) : "…"}
             </p>
           </div>
@@ -203,10 +207,10 @@ export default function DashboardPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Tendencia 6 meses (DSH-03) */}
         <section className="card p-5">
-          <h2 className="mb-3 font-semibold">Tendencia 6 meses</h2>
+          <h2 className="mb-4 text-sm font-semibold">Tendencia 6 meses</h2>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={data?.trend ?? []}>
-              <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+              <CartesianGrid vertical={false} stroke={chart.grid} />
               <XAxis dataKey="month" fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
               <YAxis fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
               <Tooltip
@@ -217,17 +221,17 @@ export default function DashboardPage() {
               <Legend
                 formatter={(value) => <span style={{ color: chart.legend }}>{value}</span>}
               />
-              <Line type="monotone" dataKey="income" name="Ingresos" stroke="#10b981" dot={false} />
-              <Line type="monotone" dataKey="expenses" name="Gastos" stroke="#ef4444" dot={false} />
+              <Line type="monotone" dataKey="income" name="Ingresos" stroke="#10b981" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="expenses" name="Gastos" stroke="#ef4444" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </section>
 
         {/* Por categoría (DSH-03) */}
         <section className="card p-5">
-          <h2 className="mb-3 font-semibold">Gasto por categoría</h2>
+          <h2 className="mb-4 text-sm font-semibold">Gasto por categoría</h2>
           {(data?.by_category ?? []).length === 0 ? (
-            <p className="text-sm text-ink-muted dark:text-slate-400">Sin gastos este mes.</p>
+            <p className="text-sm text-ink-muted">Sin gastos este mes.</p>
           ) : (
             <ResponsiveContainer width="100%" height={220}>
               <BarChart
@@ -260,9 +264,9 @@ export default function DashboardPage() {
 
         {/* Por naturaleza (CAT-03/DSH-03), con drill-down (DSH-06) */}
         <section className="card p-5">
-          <h2 className="mb-3 font-semibold">Por naturaleza</h2>
+          <h2 className="mb-4 text-sm font-semibold">Por naturaleza</h2>
           {natureData.length === 0 ? (
-            <p className="text-sm text-ink-muted dark:text-slate-400">Sin gastos este mes.</p>
+            <p className="text-sm text-ink-muted">Sin gastos este mes.</p>
           ) : (
             <>
               <ResponsiveContainer width="100%" height={200}>
@@ -300,7 +304,7 @@ export default function DashboardPage() {
                 {natureData.map((row, index) => (
                   <li key={row.key}>
                     <button
-                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-slate-800"
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-sm transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                       onClick={() => setNatureDetail(row.key)}
                     >
                       <span
@@ -310,7 +314,7 @@ export default function DashboardPage() {
                       />
                       <span className="flex-1 text-left">Ver detalle de {row.name.toLowerCase()}</span>
                       <span className="tabular-nums">{formatMoney(row.amount, currency)}</span>
-                      <span className="w-10 text-right text-xs tabular-nums text-ink-muted dark:text-slate-400">
+                      <span className="w-10 text-right text-xs tabular-nums text-ink-muted">
                         {natureTotal > 0 ? Math.round((row.value / natureTotal) * 100) : 0}%
                       </span>
                     </button>
@@ -323,27 +327,29 @@ export default function DashboardPage() {
 
         {/* Próximos compromisos (DSH-05) */}
         <section className="card p-5">
-          <h2 className="mb-3 font-semibold">Próximos compromisos</h2>
+          <h2 className="mb-4 text-sm font-semibold">Próximos compromisos</h2>
           {(data?.upcoming ?? []).length === 0 ? (
-            <p className="text-sm text-ink-muted dark:text-slate-400">Nada pendiente. 🎉</p>
+            <p className="text-sm text-ink-muted">Nada pendiente.</p>
           ) : (
-            <ul className="divide-y divide-line dark:divide-slate-800">
+            <ul className="divide-y divide-line">
               {(data?.upcoming ?? []).map((item) => (
                 <li key={`${item.kind}-${item.ref_id}`} className="flex items-center justify-between py-2 text-sm">
                   <span className="flex items-center gap-2">
-                    <span aria-hidden>{KIND_ICONS[item.kind]}</span>
+                    <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-ink-muted">
+                      <Icon name={KIND_ICONS[item.kind] ?? "calendar"} className="size-3.5" />
+                    </span>
                     <span>
                       {item.description}
                       {item.is_overdue && (
-                        <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
+                        <span className="ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">
                           Vencido
                         </span>
                       )}
                     </span>
                   </span>
                   <span className="text-right">
-                    <span className="font-medium">{formatMoney(item.amount, currency)}</span>
-                    <span className="ml-2 text-xs text-ink-muted dark:text-slate-400">{formatDate(item.date)}</span>
+                    <span className="tabular font-medium">{formatMoney(item.amount, currency)}</span>
+                    <span className="ml-2 text-xs text-ink-muted">{formatDate(item.date)}</span>
                   </span>
                 </li>
               ))}

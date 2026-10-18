@@ -17,6 +17,7 @@ import { formatDate } from "../../lib/dates";
 import { formatMoney } from "../../lib/money";
 import { useChartTheme } from "../../lib/chartTheme";
 import { useSpace } from "../spaces/SpaceProvider";
+import Icon, { type IconName } from "../../components/ui/Icon";
 
 const HORIZONS = [3, 6, 12];
 
@@ -28,12 +29,12 @@ const KIND_LABEL: Record<ForecastEvent["kind"], string> = {
   manual_expense: "Gasto programado",
 };
 
-const KIND_ICON: Record<ForecastEvent["kind"], string> = {
-  income: "💰",
-  recurring_income: "💵",
-  card_due: "💳",
-  recurring_expense: "🔁",
-  manual_expense: "🧾",
+const KIND_ICON: Record<ForecastEvent["kind"], IconName> = {
+  income: "investments",
+  recurring_income: "refresh",
+  card_due: "card",
+  recurring_expense: "refresh",
+  manual_expense: "transactions",
 };
 
 export default function ForecastPage() {
@@ -62,20 +63,20 @@ export default function ForecastPage() {
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Pronóstico de flujo</h1>
-          <p className="text-sm text-ink-muted dark:text-slate-400">
+          <h1 className="page-title">Pronóstico de flujo</h1>
+          <p className="page-subtitle">
             Proyección de ingresos y pagos a futuro; te avisa si una deuda no será pagable.
           </p>
         </div>
-        <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+        <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
           {HORIZONS.map((h) => (
             <button
               key={h}
               onClick={() => setHorizon(h)}
               className={`rounded-md px-3 py-1 text-sm transition ${
                 horizon === h
-                  ? "bg-card font-medium text-accent-strong shadow-sm dark:bg-slate-900 dark:text-teal-300"
-                  : "text-ink-muted dark:text-slate-400"
+                  ? "bg-card font-medium text-ink shadow-sm"
+                  : "text-ink-muted"
               }`}
             >
               {h} meses
@@ -87,7 +88,7 @@ export default function ForecastPage() {
       {/* PRO-02: caja inicial = saldos débito/prepago + ajuste manual */}
       <section className="card flex flex-wrap items-end gap-4 p-5">
         <div>
-          <label className="mb-1 block text-xs text-ink-muted dark:text-slate-400">
+          <label className="mb-1 block text-xs text-ink-muted">
             Ajuste de caja inicial (efectivo/banco no registrado)
           </label>
           <div className="flex gap-2">
@@ -105,14 +106,14 @@ export default function ForecastPage() {
         </div>
         {data && (
           <div className="text-sm">
-            <p className="text-xs text-ink-muted dark:text-slate-400">Caja inicial estimada</p>
+            <p className="text-xs text-ink-muted">Caja inicial estimada</p>
             <p className="text-lg font-semibold">{formatMoney(data.starting_cash, currency)}</p>
           </div>
         )}
       </section>
 
       {forecast.isLoading && (
-        <p className="text-sm text-ink-muted dark:text-slate-400">Calculando pronóstico…</p>
+        <p className="text-sm text-ink-muted">Calculando pronóstico…</p>
       )}
       {forecast.error && (
         <p className="text-sm text-red-600 dark:text-red-400">{forecast.error.message}</p>
@@ -122,9 +123,9 @@ export default function ForecastPage() {
         <>
           {/* PRO-05: alerta de sobregiro */}
           {hasOverdraft ? (
-            <div className="rounded-xl border border-red-300 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/40">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
               <p className="font-semibold text-red-700 dark:text-red-300">
-                ⚠️ Sobregiro proyectado el {formatDate(data.first_overdraft_date!)}
+                Sobregiro proyectado el {formatDate(data.first_overdraft_date!)}
               </p>
               <p className="mt-1 text-sm text-red-700 dark:text-red-300">
                 Con tus ingresos proyectados no alcanzarás a cubrir todos los pagos. Faltante
@@ -132,9 +133,9 @@ export default function ForecastPage() {
               </p>
             </div>
           ) : (
-            <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/40">
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
               <p className="font-semibold text-emerald-700 dark:text-emerald-300">
-                ✅ Sin sobregiros en los próximos {horizon} meses
+                Sin sobregiros en los próximos {horizon} meses
               </p>
               <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-300">
                 Saldo mínimo proyectado: {formatMoney(data.min_balance, currency)}
@@ -145,13 +146,13 @@ export default function ForecastPage() {
 
           {/* Saldo líquido proyectado */}
           <section className="card p-5">
-            <h2 className="mb-3 font-semibold">Saldo líquido proyectado</h2>
+            <h2 className="mb-3 text-base font-semibold tracking-tight">Saldo líquido proyectado</h2>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="bal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0d9488" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#0d9488" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
@@ -173,7 +174,7 @@ export default function ForecastPage() {
                 <Area
                   type="stepAfter"
                   dataKey="balance"
-                  stroke="#0d9488"
+                  stroke="#10b981"
                   fill="url(#bal)"
                   name="Saldo"
                 />
@@ -183,13 +184,13 @@ export default function ForecastPage() {
 
           {/* Timeline de eventos */}
           <section className="card p-5">
-            <h2 className="mb-3 font-semibold">Línea de tiempo</h2>
+            <h2 className="mb-3 text-base font-semibold tracking-tight">Línea de tiempo</h2>
             {data.events.length === 0 ? (
-              <p className="text-sm text-ink-muted dark:text-slate-400">
+              <p className="text-sm text-ink-muted">
                 Sin movimientos proyectados en el horizonte.
               </p>
             ) : (
-              <ul className="divide-y divide-line dark:divide-slate-800">
+              <ul className="divide-y divide-line">
                 {data.events.map((ev, i) => {
                   const isIn = ev.direction === "in";
                   const balNeg = Number(ev.balance_after) < 0;
@@ -199,15 +200,17 @@ export default function ForecastPage() {
                       className="flex items-center justify-between gap-3 py-2 text-sm"
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <span aria-hidden>{KIND_ICON[ev.kind]}</span>
+                        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-ink-muted">
+                          <Icon name={KIND_ICON[ev.kind]} className="size-3.5" />
+                        </span>
                         <span className="min-w-0">
                           <span className="truncate">{ev.description}</span>
-                          <span className="ml-2 text-xs text-ink-muted dark:text-slate-500">
+                          <span className="ml-2 text-xs text-ink-muted">
                             {KIND_LABEL[ev.kind]}
                             {ev.is_estimate ? " · estimado" : ""}
                           </span>
                           {!ev.covered && (
-                            <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
+                            <span className="ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">
                               Faltan {formatMoney(ev.shortfall, currency)}
                             </span>
                           )}
@@ -228,12 +231,12 @@ export default function ForecastPage() {
                           className={`w-28 text-xs ${
                             balNeg
                               ? "text-red-600 dark:text-red-400"
-                              : "text-ink-muted dark:text-slate-400"
+                              : "text-ink-muted"
                           }`}
                         >
                           {formatMoney(ev.balance_after, currency)}
                         </span>
-                        <span className="w-20 text-xs text-ink-muted dark:text-slate-500">
+                        <span className="w-20 text-xs text-ink-muted">
                           {formatDate(ev.date)}
                         </span>
                       </span>

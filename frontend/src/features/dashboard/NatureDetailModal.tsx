@@ -35,20 +35,20 @@ export default function NatureDetailModal({ month, nature, currency, onClose }: 
       ) : detail.error ? (
         <p className="py-6 text-sm text-red-600 dark:text-red-400">{detail.error.message}</p>
       ) : !data || data.items.length === 0 ? (
-        <p className="py-6 text-sm text-ink-muted dark:text-slate-400">
+        <p className="py-6 text-sm text-ink-muted">
           Sin gastos de esta naturaleza en el mes.
         </p>
       ) : (
         <div className="max-h-[70vh] space-y-6 overflow-y-auto pr-1">
           <div className="flex items-baseline justify-between">
             <p className="text-2xl font-semibold">{formatMoney(data.total, currency)}</p>
-            <p className="text-xs text-ink-muted dark:text-slate-400">
+            <p className="text-xs text-ink-muted">
               {data.items.length} {data.items.length === 1 ? "movimiento" : "movimientos"}
             </p>
           </div>
 
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted dark:text-slate-400">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
               Por categoría
             </h3>
             <ul className="space-y-2">
@@ -58,12 +58,12 @@ export default function NatureDetailModal({ month, nature, currency, onClose }: 
                   <li key={row.category_id ?? "none"}>
                     <div className="mb-1 flex items-center justify-between text-sm">
                       <span className="font-medium">{row.category_name}</span>
-                      <span className="text-ink-muted dark:text-slate-400">
+                      <span className="text-ink-muted">
                         {formatMoney(row.total, currency)}
                         <span className="ml-2 tabular-nums">{Math.round(share * 100)}%</span>
                       </span>
                     </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
                       <div
                         className="h-full rounded-full"
                         style={{
@@ -79,20 +79,20 @@ export default function NatureDetailModal({ month, nature, currency, onClose }: 
           </section>
 
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted dark:text-slate-400">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
               Movimientos
             </h3>
-            <ul className="divide-y divide-line dark:divide-slate-800">
+            <ul className="divide-y divide-line">
               {data.items.map((item) => (
                 <li key={`${item.kind}-${item.id}`} className="flex items-start gap-3 py-2 text-sm">
-                  <span className="w-16 shrink-0 text-xs text-ink-muted dark:text-slate-400">
+                  <span className="w-16 shrink-0 text-xs text-ink-muted">
                     {formatDate(item.date)}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">
                       {item.kind === "msi_quota" && (
                         <span
-                          className="mr-1.5 rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+                          className="mr-1.5 rounded-full bg-indigo-500/15 px-2 py-0.5 text-xs text-indigo-700 dark:text-indigo-300"
                           title="Cuota de meses sin intereses"
                         >
                           MSI {item.installment_number}/{item.installment_total}
@@ -100,7 +100,7 @@ export default function NatureDetailModal({ month, nature, currency, onClose }: 
                       )}
                       {item.description || item.category_name}
                     </span>
-                    <span className="block truncate text-xs text-ink-muted dark:text-slate-400">
+                    <span className="block truncate text-xs text-ink-muted">
                       {item.category_name}
                       {item.payment_method_name && ` · ${item.payment_method_name}`}
                     </span>
@@ -110,7 +110,7 @@ export default function NatureDetailModal({ month, nature, currency, onClose }: 
                       {formatMoney(item.amount, currency)}
                     </span>
                     {item.original_amount && (
-                      <span className="block text-xs text-ink-muted dark:text-slate-400">
+                      <span className="block text-xs text-ink-muted">
                         {formatMoney(item.original_amount, item.currency)}
                       </span>
                     )}

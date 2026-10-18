@@ -146,7 +146,7 @@ export default function InvestmentsPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">Inversiones</h1>
+        <h1 className="page-title">Inversiones</h1>
         <button className="btn-secondary" onClick={() => takeSnapshots.mutate()}>
           Tomar snapshot de hoy
         </button>
@@ -161,7 +161,7 @@ export default function InvestmentsPage() {
           ["Patrimonio neto", lastNetWorth?.net_worth],
         ].map(([label, value]) => (
           <div key={label as string} className="card p-4">
-            <p className="text-xs text-ink-muted dark:text-slate-400">{label}</p>
+            <p className="text-xs text-ink-muted">{label}</p>
             <p
               className={`text-lg font-semibold ${
                 value && Number(value) < 0 ? "text-red-600 dark:text-red-400" : ""
@@ -172,14 +172,14 @@ export default function InvestmentsPage() {
           </div>
         ))}
       </div>
-      <p className="text-xs text-ink-muted dark:text-slate-500">
+      <p className="text-xs text-ink-muted">
         Patrimonio = inversiones − deuda de tarjetas. Aún no incluye saldos de cuentas de
         efectivo o débito.
       </p>
 
       {/* Cuentas + movimientos */}
       <section className="card space-y-4 p-5">
-        <h2 className="font-semibold">Cuentas y movimientos</h2>
+        <h2 className="text-base font-semibold tracking-tight">Cuentas y movimientos</h2>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -211,16 +211,16 @@ export default function InvestmentsPage() {
 
       {/* Holdings (INV-06) */}
       <section className="card p-5">
-        <h2 className="mb-3 font-semibold">Portafolio</h2>
+        <h2 className="mb-3 text-base font-semibold tracking-tight">Portafolio</h2>
         {(data?.holdings ?? []).length === 0 ? (
-          <p className="text-sm text-ink-muted dark:text-slate-400">
+          <p className="text-sm text-ink-muted">
             Sin posiciones. Registra tu primera compra arriba.
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="tabular w-full text-sm">
               <thead>
-                <tr className="text-left text-xs text-ink-muted dark:text-slate-400">
+                <tr className="border-b border-line text-left text-xs font-medium uppercase tracking-wide text-ink-subtle">
                   <th className="py-1 pr-3">Activo</th>
                   <th className="py-1 pr-3">Cuenta</th>
                   <th className="py-1 pr-3">Cantidad</th>
@@ -233,9 +233,9 @@ export default function InvestmentsPage() {
               </thead>
               <tbody>
                 {(data?.holdings ?? []).map((h) => (
-                  <tr key={h.holding_id} className="border-t border-line dark:border-slate-800">
+                  <tr key={h.holding_id} className="border-t border-line">
                     <td className="py-2 pr-3 font-medium">{h.asset_name}</td>
-                    <td className="py-2 pr-3 text-ink-muted dark:text-slate-400">
+                    <td className="py-2 pr-3 text-ink-muted">
                       {h.account_name}
                     </td>
                     <td className="py-2 pr-3">{h.quantity}</td>
@@ -267,7 +267,7 @@ export default function InvestmentsPage() {
         )}
         {/* INV-04: precio manual rápido */}
         <form
-          className="mt-4 flex flex-wrap items-end gap-2 border-t border-line pt-4 dark:border-slate-800"
+          className="mt-4 flex flex-wrap items-end gap-2 border-t border-line pt-4"
           onSubmit={(e) => {
             e.preventDefault();
             const form = e.target as HTMLFormElement;
@@ -280,7 +280,7 @@ export default function InvestmentsPage() {
             form.reset();
           }}
         >
-          <span className="text-xs text-ink-muted dark:text-slate-400">
+          <span className="text-xs text-ink-muted">
             Precio manual (CETES, fondos, acciones):
           </span>
           <input name="symbol" className="input w-32" placeholder="símbolo" required />
@@ -303,9 +303,9 @@ export default function InvestmentsPage() {
       {/* Historia (INV-05 + PAT-01) */}
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="card p-5">
-          <h2 className="mb-3 font-semibold">Evolución del portafolio</h2>
+          <h2 className="mb-3 text-base font-semibold tracking-tight">Evolución del portafolio</h2>
           {(snapshots.data ?? []).length < 2 ? (
-            <p className="text-sm text-ink-muted dark:text-slate-400">
+            <p className="text-sm text-ink-muted">
               Los snapshots diarios van dibujando esta gráfica.
             </p>
           ) : (
@@ -325,15 +325,15 @@ export default function InvestmentsPage() {
                   cursor={chart.cursorLine}
                   {...chart.tooltip}
                 />
-                <Line type="monotone" dataKey="value" name="Valor" stroke="#0d9488" dot={false} />
+                <Line type="monotone" dataKey="value" name="Valor" stroke="#10b981" dot={false} />
               </LineChart>
             </ResponsiveContainer>
           )}
         </section>
         <section className="card p-5">
-          <h2 className="mb-3 font-semibold">Patrimonio neto</h2>
+          <h2 className="mb-3 text-base font-semibold tracking-tight">Patrimonio neto</h2>
           {(netWorth.data ?? []).length < 2 ? (
-            <p className="text-sm text-ink-muted dark:text-slate-400">
+            <p className="text-sm text-ink-muted">
               {lastNetWorth
                 ? `Hoy: ${formatMoney(lastNetWorth.net_worth, currency)} (activos ${formatMoney(lastNetWorth.assets, currency)} − deuda ${formatMoney(lastNetWorth.liabilities, currency)})`
                 : "Toma el primer snapshot para empezar la historia."}

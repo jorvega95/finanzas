@@ -59,20 +59,20 @@ export default function MembersSection() {
 
   return (
     <section className="card p-5">
-      <h2 className="mb-1 font-semibold">Espacio: {activeSpace.name}</h2>
-      <p className="mb-4 text-xs text-ink-muted dark:text-slate-400">
+      <h2 className="mb-1 text-base font-semibold tracking-tight">Espacio: {activeSpace.name}</h2>
+      <p className="mb-4 text-xs text-ink-muted">
         {isShared
           ? "Espacio compartido — los miembros ven y registran según su rol."
           : "Tu espacio personal es solo tuyo; crea uno compartido para invitar a alguien."}
       </p>
 
       {/* Miembros (ESP-03) */}
-      <ul className="mb-4 divide-y divide-line dark:divide-slate-800">
+      <ul className="mb-4 divide-y divide-line">
         {(members.data ?? []).map((m) => (
           <li key={m.user_id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
             <div>
               <span className="font-medium">{m.display_name}</span>
-              <span className="ml-2 text-xs text-ink-muted dark:text-slate-400">{m.email}</span>
+              <span className="ml-2 text-xs text-ink-muted">{m.email}</span>
             </div>
             <div className="flex items-center gap-2">
               {isOwner && isShared ? (
@@ -92,7 +92,7 @@ export default function MembersSection() {
                   ))}
                 </select>
               ) : (
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
                   {ROLE_LABELS[m.role]}
                 </span>
               )}
@@ -114,7 +114,7 @@ export default function MembersSection() {
 
       {/* Invitaciones (ESP-04) */}
       {isOwner && isShared && (
-        <div className="mb-6 border-t border-line pt-4 dark:border-slate-800">
+        <div className="mb-6 border-t border-line pt-4">
           <h3 className="mb-2 text-sm font-medium">Invitar</h3>
           <form onSubmit={handleInvite} className="flex flex-wrap gap-2">
             <input
@@ -138,7 +138,7 @@ export default function MembersSection() {
           </form>
           <ErrorText error={createInvite.error} />
           {(invites.data ?? []).length > 0 && (
-            <ul className="mt-3 space-y-1 text-xs text-ink-muted dark:text-slate-400">
+            <ul className="mt-3 space-y-1 text-xs text-ink-muted">
               {(invites.data ?? []).map((inv) => (
                 <li key={inv.id} className="flex flex-wrap items-center gap-2">
                   ✉️ {inv.email} ({ROLE_LABELS[inv.role]}) — expira{" "}
@@ -157,14 +157,14 @@ export default function MembersSection() {
               ))}
             </ul>
           )}
-          <p className="mt-2 text-xs text-ink-muted dark:text-slate-500">
+          <p className="mt-2 text-xs text-ink-muted">
             Comparte el token con la persona invitada; lo pega aquí abajo desde su cuenta.
           </p>
         </div>
       )}
 
       {/* Reclamar invitación + crear espacio */}
-      <div className="grid gap-4 border-t border-line pt-4 dark:border-slate-800 md:grid-cols-2">
+      <div className="grid gap-4 border-t border-line pt-4 md:grid-cols-2">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -216,7 +216,7 @@ export default function MembersSection() {
       {/* Eliminar espacio (ESP-06) */}
       {isOwner && isShared && (
         <form
-          className="mt-6 border-t border-line pt-4 dark:border-slate-800"
+          className="mt-6 border-t border-line pt-4"
           onSubmit={(e) => {
             e.preventDefault();
             deleteSpace.mutate(
@@ -234,7 +234,7 @@ export default function MembersSection() {
           <h3 className="mb-1 text-sm font-medium text-red-600 dark:text-red-400">
             Eliminar este espacio
           </h3>
-          <p className="mb-2 text-xs text-ink-muted dark:text-slate-400">
+          <p className="mb-2 text-xs text-ink-muted">
             Borra TODOS sus datos de forma permanente. Escribe el nombre exacto
             (&ldquo;{activeSpace.name}&rdquo;) para confirmar.
           </p>

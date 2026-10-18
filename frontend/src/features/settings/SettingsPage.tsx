@@ -131,7 +131,7 @@ function CategoriesSection() {
 
   return (
     <section className="card p-5">
-      <h2 className="mb-4 font-semibold">Categorías</h2>
+      <h2 className="mb-4 text-base font-semibold tracking-tight">Categorías</h2>
 
       {/* Formulario de creación */}
       <form onSubmit={handleCreate} className="mb-4 flex flex-wrap gap-2">
@@ -177,19 +177,19 @@ function CategoriesSection() {
       <div className="grid gap-6 md:grid-cols-2">
         {(["expense", "income"] as const).map((kind) => (
           <div key={kind}>
-            <h3 className="mb-2 text-sm font-medium text-ink-muted dark:text-slate-400">
+            <h3 className="mb-2 text-sm font-medium text-ink-muted">
               {kind === "expense" ? "Gastos" : "Ingresos"}
             </h3>
             <ul className="space-y-1">
               {grouped[kind].map((c) => (
                 <li
                   key={c.id}
-                  className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                  className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-muted"
                 >
                   <span className={c.is_active ? "" : "line-through opacity-50"}>
                     {c.name}
                     {c.expense_nature && (
-                      <span className="ml-2 text-xs text-ink-muted dark:text-slate-500">
+                      <span className="ml-2 text-xs text-ink-muted">
                         {NATURE_LABELS[c.expense_nature as ExpenseNature]}
                       </span>
                     )}
@@ -197,7 +197,7 @@ function CategoriesSection() {
                   <span className="flex items-center gap-1">
                     <button
                       aria-label="Editar categoría"
-                      className="rounded p-1 text-ink-muted transition-colors hover:bg-slate-100 hover:text-accent dark:hover:bg-slate-700"
+                      className="rounded p-1 text-ink-muted transition-colors hover:bg-muted hover:text-accent"
                       onClick={() => openEditModal(c)}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
@@ -214,7 +214,7 @@ function CategoriesSection() {
                     )}
                     <button
                       aria-label="Eliminar categoría"
-                      className="rounded p-1 text-ink-muted transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                      className="rounded p-1 text-ink-muted transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-40 dark:hover:text-red-400"
                       onClick={() => setDeletingCategory(c)}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
@@ -246,7 +246,7 @@ function CategoriesSection() {
             />
           </div>
           {editName !== editingCategory?.name && editName.trim() !== "" && (
-            <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+            <p className="rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
               Todas las transacciones asignadas a esta categoría reflejarán el nuevo nombre.
             </p>
           )}
@@ -300,7 +300,7 @@ function CategoriesSection() {
               </button>
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                className="btn-danger"
                 disabled={deleteCategory.isPending || updateCategory.isPending}
                 onClick={() => handleDelete(deletingCategory)}
               >
@@ -370,25 +370,25 @@ function PaymentMethodsSection() {
 
   return (
     <section className="card p-5">
-      <h2 className="mb-3 font-semibold">Métodos de pago</h2>
-      <details className="mb-4 rounded-lg border border-slate-200 dark:border-slate-700">
-        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-ink-muted select-none hover:text-ink dark:text-slate-400 dark:hover:text-slate-200">
+      <h2 className="mb-3 text-base font-semibold tracking-tight">Métodos de pago</h2>
+      <details className="mb-4 rounded-lg border border-line">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-ink-muted select-none hover:text-ink">
           ¿Para qué sirven?
         </summary>
-        <div className="space-y-2 px-3 pb-3 pt-1 text-xs text-ink-muted dark:text-slate-400">
+        <div className="space-y-2 px-3 pb-3 pt-1 text-xs text-ink-muted">
           <p>
             Cada transacción debe registrar <em>con qué</em> se pagó. Las tarjetas que agregas en
-            la sección <strong className="text-ink dark:text-slate-200">Tarjetas</strong> generan
+            la sección <strong className="text-ink">Tarjetas</strong> generan
             su propio método de pago automáticamente — no necesitas hacer nada aquí para ellas.
           </p>
           <p>Esta sección es para los casos que no son tarjeta registrada:</p>
           <ul className="ml-3 list-disc space-y-1">
             <li>
-              <strong className="text-ink dark:text-slate-200">Efectivo</strong> — el único caso
+              <strong className="text-ink">Efectivo</strong> — el único caso
               que casi todos los usuarios necesitan.
             </li>
             <li>
-              <strong className="text-ink dark:text-slate-200">Transferencia / Débito</strong> —
+              <strong className="text-ink">Transferencia / Débito</strong> —
               útil si tienes cuentas bancarias que prefieres no registrar como tarjeta completa
               (sin seguimiento de saldo ni ciclos).
             </li>
@@ -436,13 +436,13 @@ function PaymentMethodsSection() {
         {nonCardMethods.map((m) => (
           <li
             key={m.id}
-            className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+            className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-muted"
           >
             <span className={m.is_active ? "" : "line-through opacity-50"}>{m.name}</span>
             <span className="flex items-center gap-1">
               <button
                 aria-label="Editar método de pago"
-                className="rounded p-1 text-ink-muted transition-colors hover:bg-slate-100 hover:text-accent dark:hover:bg-slate-700"
+                className="rounded p-1 text-ink-muted transition-colors hover:bg-muted hover:text-accent"
                 onClick={() => openEditModal(m)}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
@@ -459,7 +459,7 @@ function PaymentMethodsSection() {
               )}
               <button
                 aria-label="Eliminar método de pago"
-                className="rounded p-1 text-ink-muted transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                className="rounded p-1 text-ink-muted transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-40 dark:hover:text-red-400"
                 onClick={() => setDeletingMethod(m)}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
@@ -482,7 +482,7 @@ function PaymentMethodsSection() {
             />
           </div>
           {editName !== editingMethod?.name && editName.trim() !== "" && (
-            <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+            <p className="rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
               Todas las transacciones asignadas a este método reflejarán el nuevo nombre.
             </p>
           )}
@@ -520,7 +520,7 @@ function PaymentMethodsSection() {
               </button>
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                className="btn-danger"
                 disabled={deleteMethod.isPending || updateMethod.isPending}
                 onClick={() => handleDelete(deletingMethod)}
               >
@@ -543,14 +543,14 @@ interface RuleListProps {
 
 function RuleList({ rules, onEdit, onToggle, onDelete }: RuleListProps) {
   return (
-    <ul className="divide-y divide-line dark:divide-slate-800">
+    <ul className="divide-y divide-line">
       {rules.map((r) => (
         <li key={r.id} className="flex items-center justify-between gap-3 py-2">
           <div className="min-w-0">
             <p className={`truncate text-sm font-medium ${r.is_active ? "" : "opacity-50"}`}>
               {r.description}
             </p>
-            <p className="text-xs text-ink-muted dark:text-slate-400">
+            <p className="text-xs text-ink-muted">
               {FREQ_LABELS[r.frequency]} · {formatMoney(r.amount, r.currency)} · desde{" "}
               {formatDate(r.start_date)}
             </p>
@@ -559,7 +559,7 @@ function RuleList({ rules, onEdit, onToggle, onDelete }: RuleListProps) {
             <button
               type="button"
               aria-label="Editar"
-              className="rounded p-1 text-ink-muted transition-colors hover:bg-slate-100 hover:text-accent dark:hover:bg-slate-700"
+              className="rounded p-1 text-ink-muted transition-colors hover:bg-muted hover:text-accent"
               onClick={() => onEdit(r)}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
@@ -576,7 +576,7 @@ function RuleList({ rules, onEdit, onToggle, onDelete }: RuleListProps) {
             <button
               type="button"
               aria-label="Eliminar"
-              className="rounded p-1 text-ink-muted transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+              className="rounded p-1 text-ink-muted transition-colors hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
               onClick={() => onDelete(r)}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
@@ -719,8 +719,8 @@ function RecurringSection() {
     <>
       {/* Gastos recurrentes */}
       <section className="card p-5">
-        <h2 className="mb-1 font-semibold">Gastos recurrentes</h2>
-        <p className="mb-4 text-xs text-ink-muted dark:text-slate-400">
+        <h2 className="mb-1 text-base font-semibold tracking-tight">Gastos recurrentes</h2>
+        <p className="mb-4 text-xs text-ink-muted">
           Suscripciones, renta, servicios. Se generan solos y aparecen en
           &ldquo;Por confirmar&rdquo;.
         </p>
@@ -784,8 +784,8 @@ function RecurringSection() {
 
       {/* Ingresos recurrentes */}
       <section className="card p-5">
-        <h2 className="mb-1 font-semibold">Ingresos recurrentes</h2>
-        <p className="mb-4 text-xs text-ink-muted dark:text-slate-400">
+        <h2 className="mb-1 text-base font-semibold tracking-tight">Ingresos recurrentes</h2>
+        <p className="mb-4 text-xs text-ink-muted">
           Nómina, freelance, rentas cobradas. Se generan solos y aparecen en
           &ldquo;Por confirmar&rdquo;.
         </p>
@@ -856,17 +856,17 @@ function RecurringSection() {
       >
         <form onSubmit={handleEditSubmit} className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            <span className="inline-flex items-center rounded-full bg-muted px-3 py-1 text-xs font-medium text-ink">
               {editingRule?.type === "expense" ? "Gasto" : "Ingreso"}
             </span>
-            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            <span className="inline-flex items-center rounded-full bg-muted px-3 py-1 text-xs font-medium text-ink">
               {editingRule ? FREQ_LABELS[editingRule.frequency] : ""}
             </span>
-            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            <span className="inline-flex items-center rounded-full bg-muted px-3 py-1 text-xs font-medium text-ink">
               Desde {editingRule ? formatDate(editingRule.start_date) : ""}
             </span>
           </div>
-          <p className="text-xs text-ink-muted dark:text-slate-400">
+          <p className="text-xs text-ink-muted">
             Los cambios solo aplican a los próximos pagos.
           </p>
           <div className="grid grid-cols-4 gap-3">
@@ -962,7 +962,7 @@ function RecurringSection() {
               </button>
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                className="btn-danger"
                 disabled={deleteRule.isPending}
                 onClick={handleDelete}
               >

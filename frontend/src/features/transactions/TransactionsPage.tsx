@@ -15,6 +15,7 @@ import { useSpace } from "../spaces/SpaceProvider";
 import { formatMoney, isPositiveAmount } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
+import Icon from "../../components/ui/Icon";
 
 type TxnType = "expense" | "income" | "transfer";
 
@@ -325,7 +326,7 @@ export default function TransactionsPage() {
               ))}
             </select>
             {type === "transfer" && transferFromBalance !== null && (
-              <p className="mt-1 text-xs text-ink-muted dark:text-slate-400">
+              <p className="mt-1 text-xs text-ink-muted">
                 Disponible: {formatMoney(transferFromBalance, activeSpace.base_currency)}
               </p>
             )}
@@ -378,7 +379,7 @@ export default function TransactionsPage() {
           </div>
         </div>
         {collision && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
             <p className="mb-2 font-medium text-amber-800 dark:text-amber-300">
               Este cargo cae el día de corte. ¿A qué ciclo pertenece?
             </p>
@@ -400,7 +401,7 @@ export default function TransactionsPage() {
           </div>
         )}
         {showIncomeWarning && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
             <p className="text-amber-800 dark:text-amber-300">
               Este ingreso se registrará como <strong>devolución/abono</strong> en el ciclo activo de la tarjeta y reducirá el total a pagar.
             </p>
@@ -412,25 +413,25 @@ export default function TransactionsPage() {
       {/* Bandeja por confirmar (REC-03) */}
       {(tray.data?.total ?? 0) > 0 && (
         <section className="card p-5">
-          <h2 className="mb-3 font-semibold">
+          <h2 className="mb-3 text-base font-semibold tracking-tight">
             Por confirmar
-            <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+            <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-800 dark:text-amber-200">
               {tray.data!.total}
             </span>
           </h2>
-          <ul className="divide-y divide-line dark:divide-slate-800">
+          <ul className="divide-y divide-line">
             {tray.data!.items.map((t) => (
               <li key={t.id} className="flex items-center justify-between gap-3 py-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{t.description || "Recurrente"}</p>
-                  <p className="text-xs text-ink-muted dark:text-slate-400">
+                  <p className="text-xs text-ink-muted">
                     {formatDate(t.date)} · {formatMoney(t.amount, t.currency)}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
                     aria-label="Editar transacción"
-                    className="rounded p-1 text-ink-muted transition-colors hover:bg-slate-100 hover:text-accent dark:hover:bg-slate-700"
+                    className="rounded p-1 text-ink-muted transition-colors hover:bg-muted hover:text-accent"
                     onClick={() => openEditModal(t)}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
@@ -459,7 +460,7 @@ export default function TransactionsPage() {
       {/* Lista con filtros */}
       <section className="card p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-semibold">Movimientos</h2>
+          <h2 className="text-base font-semibold tracking-tight">Movimientos</h2>
           <div className="flex flex-wrap gap-2">
             <input
               type="month"
@@ -522,21 +523,41 @@ export default function TransactionsPage() {
         {list.isLoading ? (
           <p className="text-sm text-ink-muted">Cargando…</p>
         ) : (list.data?.items.length ?? 0) === 0 ? (
-          <p className="text-sm text-ink-muted dark:text-slate-400">
-            Sin movimientos este mes. Registra el primero arriba ☝️
+          <p className="text-sm text-ink-muted">
+            Sin movimientos este mes. Registra el primero arriba.
           </p>
         ) : (
-          <ul className="divide-y divide-line dark:divide-slate-800">
+          <ul className="divide-y divide-line">
             {list.data!.items.map((t: TransactionOut) => (
               <li key={t.id} className="flex items-center justify-between gap-3 py-2.5">
-                <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span
+                    aria-hidden
+                    className={`grid size-9 shrink-0 place-items-center rounded-full text-xs font-semibold ${
+                      t.type === "income"
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                        : t.type === "transfer"
+                          ? "bg-muted text-ink-muted"
+                          : "bg-muted text-ink"
+                    }`}
+                  >
+                    {t.type === "transfer" ? (
+                      <Icon name="transactions" className="size-4" />
+                    ) : (
+                      ((t.category_id && byId.cats.get(t.category_id)) || t.description || "?")
+                        .trim()
+                        .charAt(0)
+                        .toUpperCase()
+                    )}
+                  </span>
+                  <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
                     {t.description ||
                       (t.type === "transfer"
                         ? "Transferencia"
                         : (t.category_id && byId.cats.get(t.category_id)) || "—")}
                   </p>
-                  <p className="text-xs text-ink-muted dark:text-slate-400">
+                  <p className="text-xs text-ink-muted">
                     {formatDate(t.date)}
                     {t.category_id ? ` · ${byId.cats.get(t.category_id) ?? ""}` : ""}
                     {t.payment_method_id
@@ -546,15 +567,16 @@ export default function TransactionsPage() {
                       ? ` → ${byId.pms.get(t.payment_method_to_id) ?? ""}`
                       : ""}
                   </p>
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span
                     className={
                       t.type === "income"
-                        ? "text-sm font-semibold text-emerald-600 dark:text-emerald-400"
+                        ? "tabular text-sm font-semibold text-emerald-600 dark:text-emerald-400"
                         : t.type === "transfer"
-                          ? "text-sm font-semibold text-ink-muted dark:text-slate-400"
-                          : "text-sm font-semibold"
+                          ? "tabular text-sm font-semibold text-ink-muted"
+                          : "tabular text-sm font-semibold"
                     }
                   >
                     {t.type === "income" ? "+" : t.type === "expense" ? "−" : ""}
@@ -562,7 +584,7 @@ export default function TransactionsPage() {
                   </span>
                   <button
                     aria-label="Editar transacción"
-                    className="rounded p-1 text-ink-muted transition-colors hover:bg-slate-100 hover:text-accent dark:hover:bg-slate-700"
+                    className="rounded p-1 text-ink-muted transition-colors hover:bg-muted hover:text-accent"
                     onClick={() => openEditModal(t)}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
@@ -571,7 +593,7 @@ export default function TransactionsPage() {
                   </button>
                   <button
                     aria-label="Eliminar transacción"
-                    className="rounded p-1 text-ink-muted transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                    className="rounded p-1 text-ink-muted transition-colors hover:bg-red-500/10 hover:text-red-500 dark:hover:text-red-400"
                     onClick={() => setDeletingTxn(t)}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
@@ -592,25 +614,25 @@ export default function TransactionsPage() {
       >
         {deletingTxn && (
           <div className="space-y-4">
-            <p className="text-sm text-ink-muted dark:text-slate-400">
+            <p className="text-sm text-ink-muted">
               Estás a punto de eliminar esta transacción:
             </p>
-            <div className="rounded-lg border border-line bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800">
+            <div className="rounded-lg border border-line bg-muted p-3 text-sm">
               <p className="font-medium">
                 {deletingTxn.description ||
                   (deletingTxn.type === "transfer"
                     ? "Transferencia"
                     : (deletingTxn.category_id && byId.cats.get(deletingTxn.category_id)) || "—")}
               </p>
-              <p className="mt-1 text-ink-muted dark:text-slate-400">
+              <p className="mt-1 text-ink-muted">
                 {TYPE_LABELS[deletingTxn.type as TxnType]} · {formatDate(deletingTxn.date)} ·{" "}
-                <span className="font-semibold text-ink dark:text-slate-200">
+                <span className="font-semibold text-ink">
                   {deletingTxn.type === "income" ? "+" : deletingTxn.type === "expense" ? "−" : ""}
                   {formatMoney(deletingTxn.amount, deletingTxn.currency)}
                 </span>
               </p>
               {deletingTxn.category_id && (
-                <p className="mt-0.5 text-xs text-ink-muted dark:text-slate-500">
+                <p className="mt-0.5 text-xs text-ink-muted">
                   {byId.cats.get(deletingTxn.category_id)}
                   {deletingTxn.payment_method_id
                     ? ` · ${byId.pms.get(deletingTxn.payment_method_id)}`
@@ -629,7 +651,7 @@ export default function TransactionsPage() {
               </button>
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                className="btn-danger"
                 disabled={remove.isPending}
                 onClick={() => {
                   remove.mutate(deletingTxn.id, { onSuccess: () => setDeletingTxn(null) });
@@ -703,7 +725,7 @@ export default function TransactionsPage() {
                     ))}
                   </select>
                   {editTransferFromBalance !== null && (
-                    <p className="mt-1 text-xs text-ink-muted dark:text-slate-400">
+                    <p className="mt-1 text-xs text-ink-muted">
                       Disponible: {formatMoney(editTransferFromBalance, activeSpace.base_currency)}
                     </p>
                   )}
@@ -760,7 +782,7 @@ export default function TransactionsPage() {
           </div>
 
           {editCollision && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
               <p className="mb-2 font-medium text-amber-800 dark:text-amber-300">
                 Este cargo cae el día de corte. ¿A qué ciclo pertenece?
               </p>
@@ -782,7 +804,7 @@ export default function TransactionsPage() {
             </div>
           )}
           {showEditIncomeWarning && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
               <p className="text-amber-800 dark:text-amber-300">
                 Este ingreso se registrará como <strong>devolución/abono</strong> en el ciclo activo de la tarjeta y reducirá el total a pagar.
               </p>

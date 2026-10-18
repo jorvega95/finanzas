@@ -42,8 +42,8 @@ function ConvertSection() {
 
   return (
     <section className="card p-5">
-      <h2 className="mb-1 font-semibold">Convertir compra a MSI</h2>
-      <p className="mb-3 text-xs text-ink-muted dark:text-slate-400">
+      <h2 className="mb-1 text-base font-semibold tracking-tight">Convertir compra a MSI</h2>
+      <p className="mb-3 text-xs text-ink-muted">
         Elige una compra ya registrada con tarjeta y el número de meses.
       </p>
       <form
@@ -151,8 +151,8 @@ function BackfillSection() {
 
   return (
     <section className="card p-5">
-      <h2 className="mb-1 font-semibold">Registrar MSI existente</h2>
-      <p className="mb-3 text-xs text-ink-muted dark:text-slate-400">
+      <h2 className="mb-1 text-base font-semibold tracking-tight">Registrar MSI existente</h2>
+      <p className="mb-3 text-xs text-ink-muted">
         Registra una compra a meses que ya tenías antes de usar el sistema. Ingresa el cobro que
         aparece en tu estado de cuenta actual (ej. "Pago 6 de 12 · $2,692").
       </p>
@@ -251,7 +251,7 @@ function BackfillSection() {
               Esta cuota ya aparece en mi estado de cuenta anterior (ya cerrado)
             </label>
           </div>
-          <p className="mt-1 pl-6 text-xs text-ink-muted dark:text-slate-400">
+          <p className="mt-1 pl-6 text-xs text-ink-muted">
             {form.current_is_charged
               ? `La cuota ${form.current_number} se marcará como pagada (✅) — ya viene en tu Pago pendiente. La cuota ${Number(form.current_number) + 1} entrará al ciclo en curso (🧾).`
               : `La cuota ${form.current_number} entrará al ciclo en curso como cobrada (🧾); las anteriores como pagadas.`}
@@ -291,13 +291,13 @@ export default function MsiPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <h1 className="text-xl font-semibold">Meses sin intereses</h1>
+      <h1 className="page-title">Meses sin intereses</h1>
 
       <ConvertSection />
       <BackfillSection />
 
       {sortedPlans.length === 0 ? (
-        <div className="card grid h-40 place-items-center p-8 text-center text-sm text-ink-muted dark:text-slate-400">
+        <div className="card grid h-40 place-items-center p-8 text-center text-sm text-ink-muted">
           Sin planes MSI. Convierte una compra con tarjeta o registra un MSI existente.
         </div>
       ) : (
@@ -309,7 +309,7 @@ export default function MsiPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="font-semibold">{summary.description || "Compra MSI"}</h3>
-                  <p className="text-xs text-ink-muted dark:text-slate-400">
+                  <p className="text-xs text-ink-muted">
                     {summary.card_alias} · {formatMoney(summary.plan.total_amount)} a{" "}
                     {summary.plan.months} meses · {STATUS_LABELS[summary.plan.status]}
                   </p>
@@ -321,10 +321,10 @@ export default function MsiPage() {
                 )}
               </div>
               <div className="mt-3">
-                <div className="mb-1 flex justify-between text-xs text-ink-muted dark:text-slate-400">
+                <div className="mb-1 flex justify-between text-xs text-ink-muted">
                   <span>
                     {done} de {total} cuotas · restan{" "}
-                    <span className="font-medium text-ink dark:text-white">
+                    <span className="font-medium text-ink">
                       {formatMoney(summary.remaining_amount)}
                     </span>
                   </span>
@@ -332,7 +332,7 @@ export default function MsiPage() {
                     último cobro: {formatDate(summary.projected_payoff)} · pago: {formatDate(summary.projected_payment_date)}
                   </span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full rounded-full bg-accent transition-all"
                     style={{ width: `${total ? Math.round((done / total) * 100) : 0}%` }}
@@ -341,7 +341,7 @@ export default function MsiPage() {
               </div>
               <details className="mt-3">
                 <summary className="cursor-pointer text-xs text-accent">Ver cuotas</summary>
-                <ul className="mt-2 grid grid-cols-2 gap-1 text-xs text-ink-muted dark:text-slate-400 md:grid-cols-3">
+                <ul className="mt-2 grid grid-cols-2 gap-1 text-xs text-ink-muted md:grid-cols-3">
                   {summary.installments.map((i) => (
                     <li key={i.id}>
                       #{i.number} · {formatDate(i.estimated_charge_date)} · {formatMoney(i.amount)} ·{" "}
@@ -363,11 +363,11 @@ export default function MsiPage() {
 
       {(projection.data ?? []).length > 0 && (
         <section className="card p-5">
-          <h2 className="mb-3 font-semibold">Comprometido por mes</h2>
+          <h2 className="mb-3 text-base font-semibold tracking-tight">Comprometido por mes</h2>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="tabular w-full text-sm">
               <thead>
-                <tr className="text-left text-xs text-ink-muted dark:text-slate-400">
+                <tr className="border-b border-line text-left text-xs font-medium uppercase tracking-wide text-ink-subtle">
                   <th className="py-1 pr-4">Tarjeta</th>
                   {projectionByMonth.months.map((m) => (
                     <th key={m} className="py-1 pr-4">{m}</th>
@@ -376,7 +376,7 @@ export default function MsiPage() {
               </thead>
               <tbody>
                 {projectionByMonth.cards.map((alias) => (
-                  <tr key={alias} className="border-t border-line dark:border-slate-800">
+                  <tr key={alias} className="border-t border-line">
                     <td className="py-1.5 pr-4 font-medium">{alias}</td>
                     {projectionByMonth.months.map((month) => {
                       const row = (projection.data ?? []).find(

@@ -1,10 +1,10 @@
 // Tokens compartidos por los widgets del dashboard (CAT-03, DSH-03/06).
 export const CHART_COLORS = [
-  "#0d9488",
+  "#10b981",
   "#f59e0b",
   "#6366f1",
   "#ef4444",
-  "#10b981",
+  "#14b8a6",
   "#8b5cf6",
   "#f97316",
   "#06b6d4",

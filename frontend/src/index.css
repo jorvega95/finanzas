@@ -3,39 +3,139 @@
 /* Dark mode por clase (toggle manual, ver src/lib/theme.tsx) */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * Tokens semánticos. Los valores cambian con la clase `.dark` en <html>, así que
+ * los componentes usan `bg-card`, `text-ink-muted`, etc. sin variantes `dark:`.
+ * Light: papel cálido (no blanco puro) con tinta casi negra para buen contraste.
+ * Dark: negro neutro, sin tinte azul.
+ */
+:root {
+  --canvas: #e8e6e0;
+  --surface: #f3f2ee;
+  --card: #fbfaf8;
+  --muted: #e9e7e1;
+  --ink: #121211;
+  --ink-muted: #4d4b46;
+  --ink-subtle: #77746c;
+  --line: #d8d5cd;
+  --line-strong: #bfbbb1;
+  --accent: #047857;
+  --accent-strong: #065f46;
+  --accent-ink: #ffffff;
+  --primary: #121211;
+  --primary-hover: #2e2d2a;
+  --primary-ink: #fbfaf8;
+  --shadow: 0 1px 2px rgb(18 18 17 / 0.06), 0 1px 1px rgb(18 18 17 / 0.04);
+  color-scheme: light;
+}
+
+.dark {
+  --canvas: #000000;
+  --surface: #0a0a0a;
+  --card: #121212;
+  --muted: #1c1c1c;
+  --ink: #f5f5f4;
+  --ink-muted: #a8a8a5;
+  --ink-subtle: #7a7a77;
+  --line: #242424;
+  --line-strong: #363636;
+  --accent: #34d399;
+  --accent-strong: #6ee7b7;
+  --accent-ink: #03140d;
+  --primary: #f5f5f4;
+  --primary-hover: #d6d6d3;
+  --primary-ink: #0a0a0a;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.6);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-ink: var(--accent-ink);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-ink: var(--primary-ink);
+}
+
+/* Red de seguridad: cualquier `slate-*` residual se pinta neutro (sin azul). */
 @theme {
-  --color-surface: #f8fafc;
-  --color-card: #ffffff;
-  --color-ink: #0f172a;
-  --color-ink-muted: #64748b;
-  --color-line: #e2e8f0;
-  --color-accent: #0d9488;
-  --color-accent-strong: #0f766e;
+  --color-slate-50: #fafafa;
+  --color-slate-100: #f5f5f5;
+  --color-slate-200: #e5e5e5;
+  --color-slate-300: #d4d4d4;
+  --color-slate-400: #a3a3a3;
+  --color-slate-500: #737373;
+  --color-slate-600: #525252;
+  --color-slate-700: #404040;
+  --color-slate-800: #262626;
+  --color-slate-900: #171717;
+  --color-slate-950: #0a0a0a;
 }
 
 @layer base {
   html {
     @apply antialiased;
+    font-feature-settings: "ss01", "cv11";
   }
   body {
-    @apply bg-surface text-ink dark:bg-slate-950 dark:text-slate-100;
+    @apply bg-canvas font-sans text-ink;
+  }
+  ::selection {
+    @apply bg-accent/25;
+  }
+  /* Montos alineados en tablas y KPIs. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--accent);
   }
 }
 
 @layer components {
   .card {
-    @apply rounded-xl border border-line bg-card shadow-sm dark:border-slate-800 dark:bg-slate-900;
+    @apply rounded-xl border border-line bg-card;
+    box-shadow: var(--shadow);
   }
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50;
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-ink transition hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-card px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800;
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-line bg-card px-3.5 text-sm font-medium text-ink transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-lg px-2.5 text-sm font-medium text-ink-muted transition hover:bg-muted hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-danger {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-red-600 px-3.5 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:pointer-events-none disabled:opacity-50;
   }
   .input {
-    @apply w-full rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100;
+    @apply h-9 w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink transition placeholder:text-ink-subtle hover:border-line-strong focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 disabled:opacity-60;
+  }
+  textarea.input {
+    @apply h-auto py-2;
   }
   .label {
-    @apply mb-1 block text-sm font-medium text-ink dark:text-slate-200;
+    @apply mb-1.5 block text-xs font-medium text-ink-muted;
+  }
+  .page-title {
+    @apply text-2xl font-semibold tracking-tight;
+  }
+  .page-subtitle {
+    @apply mt-1 text-sm text-ink-muted;
   }
 }
