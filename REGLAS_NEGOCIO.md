@@ -58,6 +58,8 @@ Complemento de `PLAN.md` (v2). Cada regla tiene ID estable para referenciarla en
 - **TXN-08 · Balance en transferencias:** una transferencia cuyo `payment_method_id` (origen) pertenece a una tarjeta de behavior `debit`/`prepaid` se rechaza (422) si `amount > saldo_disponible`, salvo `allow_overdraft=true` en esa tarjeta. No aplica cuando el origen es efectivo, transferencia bancaria u otro método sin tarjeta vinculada (sin `card_id`).
 - **TXN-09 · Transferencia a TDC como pago:** si `payment_method_to_id` pertenece a una tarjeta de behavior `credit`, `create_transaction` enruta internamente como pago: abona `amount` a `paid_amount` del statement cerrado más antiguo con saldo pendiente; si no existe ninguno, abona al statement abierto del ciclo actual. El campo opcional `target_statement_id` en el request permite elegir el statement exacto. La transacción se crea siempre como `type=transfer` para trazabilidad (TXN-02). Aplica también al editar (update): primero se revierte del statement original el monto **que se había aplicado** (no el nuevo) y luego se abona el monto nuevo; si el destino sigue siendo la misma tarjeta y no se envía `target_statement_id`, el pago permanece en su statement original. Borrar el pago revierte su abono de `paid_amount` y re-evalúa el estado (TDC-08).
 - **TXN-10 · Filtro por método de pago:** el listado de transacciones filtrado por `payment_method_id` DEBE incluir las transferencias en las que el método sea origen **o** destino (`payment_method_to_id`). El filtro representa "movimientos que tocan el método", no solo egresos desde él; sin esto un pago de TDC (TDC-10, TXN-09) queda invisible al filtrar por la tarjeta pagada. No altera agregados: los transfers siguen excluidos de ingresos/gastos (TXN-02, DSH-02).
+- **TXN-11 · Posible duplicado:** al **crear** una transacción, el cliente DEBE consultar `GET /transactions/duplicates` y, si hay coincidencias, pedir confirmación explícita antes de registrar. Coincidencia = mismo espacio, `type`, `date`, `amount`, `currency`, `category_id` (`IS NOT DISTINCT FROM`, transfers sin categoría) y `description` normalizada (`lower(trim)`). El **método de pago se ignora a propósito** (caso típico: el mismo gasto capturado en efectivo y luego con otra tarjeta). Es un **aviso, no un bloqueo**: `POST /transactions` no rechaza duplicados (gastos idénticos el mismo día son legítimos). No aplica al editar. Tras registrar, la UI DEBE confirmar visualmente el alta (aviso con descripción, monto y fecha).
+- **TXN-12 · Búsqueda y periodo del listado:** el listado acepta `q` (búsqueda por texto en `description`, case-insensitive, subcadena; los comodines `%`/`_` se escapan y se tratan como literales) combinable con el resto de filtros. El periodo es por **mes** (default: mes actual, navegable) o por **rango libre** `date_from..date_to` (inclusive, `date` puro, GLO-02), con atajos de últimos 2/3/6 meses (del día 1 del mes N−1 al último día del mes actual). Un rango con `date_from > date_to` no se consulta. Es un listado, no un agregado: no aplica DSH-03.
 
 ## 4. Tarjetas (TAR) y ciclos de crédito (TDC) — R3
 
@@ -194,7 +196,7 @@ El pronóstico responde "¿con mis ingresos futuros podré pagar lo que se viene
 
 | Req | Reglas |
 |---|---|
-| R1 gastos | TXN-01…09, GLO-01/02 |
+| R1 gastos | TXN-01…12, GLO-01/02 |
 | R2 catálogos | CAT-01…08 |
 | R3 tarjetas | TAR-01…08, TDC-01…16, CAT-08 |
 | R4 MSI | MSI-01…11 |

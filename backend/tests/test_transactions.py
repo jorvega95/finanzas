@@ -293,3 +293,100 @@ async def test_list_filters_and_pagination(client):
     body = res.json()
     assert body["total"] == 4
     assert len(body["items"]) == 2
+
+
+async def test_txn11_duplicates_ignore_payment_method(client):
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/transactions", headers=ctx["headers"], json=expense_payload(ctx)
+    )
+    assert res.status_code == 201
+    existing_id = res.json()["id"]
+
+    params = {
+        "type": "expense",
+        "date": "2026-06-01",
+        "amount": "150.50",
+        "currency": "MXN",
+        "category_id": ctx["categories"]["Comida"]["id"],
+        "description": "  tacos ",  # normalized: lower(trim)
+    }
+    res = await client.get("/api/v1/transactions/duplicates", headers=ctx["headers"], params=params)
+    assert res.status_code == 200
+    assert [t["id"] for t in res.json()] == [existing_id]
+
+    # Any other differing field => no match.
+    for key, value in [
+        ("date", "2026-06-02"),
+        ("amount", "150.51"),
+        ("currency", "USD"),
+        ("description", "Tacos al pastor"),
+        ("category_id", ctx["categories"]["Súper"]["id"]),
+        ("type", "income"),
+    ]:
+        res = await client.get(
+            "/api/v1/transactions/duplicates",
+            headers=ctx["headers"],
+            params={**params, key: value},
+        )
+        assert res.json() == [], key
+
+    # Advisory only: POST still accepts the duplicate with another method.
+    res = await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json=expense_payload(ctx, payment_method_id=ctx["methods"]["Débito"]["id"]),
+    )
+    assert res.status_code == 201
+
+
+async def test_txn11_duplicates_transfer_and_space_isolation(client):
+    ctx = await bootstrap_space(client)
+    transfer = {
+        "type": "transfer",
+        "date": "2026-06-01",
+        "amount": "1000.00",
+        "currency": "MXN",
+        "payment_method_id": ctx["methods"]["Débito"]["id"],
+        "payment_method_to_id": ctx["methods"]["Efectivo"]["id"],
+    }
+    res = await client.post("/api/v1/transactions", headers=ctx["headers"], json=transfer)
+    assert res.status_code == 201
+    params = {"type": "transfer", "date": "2026-06-01", "amount": "1000", "currency": "MXN"}
+    res = await client.get("/api/v1/transactions/duplicates", headers=ctx["headers"], params=params)
+    assert len(res.json()) == 1  # NULL category matches NULL (IS NOT DISTINCT FROM)
+
+    # GLO-05: another space never sees it.
+    other = await bootstrap_space(client)
+    res = await client.get(
+        "/api/v1/transactions/duplicates", headers=other["headers"], params=params
+    )
+    assert res.json() == []
+
+
+async def test_txn12_search_by_description(client):
+    ctx = await bootstrap_space(client)
+    for desc in ["Tacos El Güero", "Súper semanal", "100% jugo", "pago_luz"]:
+        await client.post(
+            "/api/v1/transactions",
+            headers=ctx["headers"],
+            json=expense_payload(ctx, description=desc),
+        )
+
+    async def search(q: str, **extra: str) -> list[str]:
+        res = await client.get(
+            "/api/v1/transactions", headers=ctx["headers"], params={"q": q, **extra}
+        )
+        assert res.status_code == 200
+        return sorted(t["description"] for t in res.json()["items"])
+
+    assert await search("tacos") == ["Tacos El Güero"]
+    assert await search("SEMANAL") == ["Súper semanal"]
+    # Wildcards are literal (TXN-12).
+    assert await search("%") == ["100% jugo"]
+    assert await search("_") == ["pago_luz"]
+    assert await search("   ") == sorted(
+        ["Tacos El Güero", "Súper semanal", "100% jugo", "pago_luz"]
+    )
+    # Combined with other filters.
+    assert await search("tacos", date_from="2026-07-01") == []

@@ -1,4 +1,4 @@
-"""Transaction services. Implements TXN-01..TXN-09, FX-03, REC-03 (discard).
+"""Transaction services. Implements TXN-01..TXN-09, TXN-11/12, FX-03, REC-03 (discard).
 
 GLO-01: Decimal everywhere. GLO-02: pure dates. GLO-05: space-scoped.
 """
@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dates import today_in_tz
@@ -209,6 +209,42 @@ async def _check_sufficient_funds(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"Saldo insuficiente en la tarjeta (disponible {available})",
         )
+
+
+def like_pattern(text: str) -> str:
+    """TXN-12: substring ILIKE pattern with `%`, `_` and `\\` escaped as literals."""
+    escaped = text.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+async def find_possible_duplicates(
+    session: AsyncSession,
+    space_id: uuid.UUID,
+    txn_type: TransactionType,
+    txn_date: date,
+    amount: Decimal,
+    currency: str,
+    description: str,
+    category_id: uuid.UUID | None,
+) -> list[Transaction]:
+    """TXN-11: same type, date, amount, currency, category and normalized
+    description. The payment method is ignored on purpose (same expense
+    captured as cash and then again with a card)."""
+    rows = await session.execute(
+        select(Transaction)
+        .where(
+            Transaction.space_id == space_id,
+            Transaction.type == txn_type,
+            Transaction.date == txn_date,
+            Transaction.amount == amount,
+            Transaction.currency == currency,
+            Transaction.category_id.is_not_distinct_from(category_id),
+            func.lower(func.trim(Transaction.description)) == description.strip().lower(),
+        )
+        .order_by(Transaction.created_at.desc())
+        .limit(10)
+    )
+    return list(rows.scalars().all())
 
 
 async def get_transaction(

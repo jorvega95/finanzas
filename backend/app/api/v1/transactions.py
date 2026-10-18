@@ -1,9 +1,10 @@
-"""Router: transactions. Implements TXN-01..TXN-06, TXN-10, REC-03 (review tray)."""
+"""Router: transactions. Implements TXN-01..TXN-06, TXN-10..TXN-12, REC-03 (review tray)."""
 
 import uuid
 from datetime import date
+from decimal import Decimal
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
 from sqlalchemy import func, or_, select
 
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
@@ -50,6 +51,7 @@ async def list_transactions(
     category_id: uuid.UUID | None = None,
     payment_method_id: uuid.UUID | None = None,
     needs_review: bool | None = None,
+    q: str | None = Query(None, max_length=200),
     limit: int = 50,
     offset: int = 0,
 ) -> TransactionListOut:
@@ -74,17 +76,40 @@ async def list_transactions(
         )
     if needs_review is not None:
         filters.append(Transaction.needs_review.is_(needs_review))
+    if q is not None and q.strip():
+        # TXN-12: case-insensitive substring over description; wildcards literal.
+        filters.append(Transaction.description.ilike(svc.like_pattern(q), escape="\\"))
 
     total = await db.scalar(select(func.count()).select_from(Transaction).where(*filters))
     rows = await db.execute(
         select(Transaction)
         .where(*filters)
         .order_by(Transaction.date.desc(), Transaction.created_at.desc())
-        .limit(min(limit, 200))
+        .limit(min(limit, 500))
         .offset(offset)
     )
     items = [TransactionOut.model_validate(t) for t in rows.scalars().all()]
     return TransactionListOut(items=items, total=total or 0)
+
+
+@router.get("/duplicates", response_model=list[TransactionOut])
+async def list_possible_duplicates(
+    db: DbSession,
+    space_and_member: ActiveSpace,
+    type: TransactionType,
+    date: date,
+    amount: Decimal,
+    currency: str,
+    description: str = "",
+    category_id: uuid.UUID | None = None,
+) -> list[TransactionOut]:
+    """TXN-11: existing transactions that look like the one about to be created
+    (payment method deliberately ignored). Advisory only; never blocks POST."""
+    space, _ = space_and_member
+    rows = await svc.find_possible_duplicates(
+        db, space.id, type, date, amount, currency, description, category_id
+    )
+    return [TransactionOut.model_validate(t) for t in rows]
 
 
 @router.post("", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)

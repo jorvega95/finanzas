@@ -1,14 +1,18 @@
 // Registro de gastos (R1): captura rápida <10 s, bandeja "Por confirmar"
 // (REC-03) y lista con filtros (TXN-01..03). TXN-08/TXN-09: validaciones y avisos.
-import { useMemo, useState, type FormEvent } from "react";
+// TXN-11: aviso de posible duplicado + confirmación visual del alta.
+// TXN-12: búsqueda por descripción y periodo por mes o rango libre.
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useCategories, usePaymentMethods, type PaymentMethodOut } from "../../api/catalogs";
 import { useCards, type CardOut } from "../../api/cards";
 import {
+  fetchPossibleDuplicates,
   useConfirmTransaction,
   useCreateTransaction,
   useDeleteTransaction,
   useUpdateTransaction,
   useTransactions,
+  type TransactionBody,
   type TransactionOut,
 } from "../../api/transactions";
 import { useSpace } from "../spaces/SpaceProvider";
@@ -30,6 +34,42 @@ function todayISO(): string {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${now.getFullYear()}-${month}-${day}`;
+}
+
+const CREATED_LABELS: Record<TxnType, string> = {
+  expense: "Gasto registrado",
+  income: "Ingreso registrado",
+  transfer: "Transferencia registrada",
+};
+
+const PAGE_SIZE = 100;
+const RANGE_PRESETS = [2, 3, 6] as const;
+
+function monthBounds(ym: string): { from: string; to: string } {
+  const [year, month] = ym.split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return { from: `${ym}-01`, to: `${ym}-${String(lastDay).padStart(2, "0")}` };
+}
+
+function shiftMonth(ym: string, delta: number): string {
+  const [year, month] = ym.split("-").map(Number);
+  const d = new Date(year, month - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** TXN-12: del día 1 de hace N−1 meses al último día del mes actual. */
+function lastMonthsRange(n: number): { from: string; to: string } {
+  const current = todayISO().slice(0, 7);
+  return { from: monthBounds(shiftMonth(current, -(n - 1))).from, to: monthBounds(current).to };
+}
+
+function useDebounced<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
 }
 
 function detectCutoffCollision(
@@ -68,7 +108,27 @@ export default function TransactionsPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [cycleHint, setCycleHint] = useState<"current" | "next" | null>(null);
 
+  const [filterMode, setFilterMode] = useState<"month" | "range">("month");
   const [filterMonth, setFilterMonth] = useState(todayISO().slice(0, 7));
+  const [rangeFrom, setRangeFrom] = useState(() => monthBounds(todayISO().slice(0, 7)).from);
+  const [rangeTo, setRangeTo] = useState(() => monthBounds(todayISO().slice(0, 7)).to);
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounced(search.trim(), 300);
+  const [listLimit, setListLimit] = useState(PAGE_SIZE);
+
+  // TXN-11: alta pendiente de confirmar por posible duplicado.
+  const [pendingCreate, setPendingCreate] = useState<{
+    body: TransactionBody;
+    matches: TransactionOut[];
+  } | null>(null);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [created, setCreated] = useState<TransactionOut | null>(null);
+
+  useEffect(() => {
+    if (!created) return;
+    const id = window.setTimeout(() => setCreated(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [created]);
   const [filterType, setFilterType] = useState("");
   const [filterCategoryId, setFilterCategoryId] = useState("");
   const [filterMethodId, setFilterMethodId] = useState("");
@@ -136,14 +196,16 @@ export default function TransactionsPage() {
     }
   }
 
-  const monthFilters = useMemo(() => {
-    const [year, month] = filterMonth.split("-").map(Number);
-    const lastDay = new Date(year, month, 0).getDate();
-    return {
-      date_from: `${filterMonth}-01`,
-      date_to: `${filterMonth}-${String(lastDay).padStart(2, "0")}`,
-    };
-  }, [filterMonth]);
+  const periodFilters = useMemo(() => {
+    if (filterMode === "month") {
+      const { from, to } = monthBounds(filterMonth);
+      return { date_from: from, date_to: to };
+    }
+    return { date_from: rangeFrom || undefined, date_to: rangeTo || undefined };
+  }, [filterMode, filterMonth, rangeFrom, rangeTo]);
+  // TXN-12: un rango invertido no se consulta.
+  const invalidRange =
+    filterMode === "range" && !!rangeFrom && !!rangeTo && rangeFrom > rangeTo;
 
   const filterCategories = useMemo(
     () =>
@@ -159,12 +221,30 @@ export default function TransactionsPage() {
     [categories.data, filterType],
   );
 
-  const list = useTransactions({
-    ...monthFilters,
-    type: filterType || undefined,
-    category_id: filterCategoryId || undefined,
-    payment_method_id: filterMethodId || undefined,
-  });
+  useEffect(() => {
+    setListLimit(PAGE_SIZE);
+  }, [periodFilters, filterType, filterCategoryId, filterMethodId, debouncedSearch]);
+
+  const list = useTransactions(
+    {
+      ...periodFilters,
+      type: filterType || undefined,
+      category_id: filterCategoryId || undefined,
+      payment_method_id: filterMethodId || undefined,
+      q: debouncedSearch || undefined,
+      limit: listLimit,
+    },
+    { enabled: !invalidRange },
+  );
+  const activePreset = useMemo(() => {
+    if (filterMode !== "range") return null;
+    return (
+      RANGE_PRESETS.find((n) => {
+        const r = lastMonthsRange(n);
+        return r.from === rangeFrom && r.to === rangeTo;
+      }) ?? null
+    );
+  }, [filterMode, rangeFrom, rangeTo]);
   const tray = useTransactions({ needs_review: true });
 
   const visibleCategories = (categories.data ?? []).filter(
@@ -227,24 +307,73 @@ export default function TransactionsPage() {
       setFormError("El monto debe ser mayor a 0.");
       return;
     }
+    const body: TransactionBody = {
+      type,
+      date,
+      amount,
+      currency,
+      description,
+      category_id: type === "transfer" ? null : categoryId || null,
+      payment_method_id: methodId || null,
+      payment_method_to_id: type === "transfer" ? methodToId || null : null,
+      cycle_hint: collision ? (cycleHint ?? collision.defaultHint) : undefined,
+    };
+    // TXN-11: mismo tipo, fecha, monto, moneda, categoría y descripción
+    // (el método de pago se ignora) ⇒ pedir confirmación antes de registrar.
+    setCheckingDuplicates(true);
+    let matches: TransactionOut[] = [];
     try {
-      await create.mutateAsync({
-        type,
-        date,
-        amount,
-        currency,
-        description,
-        category_id: type === "transfer" ? null : categoryId || null,
-        payment_method_id: methodId || null,
-        payment_method_to_id: type === "transfer" ? methodToId || null : null,
-        cycle_hint: collision ? (cycleHint ?? collision.defaultHint) : undefined,
+      matches = await fetchPossibleDuplicates({
+        type: body.type,
+        date: body.date,
+        amount: body.amount,
+        currency: body.currency,
+        description: body.description,
+        category_id: body.category_id,
       });
+    } catch {
+      // El aviso es auxiliar: si la verificación falla, no bloquea el alta.
+    } finally {
+      setCheckingDuplicates(false);
+    }
+    if (matches.length > 0) {
+      setPendingCreate({ body, matches });
+      return;
+    }
+    await submitCreate(body);
+  }
+
+  async function submitCreate(body: TransactionBody) {
+    setFormError(null);
+    try {
+      const txn = await create.mutateAsync(body);
       setAmount("");
       setDescription("");
       setCycleHint(null);
+      setPendingCreate(null);
+      setCreated(txn);
     } catch (err) {
+      setPendingCreate(null);
       setFormError(err instanceof Error ? err.message : "Error al guardar");
     }
+  }
+
+  function txnTitle(t: TransactionOut): string {
+    return (
+      t.description ||
+      (t.type === "transfer"
+        ? "Transferencia"
+        : (t.category_id && byId.cats.get(t.category_id)) || "—")
+    );
+  }
+
+  function txnMethods(t: TransactionOut): string {
+    const from = t.payment_method_id ? (byId.pms.get(t.payment_method_id) ?? "") : "";
+    const to =
+      t.type === "transfer" && t.payment_method_to_id
+        ? ` → ${byId.pms.get(t.payment_method_to_id) ?? ""}`
+        : "";
+    return `${from}${to}`;
   }
 
   return (
@@ -373,8 +502,12 @@ export default function TransactionsPage() {
             </select>
           </div>
           <div className="flex items-end">
-            <button type="submit" className="btn-primary w-full" disabled={create.isPending}>
-              Agregar
+            <button
+              type="submit"
+              className="btn-primary w-full"
+              disabled={create.isPending || checkingDuplicates}
+            >
+              {create.isPending || checkingDuplicates ? "Guardando…" : "Agregar"}
             </button>
           </div>
         </div>
@@ -459,15 +592,117 @@ export default function TransactionsPage() {
 
       {/* Lista con filtros */}
       <section className="card p-5">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-semibold tracking-tight">Movimientos</h2>
+        <div className="mb-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-base font-semibold tracking-tight">
+              Movimientos
+              {list.data && !invalidRange && (
+                <span className="ml-2 text-xs font-normal text-ink-muted">
+                  {list.data.total} {list.data.total === 1 ? "movimiento" : "movimientos"}
+                </span>
+              )}
+            </h2>
+            <div className="relative w-full sm:w-72">
+              <Icon
+                name="search"
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-subtle"
+              />
+              <input
+                type="search"
+                aria-label="Buscar por descripción"
+                className="input pl-9"
+                placeholder="Buscar por descripción…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="Periodo">
+              {(["month", "range"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={filterMode === mode}
+                  onClick={() => {
+                    if (mode === "range" && filterMode === "month") {
+                      const { from, to } = monthBounds(filterMonth);
+                      setRangeFrom(from);
+                      setRangeTo(to);
+                    }
+                    setFilterMode(mode);
+                  }}
+                  className={`rounded-md px-3 py-1 text-sm transition ${
+                    filterMode === mode
+                      ? "bg-muted font-medium text-ink"
+                      : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  {mode === "month" ? "Mes" : "Rango"}
+                </button>
+              ))}
+            </div>
+            {filterMode === "month" ? (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Mes anterior"
+                  className="rounded-lg p-2 text-ink-muted transition hover:bg-muted hover:text-ink"
+                  onClick={() => setFilterMonth((m) => shiftMonth(m, -1))}
+                >
+                  <Icon name="chevron-left" />
+                </button>
+                <input
+                  type="month"
+                  aria-label="Mes"
+                  className="input w-auto"
+                  value={filterMonth}
+                  onChange={(e) => e.target.value && setFilterMonth(e.target.value)}
+                />
+                <button
+                  type="button"
+                  aria-label="Mes siguiente"
+                  className="rounded-lg p-2 text-ink-muted transition hover:bg-muted hover:text-ink"
+                  onClick={() => setFilterMonth((m) => shiftMonth(m, 1))}
+                >
+                  <Icon name="chevron-right" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="date"
+                  aria-label="Desde"
+                  className="input w-auto"
+                  value={rangeFrom}
+                  onChange={(e) => setRangeFrom(e.target.value)}
+                />
+                <span className="text-sm text-ink-muted">a</span>
+                <input
+                  type="date"
+                  aria-label="Hasta"
+                  className="input w-auto"
+                  value={rangeTo}
+                  onChange={(e) => setRangeTo(e.target.value)}
+                />
+                {RANGE_PRESETS.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={activePreset === n ? "btn-primary px-3 py-1.5" : "btn-secondary px-3 py-1.5"}
+                    onClick={() => {
+                      const r = lastMonthsRange(n);
+                      setRangeFrom(r.from);
+                      setRangeTo(r.to);
+                    }}
+                  >
+                    Últimos {n} meses
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="flex flex-wrap gap-2">
-            <input
-              type="month"
-              className="input w-auto"
-              value={filterMonth}
-              onChange={(e) => setFilterMonth(e.target.value)}
-            />
             <select
               className="input w-auto"
               value={filterType}
@@ -520,16 +755,29 @@ export default function TransactionsPage() {
             </select>
           </div>
         </div>
-        {list.isLoading ? (
+        {invalidRange ? (
+          <p className="text-sm text-amber-700 dark:text-amber-300">
+            La fecha inicial es posterior a la final. Ajusta el rango.
+          </p>
+        ) : list.isLoading ? (
           <p className="text-sm text-ink-muted">Cargando…</p>
         ) : (list.data?.items.length ?? 0) === 0 ? (
           <p className="text-sm text-ink-muted">
-            Sin movimientos este mes. Registra el primero arriba.
+            {debouncedSearch
+              ? `Sin movimientos que coincidan con «${debouncedSearch}» en este periodo.`
+              : filterMode === "month"
+                ? "Sin movimientos este mes. Registra el primero arriba."
+                : "Sin movimientos en este rango."}
           </p>
         ) : (
           <ul className="divide-y divide-line">
             {list.data!.items.map((t: TransactionOut) => (
-              <li key={t.id} className="flex items-center justify-between gap-3 py-2.5">
+              <li
+                key={t.id}
+                className={`-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 py-2.5 transition-colors duration-700 ${
+                  created?.id === t.id ? "bg-emerald-500/10" : ""
+                }`}
+              >
                 <div className="flex min-w-0 items-center gap-3">
                   <span
                     aria-hidden
@@ -605,7 +853,110 @@ export default function TransactionsPage() {
             ))}
           </ul>
         )}
+        {!invalidRange && list.data && list.data.items.length < list.data.total && (
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={list.isFetching}
+              onClick={() => setListLimit((l) => l + PAGE_SIZE)}
+            >
+              {list.isFetching
+                ? "Cargando…"
+                : `Mostrar más (${list.data.items.length} de ${list.data.total})`}
+            </button>
+          </div>
+        )}
       </section>
+
+      {/* TXN-11: aviso de posible duplicado */}
+      <Modal
+        open={pendingCreate !== null}
+        onClose={() => setPendingCreate(null)}
+        title="¿Registro duplicado?"
+      >
+        {pendingCreate && (
+          <div className="space-y-4">
+            <div className="flex gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+              <Icon name="alert" className="mt-0.5 size-4" />
+              <p>
+                Ya {pendingCreate.matches.length === 1 ? "existe un movimiento" : `existen ${pendingCreate.matches.length} movimientos`}{" "}
+                con la misma descripción, tipo, categoría y monto el{" "}
+                <strong>{formatDate(pendingCreate.body.date)}</strong> (sin importar el método de
+                pago):
+              </p>
+            </div>
+            <ul className="divide-y divide-line rounded-lg border border-line bg-muted text-sm">
+              {pendingCreate.matches.map((m) => (
+                <li key={m.id} className="flex items-center justify-between gap-3 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{txnTitle(m)}</p>
+                    <p className="text-xs text-ink-muted">
+                      {TYPE_LABELS[m.type as TxnType]} · {txnMethods(m) || "Sin método"}
+                    </p>
+                  </div>
+                  <span className="tabular shrink-0 font-semibold">
+                    {formatMoney(m.amount, m.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-sm">
+              Lo que vas a registrar se pagaría con{" "}
+              <strong>
+                {(pendingCreate.body.payment_method_id &&
+                  byId.pms.get(pendingCreate.body.payment_method_id)) ||
+                  "—"}
+              </strong>
+              . ¿Seguro que no es el mismo gasto y deseas continuar?
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" className="btn-secondary" onClick={() => setPendingCreate(null)}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={create.isPending}
+                onClick={() => void submitCreate(pendingCreate.body)}
+              >
+                Registrar de todos modos
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* TXN-11: confirmación visual del alta */}
+      {created && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 left-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0"
+        >
+          <div className="card flex items-start gap-3 p-4 shadow-2xl">
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+              <Icon name="check" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">{CREATED_LABELS[created.type as TxnType]}</p>
+              <p className="truncate text-sm">{txnTitle(created)}</p>
+              <p className="text-xs text-ink-muted">
+                {formatMoney(created.amount, created.currency)} · {formatDate(created.date)}
+                {txnMethods(created) ? ` · ${txnMethods(created)}` : ""}
+              </p>
+            </div>
+            <button
+              aria-label="Cerrar aviso"
+              className="-mr-1 -mt-1 rounded-lg p-1 text-ink-subtle transition hover:bg-muted hover:text-ink"
+              onClick={() => setCreated(null)}
+            >
+              <Icon name="x" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Modal de confirmación de eliminación */}
       <Modal
         open={deletingTxn !== null}

@@ -33,6 +33,7 @@ export interface TransactionFilters {
   category_id?: string;
   payment_method_id?: string;
   needs_review?: boolean;
+  q?: string; // TXN-12: búsqueda por descripción
   limit?: number;
   offset?: number;
 }
@@ -50,20 +51,37 @@ export interface TransactionBody {
   target_statement_id?: string | null; // TXN-09: explicit statement for TDC payment
 }
 
-function toQuery(filters: TransactionFilters): string {
+export interface DuplicateQuery {
+  type: string;
+  date: string;
+  amount: string;
+  currency: string;
+  description?: string;
+  category_id?: string | null;
+}
+
+function toQuery(filters: object): string {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== "") params.set(key, String(value));
+    if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
   });
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
 
-export function useTransactions(filters: TransactionFilters) {
+export function useTransactions(filters: TransactionFilters, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ["transactions", filters],
     queryFn: () => api<TransactionListOut>(`/api/v1/transactions${toQuery(filters)}`),
+    enabled: options.enabled ?? true,
+    placeholderData: (prev) => prev, // evita parpadeo al teclear la búsqueda
   });
+}
+
+/** TXN-11: transacciones existentes que parecen la que se va a registrar
+ * (ignora el método de pago). Es un aviso; el alta nunca se bloquea. */
+export function fetchPossibleDuplicates(query: DuplicateQuery): Promise<TransactionOut[]> {
+  return api<TransactionOut[]>(`/api/v1/transactions/duplicates${toQuery(query)}`);
 }
 
 function useInvalidateTransactions() {
