@@ -323,6 +323,8 @@ async def update_transaction(
 
     # Capture pre-update state needed for TXN-09 revert logic.
     old_type = txn.type
+    old_amount = txn.amount
+    old_method_to_id = txn.payment_method_to_id
     old_statement_id_pre = txn.statement_id
 
     if data.fx_rate_override is not None:
@@ -361,7 +363,8 @@ async def update_transaction(
     # TXN-09 update path: if old txn was a TDC payment, revert it first.
     was_tdc_payment = old_type == TransactionType.transfer and old_statement_id is not None
     if was_tdc_payment:
-        await revert_card_payment(session, space.id, txn)
+        # Revert with the amount that was actually applied, not the edited one.
+        await revert_card_payment(session, space.id, txn, old_amount)
 
     if (
         resolved.card is not None
@@ -386,7 +389,12 @@ async def update_transaction(
             and dest_method.card_id is not None
         ):
             dest_card = await get_card(session, space.id, dest_method.card_id)
-            await apply_card_payment(session, space, dest_card, txn, data.target_statement_id)
+            # TXN-09: an edit to the same card keeps the payment on its original
+            # statement unless the client targets another one explicitly.
+            target = data.target_statement_id
+            if target is None and was_tdc_payment and old_method_to_id == txn.payment_method_to_id:
+                target = old_statement_id
+            await apply_card_payment(session, space, dest_card, txn, target)
     elif txn.statement_id is not None:
         # Method changed away from credit card: clear the statement link.
         txn.statement_id = None
@@ -423,6 +431,12 @@ async def delete_transaction(session: AsyncSession, space_id: uuid.UUID, txn_id:
         if plan is not None:
             await delete_plan_if_allowed(session, plan)
     old_statement_id = txn.statement_id
+    if txn.type == TransactionType.transfer and old_statement_id is not None:
+        # TXN-09: deleting a TDC payment takes its abono back off the statement.
+        from app.services.cards import revert_card_payment
+
+        await revert_card_payment(session, space_id, txn, txn.amount)
+        old_statement_id = None
     if txn.recurring_rule_id is not None and txn.scheduled_date is not None:
         # REC-03: discarding a generated instance leaves a tombstone so the
         # job never regenerates it.

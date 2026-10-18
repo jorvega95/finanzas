@@ -320,6 +320,131 @@ async def test_txn09_target_statement_id_overrides_auto_select(client):
     assert Decimal(oldest_after["paid_amount"]) == Decimal("0.00")
 
 
+# ---------------------------------------------------------------------------
+# TXN-09: editar/borrar un pago de TDC ajusta paid_amount con el monto real
+# ---------------------------------------------------------------------------
+
+
+async def _pay_card(client, ctx, card_id, from_method_id, amount, statement_id=None):
+    res = await client.post(
+        f"/api/v1/cards/{card_id}/payments",
+        headers=ctx["headers"],
+        json={
+            "amount": amount,
+            "from_payment_method_id": from_method_id,
+            "date": "2026-06-20",
+            "statement_id": statement_id,
+        },
+    )
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+async def _edit_amount(client, ctx, txn, amount):
+    keys = ("type", "date", "currency", "description", "payment_method_id", "payment_method_to_id")
+    body = {k: txn[k] for k in keys}
+    body["amount"] = amount
+    res = await client.put(f"/api/v1/transactions/{txn['id']}", headers=ctx["headers"], json=body)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+async def _statement(client, ctx, card_id, statement_id):
+    return next(s for s in await get_statements(client, ctx, card_id) if s["id"] == statement_id)
+
+
+@freeze_time("2026-06-20 12:00:00")
+async def test_txn09_edit_payment_amount_up_keeps_other_payments(client):
+    """TXN-09: corregir 464.63 → 4064.63 revierte el monto aplicado (no el nuevo),
+    así que otros pagos del mismo statement no se pierden."""
+    ctx = await bootstrap_space(client)
+    debit = await make_debit(client, ctx, initial_balance="9000.00")
+    credit = await make_credit(client, ctx)
+    await charge_credit(client, ctx, credit["payment_method_id"], "5064.63", "2026-06-10")
+    await close_cycles(client, ctx)
+    statements = await get_statements(client, ctx, credit["id"])
+    closed = next(s for s in statements if s["status"] == "closed")
+
+    await _pay_card(client, ctx, credit["id"], debit["payment_method_id"], "1000.00")
+    typo = await _pay_card(client, ctx, credit["id"], debit["payment_method_id"], "464.63")
+    assert (await get_card(client, ctx, credit["id"]))["next_payment"]["amount"] == "3600.00"
+
+    await _edit_amount(client, ctx, typo, "4064.63")
+
+    after = await _statement(client, ctx, credit["id"], closed["id"])
+    assert Decimal(after["paid_amount"]) == Decimal("5064.63")
+    assert after["status"] == "paid"
+    assert (await get_card(client, ctx, credit["id"]))["next_payment"] is None
+
+
+@freeze_time("2026-06-20 12:00:00")
+async def test_txn09_edit_payment_amount_down_reduces_paid_amount(client):
+    """TXN-09: bajar el monto de un pago reduce paid_amount (antes quedaba igual)."""
+    ctx = await bootstrap_space(client)
+    debit = await make_debit(client, ctx, initial_balance="9000.00")
+    credit = await make_credit(client, ctx)
+    await charge_credit(client, ctx, credit["payment_method_id"], "4064.63", "2026-06-10")
+    await close_cycles(client, ctx)
+    statements = await get_statements(client, ctx, credit["id"])
+    closed = next(s for s in statements if s["status"] == "closed")
+
+    txn = await _pay_card(client, ctx, credit["id"], debit["payment_method_id"], "4064.63")
+    await _edit_amount(client, ctx, txn, "464.63")
+
+    after = await _statement(client, ctx, credit["id"], closed["id"])
+    assert Decimal(after["paid_amount"]) == Decimal("464.63")
+    assert after["status"] == "partially_paid"
+
+
+@freeze_time("2026-06-20 12:00:00")
+async def test_txn09_edit_payment_keeps_its_statement(client):
+    """TXN-09: editar el monto de un pago dirigido a un statement que no es el
+    más antiguo no lo mueve al más antiguo."""
+    ctx = await bootstrap_space(client)
+    debit = await make_debit(client, ctx, initial_balance="9000.00")
+    credit = await make_credit(client, ctx, last4="3333")
+    await charge_credit(client, ctx, credit["payment_method_id"], "300.00", "2026-04-20")
+    await charge_credit(client, ctx, credit["payment_method_id"], "700.00", "2026-06-10")
+    await close_cycles(client, ctx)
+    closed = sorted(
+        [s for s in await get_statements(client, ctx, credit["id"]) if s["status"] == "closed"],
+        key=lambda s: s["period_end"],
+    )
+    oldest, newest = closed[0], closed[-1]
+
+    txn = await _pay_card(
+        client, ctx, credit["id"], debit["payment_method_id"], "70.00", newest["id"]
+    )
+    edited = await _edit_amount(client, ctx, txn, "700.00")
+
+    assert edited["statement_id"] == newest["id"]
+    assert (await _statement(client, ctx, credit["id"], newest["id"]))["status"] == "paid"
+    oldest_after = await _statement(client, ctx, credit["id"], oldest["id"])
+    assert Decimal(oldest_after["paid_amount"]) == Decimal("0.00")
+
+
+@freeze_time("2026-06-20 12:00:00")
+async def test_txn09_delete_payment_reverts_paid_amount(client):
+    """TXN-09: borrar un pago de TDC quita su abono del statement."""
+    ctx = await bootstrap_space(client)
+    debit = await make_debit(client, ctx, initial_balance="9000.00")
+    credit = await make_credit(client, ctx)
+    await charge_credit(client, ctx, credit["payment_method_id"], "800.00", "2026-06-10")
+    await close_cycles(client, ctx)
+    statements = await get_statements(client, ctx, credit["id"])
+    closed = next(s for s in statements if s["status"] == "closed")
+
+    txn = await _pay_card(client, ctx, credit["id"], debit["payment_method_id"], "800.00")
+    assert (await _statement(client, ctx, credit["id"], closed["id"]))["status"] == "paid"
+
+    res = await client.delete(f"/api/v1/transactions/{txn['id']}", headers=ctx["headers"])
+    assert res.status_code == 204, res.text
+
+    after = await _statement(client, ctx, credit["id"], closed["id"])
+    assert Decimal(after["paid_amount"]) == Decimal("0.00")
+    assert after["status"] == "closed"
+
+
 @freeze_time("2026-06-10 12:00:00")
 async def test_txn09_transfer_to_debit_is_plain_transfer(client):
     """TXN-09: transferencia a tarjeta de débito no toca statements."""

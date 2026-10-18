@@ -897,17 +897,20 @@ async def apply_card_payment(
         await cancel_card_reminders(session, statement)  # REM-01
 
 
-async def revert_card_payment(session: AsyncSession, space_id: uuid.UUID, txn: Transaction) -> None:
+async def revert_card_payment(
+    session: AsyncSession, space_id: uuid.UUID, txn: Transaction, applied_amount: Decimal
+) -> None:
     """Undo a previously applied TDC payment (TXN-09 update path).
 
     When editing a transfer that was already applied to a statement, subtract
-    the old amount from paid_amount and re-evaluate the statement status."""
+    the amount originally applied (`applied_amount`, captured before the edit
+    mutates `txn.amount`) from paid_amount and re-evaluate the statement status."""
     if txn.statement_id is None:
         return
     statement = await session.get(CardStatement, txn.statement_id)
     if statement is None or statement.space_id != space_id:
         return
-    statement.paid_amount = max(statement.paid_amount - txn.amount, ZERO)
+    statement.paid_amount = max(statement.paid_amount - applied_amount, ZERO)
     _update_payment_status(statement)
     txn.statement_id = None
     await session.flush()
