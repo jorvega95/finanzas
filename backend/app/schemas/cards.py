@@ -10,6 +10,12 @@ from app.models.catalogs import CardBehavior
 from app.models.msi import InstallmentStatus, PlanStatus
 from app.schemas.transactions import Money, MoneyNonNeg, MoneyOut
 
+# TAR-08: card design. Hex base color and a front-image data URL (never the PAN:
+# TDC-01 — the UI warns; the backend only checks format and size).
+CARD_COLOR_PATTERN = r"^#[0-9a-fA-F]{6}$"
+CARD_IMAGE_PATTERN = r"^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$"
+CARD_IMAGE_MAX_LENGTH = 1_000_000
+
 
 class CardCreate(BaseModel):
     card_type_id: uuid.UUID  # CAT-08/TAR-01
@@ -18,7 +24,10 @@ class CardCreate(BaseModel):
     network: str = Field(min_length=1, max_length=20)
     last4: str = Field(pattern=r"^\d{4}$")
     currency: str = Field(default="MXN", pattern="^[A-Z]{3}$")
-    color: str | None = Field(default=None, max_length=20)
+    color: str | None = Field(default=None, pattern=CARD_COLOR_PATTERN)  # TAR-08
+    image: str | None = Field(
+        default=None, pattern=CARD_IMAGE_PATTERN, max_length=CARD_IMAGE_MAX_LENGTH
+    )  # TAR-08
     # TAR-02 credit-only fields (TDC-15: all optional, fillable later).
     statement_day: int | str | None = None  # 1-28 | "last" (TDC-02)
     cutoff_day_policy: CutoffDayPolicy = CutoffDayPolicy.include
@@ -41,7 +50,10 @@ class CardUpdate(BaseModel):
     network: str | None = Field(default=None, min_length=1, max_length=20)
     last4: str | None = Field(default=None, pattern=r"^\d{4}$")
     currency: str | None = Field(default=None, pattern="^[A-Z]{3}$")
-    color: str | None = Field(default=None, max_length=20)
+    color: str | None = Field(default=None, pattern=CARD_COLOR_PATTERN)  # TAR-08
+    image: str | None = Field(
+        default=None, pattern=CARD_IMAGE_PATTERN, max_length=CARD_IMAGE_MAX_LENGTH
+    )  # TAR-08
     # Credit-only (TAR-02):
     statement_day: int | str | None = None
     cutoff_day_policy: CutoffDayPolicy | None = None
@@ -93,6 +105,7 @@ class CardOut(BaseModel):
     initial_balance: MoneyNonNeg | None
     allow_overdraft: bool
     color: str | None
+    image: str | None  # TAR-08
     payment_method_id: uuid.UUID | None
     is_active: bool
 

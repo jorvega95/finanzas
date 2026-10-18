@@ -112,6 +112,7 @@ async def create_card(
         initial_balance=payload.initial_balance,
         allow_overdraft=payload.allow_overdraft,
         color=payload.color,
+        image=payload.image,
     )
 
 

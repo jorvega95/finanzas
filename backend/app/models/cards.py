@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     Uuid,
 )
@@ -97,7 +98,10 @@ class Card(Base, AuditMixin):
     # REM-01: offsets in days before due_date.
     reminder_days: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=lambda: [3, 1])
 
+    # TAR-08: visual design (presentation only). `color` is a #RRGGBB base and
+    # `image` an optional front-art data URL painted on top of it.
     color: Mapped[str | None] = mapped_column(String(20))
+    image: Mapped[str | None] = mapped_column(Text)
     icon: Mapped[str | None] = mapped_column(String(40))
     # CAT-07: auto-created payment method linked to this card.
     payment_method_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)

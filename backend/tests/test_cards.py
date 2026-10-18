@@ -885,3 +885,77 @@ async def test_tdc16_refund_edit_reassigns(client):
     ).json()
     st = next(s for s in statements if s["id"] == statement_id)
     assert st["computed_total"] == "300.00"
+
+
+# --- TAR-08: card appearance -------------------------------------------------
+
+PNG_DATA_URL = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+async def test_tar08_create_with_color_and_image(client):
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx, color="#1A2B3C", image=PNG_DATA_URL)
+    assert card["color"] == "#1A2B3C"
+    assert card["image"] == PNG_DATA_URL
+
+    res = await client.get("/api/v1/cards", headers=ctx["headers"])
+    listed = next(c for c in res.json() if c["id"] == card["id"])
+    assert listed["color"] == "#1A2B3C"
+    assert listed["image"] == PNG_DATA_URL
+
+
+async def test_tar08_edit_and_clear_design(client):
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    assert card["color"] is None and card["image"] is None
+
+    url = f"/api/v1/cards/{card['id']}"
+    res = await client.patch(
+        url, headers=ctx["headers"], json={"color": "#ff0000", "image": PNG_DATA_URL}
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["color"] == "#ff0000"
+    assert res.json()["image"] == PNG_DATA_URL
+
+    # Unrelated edits keep the design (exclude_unset).
+    res = await client.patch(url, headers=ctx["headers"], json={"alias": "Otra"})
+    assert res.json()["image"] == PNG_DATA_URL
+
+    # null clears it.
+    res = await client.patch(url, headers=ctx["headers"], json={"image": None, "color": None})
+    assert res.status_code == 200, res.text
+    assert res.json()["image"] is None
+    assert res.json()["color"] is None
+
+
+async def test_tar08_rejects_invalid_design(client):
+    ctx = await bootstrap_space(client)
+    bad = [
+        {"color": "red"},
+        {"color": "#12345"},
+        {"image": "https://example.com/card.png"},  # only inline data URLs
+        {"image": "data:image/svg+xml;base64,PHN2Zz4="},  # no SVG (script-capable)
+        {"image": "data:image/png;base64," + "A" * 1_000_000},  # too large
+    ]
+    for extra in bad:
+        res = await client.post(
+            "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, **extra)
+        )
+        assert res.status_code == 422, (extra, res.text)
+
+
+async def test_tar08_viewer_cannot_change_design(client):
+    owner = await bootstrap_space(client)
+    shared = await client.post("/api/v1/spaces", headers=owner["headers"], json={"name": "Casa"})
+    space_id = shared.json()["id"]
+    owner_sh = {**owner["headers"], "X-Space-Id": space_id}
+    card = await create_card_for(client, owner_sh, "Uno")
+
+    viewer = await add_member(client, owner["headers"], space_id, "viewer", "viewer@example.com")
+    res = await client.patch(
+        f"/api/v1/cards/{card['id']}", headers=viewer, json={"color": "#000000"}
+    )
+    assert res.status_code == 403

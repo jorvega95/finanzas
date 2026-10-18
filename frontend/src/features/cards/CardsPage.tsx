@@ -34,8 +34,11 @@ import {
 import { useCardTypes, usePaymentMethods } from "../../api/catalogs";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
+import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
 import Spinner from "../../components/ui/Spinner";
+import CardDesigner, { type CardDesign } from "./CardDesigner";
+import CardVisual from "./CardVisual";
 
 const STATUS_LABELS: Record<StatementOut["status"], string> = {
   open: "Abierto",
@@ -63,6 +66,7 @@ function NewCardForm({ onDone }: { onDone: () => void }) {
   const [openingBalance, setOpeningBalance] = useState("");
   const [initialBalance, setInitialBalance] = useState("");
   const [allowOverdraft, setAllowOverdraft] = useState(false);
+  const [design, setDesign] = useState<CardDesign>({ color: null, image: null }); // TAR-08
 
   // Default to the first (credit) seeded type once loaded.
   useEffect(() => {
@@ -71,7 +75,15 @@ function NewCardForm({ onDone }: { onDone: () => void }) {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    const body: CardBody = { card_type_id: cardTypeId, alias, bank, network, last4 };
+    const body: CardBody = {
+      card_type_id: cardTypeId,
+      alias,
+      bank,
+      network,
+      last4,
+      color: design.color,
+      image: design.image,
+    };
     if (isCredit) {
       // TDC-15: campos de ciclo opcionales (se pueden completar luego).
       if (statementDay) body.statement_day = statementDay === "last" ? "last" : Number(statementDay);
@@ -86,13 +98,10 @@ function NewCardForm({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="card grid grid-cols-2 gap-3 p-5 md:grid-cols-4">
-      <div className="col-span-2 md:col-span-4">
-        <h2 className="font-semibold">Nueva tarjeta</h2>
-        <p className="text-xs text-ink-muted dark:text-slate-400">
-          Solo guardamos alias, banco y últimos 4 dígitos — nunca el número completo.
-        </p>
-      </div>
+    <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <p className="col-span-2 -mt-2 text-xs text-ink-muted md:col-span-4">
+        Solo guardamos alias, banco y últimos 4 dígitos — nunca el número completo.
+      </p>
       <div>
         <label className="label">Tipo</label>
         <select className="input" value={cardTypeId} onChange={(e) => setCardTypeId(e.target.value)}>
@@ -208,12 +217,18 @@ function NewCardForm({ onDone }: { onDone: () => void }) {
         </>
       )}
 
-      <div className="col-span-2 flex items-end gap-2 md:col-span-4">
-        <button className="btn-primary flex-1" disabled={create.isPending || !cardTypeId}>
-          Guardar
-        </button>
+      <fieldset className="col-span-2 mt-2 border-t border-line pt-4 md:col-span-4">
+        <legend className="sr-only">Diseño</legend>
+        <h3 className="mb-3 text-sm font-medium">Diseño de la tarjeta</h3>
+        <CardDesigner value={design} onChange={setDesign} preview={{ alias, bank, network, last4 }} />
+      </fieldset>
+
+      <div className="col-span-2 mt-2 flex items-end justify-end gap-2 md:col-span-4">
         <button type="button" className="btn-secondary" onClick={onDone}>
           Cancelar
+        </button>
+        <button className="btn-primary" disabled={create.isPending || !cardTypeId}>
+          Guardar tarjeta
         </button>
       </div>
       {create.error && (
@@ -329,10 +344,14 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
   const [openingBalance, setOpeningBalance] = useState(card.opening_balance ?? "");
   const [initialBalance, setInitialBalance] = useState(card.initial_balance ?? "0");
   const [allowOverdraft, setAllowOverdraft] = useState(card.allow_overdraft);
+  const [design, setDesign] = useState<CardDesign>({ color: card.color, image: card.image }); // TAR-08
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const body: CardUpdateBody = { alias, bank, network, last4 };
+    // TAR-08: solo enviamos el diseño si cambió (la imagen puede pesar ~200 KB).
+    if (design.color !== card.color) body.color = design.color;
+    if (design.image !== card.image) body.image = design.image;
     if (isCredit) {
       body.statement_day = statementDay
         ? statementDay === "last"
@@ -358,13 +377,7 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
 
   return (
     <>
-    <form
-      onSubmit={handleSubmit}
-      className="mt-4 grid grid-cols-2 gap-3 border-t border-line pt-4 dark:border-slate-800 md:grid-cols-4"
-    >
-      <div className="col-span-2 md:col-span-4">
-        <h4 className="text-sm font-medium">Editar tarjeta</h4>
-      </div>
+    <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-3 md:grid-cols-4">
       <div>
         <label className="label">Alias</label>
         <input className="input" required value={alias} onChange={(e) => setAlias(e.target.value)} />
@@ -467,7 +480,7 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
               value={openingBalance}
               onChange={(e) => setOpeningBalance(e.target.value)}
             />
-            <p className="mt-1 text-xs text-ink-muted dark:text-slate-400">
+            <p className="mt-1 text-xs text-ink-muted">
               Lo que ya debías del estado de cuenta anterior; se agrega como pago próximo.
             </p>
           </div>
@@ -484,7 +497,7 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
               value={initialBalance}
               onChange={(e) => setInitialBalance(e.target.value)}
             />
-            <p className="mt-1 text-xs text-ink-muted dark:text-slate-400">
+            <p className="mt-1 text-xs text-ink-muted">
               Modificar el saldo inicial recalcula el saldo disponible actual.
             </p>
           </div>
@@ -499,12 +512,18 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
         </>
       )}
 
-      <div className="col-span-2 flex items-end gap-2 md:col-span-4">
-        <button className="btn-primary flex-1" disabled={update.isPending}>
-          Guardar cambios
-        </button>
+      <fieldset className="col-span-2 mt-2 border-t border-line pt-4 md:col-span-4">
+        <legend className="sr-only">Diseño</legend>
+        <h3 className="mb-3 text-sm font-medium">Diseño de la tarjeta</h3>
+        <CardDesigner value={design} onChange={setDesign} preview={{ alias, bank, network, last4 }} />
+      </fieldset>
+
+      <div className="col-span-2 mt-2 flex items-end justify-end gap-2 md:col-span-4">
         <button type="button" className="btn-secondary" onClick={onDone}>
           Cancelar
+        </button>
+        <button className="btn-primary" disabled={update.isPending}>
+          Guardar cambios
         </button>
       </div>
       {update.error && (
@@ -514,8 +533,8 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
       )}
 
       {/* TDC-12: baja/reactivación lógica desde el propio formulario de edición. */}
-      <div className="col-span-2 mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4 dark:border-slate-800 md:col-span-4">
-        <p className="text-xs text-ink-muted dark:text-slate-400">
+      <div className="col-span-2 mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4 md:col-span-4">
+        <p className="text-xs text-ink-muted">
           {card.is_active
             ? "Desactivar impide nuevos cargos; podrás reactivarla luego."
             : "Esta tarjeta está desactivada."}
@@ -571,7 +590,7 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
             type="button"
             className={
               card.is_active
-                ? "inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
+                ? "btn-danger"
                 : "btn-primary"
             }
             disabled={update.isPending}
@@ -592,12 +611,12 @@ function EditCardForm({ card, onDone }: { card: CardOut; onDone: () => void }) {
 function CardDetail({ card }: { card: CardOut }) {
   const statements = useCardStatements(card.id);
   return (
-    <div className="mt-4 border-t border-line pt-4 dark:border-slate-800">
+    <div className="mt-4 border-t border-line pt-4">
       <h4 className="mb-2 text-sm font-medium">Statements</h4>
       <ul className="space-y-1 text-sm">
         {(statements.data ?? []).map((s) => (
           <li key={s.id} className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-ink-muted dark:text-slate-400">
+            <span className="text-ink-muted">
               {formatDate(s.period_start)} → {formatDate(s.period_end)} · vence {formatDate(s.due_date)}
             </span>
             <span className="flex items-center gap-2">
@@ -610,12 +629,12 @@ function CardDetail({ card }: { card: CardOut }) {
               <span
                 className={`rounded-full px-2 py-0.5 text-xs ${
                   s.is_overdue
-                    ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+                    ? "bg-red-500/15 text-red-700 dark:text-red-300"
                     : s.status === "paid"
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                       : s.status === "open"
-                        ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-                        : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                        ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
+                        : "bg-amber-500/15 text-amber-800 dark:text-amber-200"
                 }`}
               >
                 {s.is_overdue ? "Vencido" : STATUS_LABELS[s.status]}
@@ -639,34 +658,50 @@ function SortableCardRow({ card }: { card: CardOut }) {
     <li
       ref={setNodeRef}
       style={style}
-      className={`card flex items-center gap-3 p-4 ${
-        isDragging ? "opacity-70 ring-2 ring-accent" : ""
-      }`}
+      className={`card flex items-center gap-4 p-3 ${isDragging ? "z-10 ring-2 ring-accent" : ""}`}
     >
       <button
         type="button"
-        className="cursor-grab touch-none text-lg leading-none text-ink-muted hover:text-ink dark:text-slate-400"
+        className="cursor-grab touch-none rounded-md p-1 text-ink-subtle hover:bg-muted hover:text-ink"
         aria-label="Arrastrar para reordenar"
         {...attributes}
         {...listeners}
       >
-        ⠿
+        <Icon name="grip" />
       </button>
+      <CardVisual {...card} inactive={!card.is_active} className="w-24 shrink-0" />
       <div className="min-w-0">
-        <p className="truncate font-medium">
-          {card.alias}
-          {!card.is_active && (
-            <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-              Inactiva
-            </span>
-          )}
-        </p>
-        <p className="truncate text-xs text-ink-muted dark:text-slate-400">
+        <p className="truncate font-medium">{card.alias}</p>
+        <p className="truncate text-xs text-ink-muted">
           {card.bank} · {card.network} ····{card.last4}
         </p>
       </div>
     </li>
   );
+}
+
+function Stat({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="rounded-lg border border-line bg-surface px-3 py-2.5">
+      <p className="text-xs text-ink-muted">{label}</p>
+      <p className={`tabular mt-0.5 font-semibold ${strong ? "text-lg" : "text-base"}`}>{value}</p>
+    </div>
+  );
+}
+
+function cycleSummary(card: CardOut): string {
+  if (card.behavior === "debit") return "Débito · saldo disponible";
+  if (card.behavior === "prepaid") return "Prepago · saldo disponible";
+  if (card.statement_day == null && !card.statement_day_is_last) return "Crédito · corte sin definir";
+  const cut = card.statement_day_is_last ? "último día" : `día ${card.statement_day}`;
+  const pay = card.payment_due_days
+    ? ` · ${card.payment_due_days} días para pagar`
+    : card.payment_day_is_last
+      ? " · paga el último día"
+      : card.payment_day
+        ? ` · paga el día ${card.payment_day}`
+        : "";
+  return `Crédito · corte ${cut}${pay}`;
 }
 
 export default function CardsPage() {
@@ -695,6 +730,7 @@ export default function CardsPage() {
   const [editing, setEditing] = useState<string | null>(null);
 
   const cardList = cards.data ?? [];
+  const editingCard = cardList.find((c) => c.id === editing) ?? null;
 
   // TAR-07: reorder mode. Gated by a button; drag is active only inside it.
   const qc = useQueryClient();
@@ -763,11 +799,14 @@ export default function CardsPage() {
   }, [qc]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Tarjetas</h1>
+    <div className="mx-auto max-w-5xl space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="page-title">Tarjetas</h1>
+          <p className="page-subtitle">Crédito, débito, vales y tarjetas de regalo.</p>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-sm text-ink-muted dark:text-slate-400">
+          <label className="mr-1 flex items-center gap-1.5 text-sm text-ink-muted">
             <input
               type="checkbox"
               checked={showInactive}
@@ -778,16 +817,23 @@ export default function CardsPage() {
           </label>
           {!reordering && cardList.length > 1 && (
             <button className="btn-secondary" onClick={startReorder}>
+              <Icon name="arrowUpDown" />
               Ordenar
             </button>
           )}
           {!reordering && (
             <>
-              <button className="btn-secondary" onClick={() => closeCycles.mutate()}>
-                Cerrar ciclos vencidos
+              <button
+                className="btn-secondary"
+                onClick={() => closeCycles.mutate()}
+                title="Cerrar ciclos vencidos"
+              >
+                <Icon name="refresh" />
+                <span className="hidden sm:inline">Cerrar ciclos</span>
               </button>
               <button className="btn-primary" onClick={() => setShowForm(true)}>
-                + Nueva tarjeta
+                <Icon name="plus" />
+                Nueva tarjeta
               </button>
             </>
           )}
@@ -796,13 +842,21 @@ export default function CardsPage() {
 
       {/* Los recordatorios viven en la campana del header (REM-04, OPP-01). */}
 
-      {showForm && <NewCardForm onDone={() => setShowForm(false)} />}
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Nueva tarjeta" size="xl">
+        {showForm && <NewCardForm onDone={() => setShowForm(false)} />}
+      </Modal>
+
+      {editingCard && (
+        <Modal open onClose={() => setEditing(null)} title={`Editar ${editingCard.alias}`} size="xl">
+          <EditCardForm card={editingCard} onDone={() => setEditing(null)} />
+        </Modal>
+      )}
 
       {reordering ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-ink-muted dark:text-slate-400">
-              Arrastra ⠿ para reordenar. Este orden es solo tuyo; si sales sin guardar, también se
+            <p className="text-sm text-ink-muted">
+              Arrastra para reordenar. Este orden es solo tuyo; si sales sin guardar, también se
               conserva.
             </p>
             <div className="flex gap-2">
@@ -836,109 +890,131 @@ export default function CardsPage() {
           </DndContext>
         </div>
       ) : cards.isPending ? (
-        <div className="card flex h-48 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-ink-muted dark:text-slate-400">
+        <div className="card flex h-48 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-ink-muted">
           <Spinner className="size-7" />
           Cargando tus tarjetas…
         </div>
       ) : cards.isError ? (
-        <div className="card flex h-48 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-ink-muted dark:text-slate-400">
+        <div className="card flex h-48 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-ink-muted">
           No se pudieron cargar tus tarjetas.
           <button className="btn-secondary" onClick={() => cards.refetch()}>
             Reintentar
           </button>
         </div>
-      ) : (cards.data ?? []).length === 0 && !showForm ? (
-        <div className="card grid h-48 place-items-center p-8 text-center text-sm text-ink-muted dark:text-slate-400">
-          Sin tarjetas aún. Da de alta la primera: crédito, débito, vales o tarjeta de regalo.
-        </div>
+      ) : cardList.length === 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowForm(true)}
+          className="grid h-56 w-full place-items-center rounded-xl border border-dashed border-line-strong text-sm text-ink-muted transition hover:bg-card hover:text-ink"
+        >
+          <span className="flex flex-col items-center gap-2">
+            <Icon name="plus" className="size-5" />
+            Da de alta tu primera tarjeta
+          </span>
+        </button>
       ) : (
-        (cards.data ?? []).map((card) => {
-          const isCredit = card.behavior === "credit";
-          return (
-            <section key={card.id} className={`card p-5 ${card.is_active ? "" : "opacity-60"}`}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold">
-                    {card.alias}{" "}
-                    <span className="text-sm font-normal text-ink-muted dark:text-slate-400">
-                      {card.bank} · {card.network} ····{card.last4}
-                    </span>
-                    {!card.is_active && (
-                      <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-                        Inactiva
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-xs text-ink-muted dark:text-slate-400">
-                    {isCredit
-                      ? `Corte: ${card.statement_day_is_last ? "último día" : `día ${card.statement_day}`}${
-                          card.payment_due_days ? ` · ${card.payment_due_days} días para pagar` : ""
-                        }`
-                      : card.behavior === "debit"
-                        ? "Débito · saldo disponible"
-                        : "Prepago · saldo disponible"}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    className="btn-secondary"
-                    onClick={() => setEditing(editing === card.id ? null : card.id)}
-                  >
-                    {editing === card.id ? "Cerrar" : "Editar"}
-                  </button>
-                  {isCredit && (
-                    <button
-                      className="btn-secondary"
-                      onClick={() => setExpanded(expanded === card.id ? null : card.id)}
-                    >
-                      {expanded === card.id ? "Ocultar" : "Detalle"}
-                    </button>
-                  )}
-                </div>
-              </div>
+        <div className="space-y-4">
+          {cardList.map((card) => {
+            const isCredit = card.behavior === "credit";
+            // Solo proporción visual de la barra (no aritmética de dinero, GLO-01).
+            const usage =
+              isCredit && card.debt && card.credit_limit && Number(card.credit_limit) > 0
+                ? Math.min(100, (Number(card.debt.total_debt) / Number(card.credit_limit)) * 100)
+                : null;
+            return (
+              <section
+                key={card.id}
+                className={`card p-4 sm:p-5 ${card.is_active ? "" : "opacity-70"}`}
+              >
+                <div className="flex flex-col gap-5 sm:flex-row">
+                  <div className="w-full shrink-0 sm:w-72">
+                    <CardVisual {...card} inactive={!card.is_active} />
+                  </div>
 
-              {editing === card.id && (
-                <EditCardForm card={card} onDone={() => setEditing(null)} />
-              )}
-
-              {isCredit && card.next_payment && (
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm dark:bg-amber-950/40">
-                  <span className="text-amber-800 dark:text-amber-200">
-                    Próximo pago · vence {formatDate(card.next_payment.due_date)}
-                  </span>
-                  <span className="font-semibold">
-                    {formatMoney(card.next_payment.amount, card.currency)}
-                  </span>
-                </div>
-              )}
-
-              {isCredit && card.debt && (
-                <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-                  {[
-                    ["Saldo al corte", card.debt.statement_balance],
-                    ["Ciclo en curso", card.debt.current_cycle_spend],
-                    ["MSI por venir", card.debt.committed_msi],
-                    ["Deuda total", card.debt.total_debt],
-                  ].map(([label, value]) => (
-                    <div key={label} className="rounded-lg bg-surface p-3 dark:bg-slate-800/50">
-                      <p className="text-xs text-ink-muted dark:text-slate-400">{label}</p>
-                      <p className="text-lg font-semibold">{formatMoney(value, card.currency)}</p>
+                  <div className="flex min-w-0 flex-1 flex-col gap-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-lg font-semibold tracking-tight">
+                          {card.alias}
+                        </h3>
+                        <p className="text-sm text-ink-muted">{cycleSummary(card)}</p>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button className="btn-secondary" onClick={() => setEditing(card.id)}>
+                          <Icon name="pencil" className="size-3.5" />
+                          Editar
+                        </button>
+                        {isCredit && (
+                          <button
+                            className="btn-secondary"
+                            aria-expanded={expanded === card.id}
+                            onClick={() => setExpanded(expanded === card.id ? null : card.id)}
+                          >
+                            {expanded === card.id ? "Ocultar" : "Detalle"}
+                            <Icon
+                              name="chevronDown"
+                              className={`size-3.5 transition ${expanded === card.id ? "rotate-180" : ""}`}
+                            />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
 
-              {!isCredit && card.balance !== null && (
-                <div className="mt-4 rounded-lg bg-surface p-3 dark:bg-slate-800/50">
-                  <p className="text-xs text-ink-muted dark:text-slate-400">Saldo actual</p>
-                  <p className="text-2xl font-semibold">{formatMoney(card.balance, card.currency)}</p>
-                </div>
-              )}
+                    {isCredit && card.next_payment && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+                        <span className="text-amber-900 dark:text-amber-200">
+                          Próximo pago · vence {formatDate(card.next_payment.due_date)}
+                        </span>
+                        <span className="tabular font-semibold">
+                          {formatMoney(card.next_payment.amount, card.currency)}
+                        </span>
+                      </div>
+                    )}
 
-              {isCredit && expanded === card.id && <CardDetail card={card} />}
-            </section>
-          );
-        })
+                    {isCredit && card.debt && (
+                      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                        <Stat label="Saldo al corte" value={formatMoney(card.debt.statement_balance, card.currency)} />
+                        <Stat label="Ciclo en curso" value={formatMoney(card.debt.current_cycle_spend, card.currency)} />
+                        <Stat label="MSI por venir" value={formatMoney(card.debt.committed_msi, card.currency)} />
+                        <Stat label="Deuda total" value={formatMoney(card.debt.total_debt, card.currency)} strong />
+                      </div>
+                    )}
+
+                    {usage !== null && card.credit_limit && (
+                      <div>
+                        <div className="mb-1 flex justify-between text-xs text-ink-muted">
+                          <span>Uso de la línea</span>
+                          <span className="tabular">
+                            {usage.toFixed(0)}% de {formatMoney(card.credit_limit, card.currency)}
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className={`h-full rounded-full ${
+                              usage > 80 ? "bg-red-500" : usage > 50 ? "bg-amber-500" : "bg-accent"
+                            }`}
+                            style={{ width: `${usage}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {!isCredit && card.balance !== null && (
+                      <div className="rounded-lg border border-line bg-surface px-4 py-3">
+                        <p className="text-xs text-ink-muted">Saldo actual</p>
+                        <p className="tabular text-2xl font-semibold tracking-tight">
+                          {formatMoney(card.balance, card.currency)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {isCredit && expanded === card.id && <CardDetail card={card} />}
+              </section>
+            );
+          })}
+        </div>
       )}
     </div>
   );

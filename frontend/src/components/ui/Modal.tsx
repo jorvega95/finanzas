@@ -1,8 +1,10 @@
 import { useEffect, type ReactNode } from "react";
+import Icon from "./Icon";
 
 const SIZE_CLASSES = {
   sm: "max-w-sm",
   lg: "max-w-2xl",
+  xl: "max-w-3xl",
 };
 
 interface ModalProps {
@@ -27,26 +29,26 @@ export default function Modal({ open, onClose, title, children, size = "sm" }: M
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className={`card w-full ${SIZE_CLASSES[size]} p-6 shadow-xl`}
+        className={`card max-h-[90vh] w-full overflow-y-auto ${SIZE_CLASSES[size]} p-6 shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-start justify-between gap-4">
-          <h2 id="modal-title" className="font-semibold">
+          <h2 id="modal-title" className="text-base font-semibold tracking-tight">
             {title}
           </h2>
           <button
             aria-label="Cerrar"
-            className="-mr-1 -mt-1 rounded-lg px-2 py-1 text-ink-muted transition hover:bg-slate-100 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            className="-mr-2 -mt-1 rounded-lg p-1.5 text-ink-subtle transition hover:bg-muted hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             onClick={onClose}
           >
-            ✕
+            <Icon name="x" />
           </button>
         </div>
         {children}

@@ -29,7 +29,8 @@ export interface CardOut {
   reminder_days: number[];
   initial_balance: string | null;
   allow_overdraft: boolean;
-  color: string | null;
+  color: string | null; // TAR-08: #RRGGBB
+  image: string | null; // TAR-08: front-art data URL
   payment_method_id: string | null;
   is_active: boolean;
   // CardWithDebtOut extras (list/detail endpoints):
@@ -62,6 +63,8 @@ export interface CardBody {
   bank: string;
   network: string;
   last4: string;
+  color?: string | null; // TAR-08
+  image?: string | null; // TAR-08
   // Credit-only (TAR-02):
   statement_day?: number | string | null;
   cutoff_day_policy?: string;
@@ -81,7 +84,8 @@ export interface CardUpdateBody {
   network?: string;
   last4?: string;
   currency?: string;
-  color?: string | null;
+  color?: string | null; // TAR-08
+  image?: string | null; // TAR-08
   statement_day?: number | string | null;
   cutoff_day_policy?: string;
   payment_due_days?: number | null;

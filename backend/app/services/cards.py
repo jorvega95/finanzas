@@ -325,6 +325,7 @@ async def create_card(
     initial_balance: Decimal | None = None,
     allow_overdraft: bool = False,
     color: str | None = None,
+    image: str | None = None,  # TAR-08
 ) -> Card:
     """TAR-01/03 + TDC-01 + CAT-07: creates the card and its linked method.
     Credit cards carry (optional) cycle fields and an optional opening debt
@@ -357,6 +358,7 @@ async def create_card(
             cutoff_day_policy=cutoff_day_policy,
             reminder_days=reminder_days if reminder_days is not None else [3, 1],
             color=color,
+            image=image,
             created_by=created_by,
             **cfg,
         )
@@ -382,6 +384,7 @@ async def create_card(
             allow_overdraft=allow_overdraft,
             reminder_days=[],
             color=color,
+            image=image,
             created_by=created_by,
         )
     session.add(card)
@@ -464,6 +467,7 @@ async def update_card(
         "last4",
         "currency",
         "color",
+        "image",  # TAR-08
         "cutoff_day_policy",
         "credit_limit",
         "reminder_days",
