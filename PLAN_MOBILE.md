@@ -57,7 +57,7 @@ finanzas/
 - **pnpm workspaces** (migrar de npm); dependencias internas con `workspace:*`.
 - **Una sola versión de React y React Native** en todo el repo (duplicados rompen Metro de formas opacas).
 - `packages/*` son TypeScript puro **sin imports de react-dom ni react-native** (salvo `queries`, que importa solo `@tanstack/react-query`, agnóstico de plataforma). Lint rule que lo haga cumplir.
-- Supabase auth: `@supabase/supabase-js` funciona en ambos; el **storage del token es por plataforma** (localStorage en web, `expo-secure-store` en mobile — MOB-04). El wrapper de auth queda en cada app; `packages/api` solo recibe un `getToken()`.
+- Auth: el backend corre en modo local (GLO-07). Un cliente móvil requiere `AUTH_MODE=jwt` (token HS256 emitido por el backend) y exponer el servidor de forma segura (p. ej. Tailscale). El **storage del token es por plataforma** (`expo-secure-store` en mobile — MOB-04); `packages/api` solo recibe un `getToken()`.
 - CI: GitHub Actions corre lint + tests de `packages/*` y ambas apps; EAS Build solo para releases mobile (free tier: 15 builds Android + 15 iOS/mes, suficiente para uso personal).
 
 ## 3. Stack mobile
@@ -69,7 +69,7 @@ finanzas/
 | UI | **NativeWind v4** | Sintaxis Tailwind; tokens compartidos vía preset |
 | Datos | **TanStack Query** (de `packages/queries`) | Mismos hooks que web |
 | Formularios | react-hook-form + zod (schemas de `packages/domain`) | Igual que web |
-| Auth | supabase-js + expo-secure-store; Google OAuth nativo vía `expo-auth-session` | El backend no cambia: mismo JWT |
+| Auth | token del backend (`AUTH_MODE=jwt`) + expo-secure-store | Requiere un endpoint de emisión de token en el backend |
 | Push | **expo-notifications** + Expo Push Service | Ver §5 |
 | Gráficas | victory-native o react-native-svg + d3 ligero | Solo dashboard ligero; decidir en M2 |
 | Builds | **EAS Build + EAS Submit** | eas.json con perfiles `development`, `preview` (APK/TestFlight), `production` |
@@ -122,7 +122,7 @@ Migrar a pnpm workspaces; mover `frontend/` → `apps/web`; crear `packages/api`
 **Sale:** monorepo listo; el desarrollo web continúa sin fricción y todo lo nuevo compartible nace en `packages/`.
 
 ### Fase M1 — Esqueleto + auth (1 semana)
-App Expo con Expo Router, NativeWind, dev build en tu(s) dispositivo(s). Login Supabase (Google + email) con secure store (MOB-04). Switcher de espacio. Pantalla de movimientos en solo-lectura consumiendo `packages/queries`.
+App Expo con Expo Router, NativeWind, dev build en tu(s) dispositivo(s). Login contra el backend (`AUTH_MODE=jwt`) con secure store (MOB-04). Switcher de espacio. Pantalla de movimientos en solo-lectura consumiendo `packages/queries`.
 **Sale:** haces login en tu teléfono y ves tus datos reales.
 
 ### Fase M2 — Captura + bandeja (1-2 semanas)

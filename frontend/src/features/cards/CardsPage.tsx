@@ -728,7 +728,7 @@ export default function CardsPage() {
     setReordering(false);
     // Reflect the new order in the cache right away so the list updates on
     // return; the mutation's invalidation refetches in the background to confirm
-    // (Supabase can be slow from local dev, so we don't wait on it visually).
+    // (no need to wait on it visually).
     qc.setQueryData<CardOut[]>(["cards", { includeInactive: showInactive }], ordered);
     saveLayout.mutate(ordered.map((c) => c.id));
   }

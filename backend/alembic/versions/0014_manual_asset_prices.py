@@ -5,9 +5,6 @@ live in `manual_asset_prices (space_id, symbol)` so one space can no longer
 overwrite (or permanently freeze) the price another space sees. The provider
 cache stays global on purpose (INV-03: one batch per refresh for all symbols).
 
-RLS scopes the new table by space membership, mirroring the domain tables from
-0006 (only applies on PostgreSQL; tests run on SQLite via create_all).
-
 Revision ID: 0014
 Revises: 0013
 Create Date: 2026-07-20
@@ -16,7 +13,6 @@ Create Date: 2026-07-20
 import sqlalchemy as sa
 
 from alembic import op
-from app.db.rls import supports_rls
 
 revision = "0014"
 down_revision = "0013"
@@ -61,22 +57,6 @@ def upgrade() -> None:
     # Las filas 'manual' huérfanas en la caché ya no deben tratarse como eternas.
     op.execute("DELETE FROM public.asset_prices WHERE source = 'manual';")
 
-    if not supports_rls(bind):
-        return
-    op.execute("ALTER TABLE public.manual_asset_prices ENABLE ROW LEVEL SECURITY;")
-    op.execute(
-        """
-        CREATE POLICY manual_asset_prices_space_isolation ON public.manual_asset_prices
-        USING (public.is_space_member(space_id));
-        """
-    )
-
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    if supports_rls(bind):
-        op.execute(
-            "DROP POLICY IF EXISTS manual_asset_prices_space_isolation "
-            "ON public.manual_asset_prices;"
-        )
     op.drop_table("manual_asset_prices")

@@ -16,8 +16,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   install -m 600 /dev/null "$ENV_FILE"
   env_set ENV dev
   env_set AUTH_MODE local
-  # Instalación nueva: un UUID cualquiera. migrate-from-supabase.sh lo
-  # reemplaza por el de tu perfil real.
+  # Instalación nueva: un UUID cualquiera; el perfil se crea en la primera
+  # petición (ESP-01). Si restauras un respaldo, pon aquí el id de su perfil.
   env_set LOCAL_USER_ID "$(cat /proc/sys/kernel/random/uuid)"
 fi
 env_set DATABASE_URL "postgresql+asyncpg://$DB_USER@/$DB_NAME?host=$PG_SOCKET_DIR"

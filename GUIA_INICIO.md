@@ -24,20 +24,6 @@ scripts/local/setup-postgres.sh      # SIN sudo delante (lo pide solo): instala 
 scripts/local/install.sh             # build + migraciones + servicio + lanzador
 ```
 
-## Migrar los datos desde Supabase (una vez)
-
-```bash
-SUPABASE_DB_URL='postgresql://postgres.<ref>:<pass>@<host>:5432/postgres' \
-  scripts/local/migrate-from-supabase.sh
-```
-
-- Hace un respaldo completo de Supabase en `~/Documents/finanzas-backups/`.
-- Copia los datos (sin sudo) y verifica **cada tabla** (conteo, sumas de columnas
-  numéricas y md5 del contenido). Si algo no coincide, se detiene.
-- Fija `LOCAL_USER_ID` con tu perfil y arranca el servicio.
-- Sin `SUPABASE_DB_URL` usa el `DATABASE_URL` de `backend/.env`.
-- Supabase **no se modifica**. Páusalo cuando valides la app y bórralo después.
-
 ## Día a día
 
 | Qué | Comando |

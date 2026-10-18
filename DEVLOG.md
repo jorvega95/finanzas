@@ -64,8 +64,8 @@ base con multimoneda desde la primera migración, CI básico.
   `PaymentMethod` (necesarios para el seed CAT-02; CRUD llega en Fase 1).
   Mixins de auditoría GLO-04 (`created_by/created_at/updated_at`).
 - **Migración inicial** `alembic/versions/0001_initial.py` (escrita a mano —
-  no hay Postgres local; se valida contra Supabase al configurar el proyecto).
-- **Seguridad** (`core/security.py`): verificación de JWT de Supabase (HS256,
+  se valida contra Postgres al configurar la base).
+- **Seguridad** (`core/security.py`): verificación de JWT del proveedor de auth (HS256,
   audience `authenticated`). FastAPI no emite tokens.
 - **Deps** (`core/deps.py`): `get_current_user` (provisioning perezoso ESP-01:
   el primer request autenticado crea perfil + espacio "Personal" + membresía
@@ -80,8 +80,8 @@ base con multimoneda desde la primera migración, CI básico.
 ### Frontend
 
 - Login (`features/auth/LoginPage.tsx`): Google OAuth + email/contraseña
-  (alta y acceso), es-MX. Aviso claro si falta configurar Supabase en `.env`.
-- `AuthProvider` (sesión Supabase) + rutas protegidas (`routes/index.tsx`).
+  (alta y acceso), es-MX. Aviso claro si falta configurar el auth en `.env`.
+- `AuthProvider` (sesión del proveedor de auth) + rutas protegidas (`routes/index.tsx`).
 - **Tema light/dark** (`lib/theme.tsx`): clase `dark` en `<html>`, persistido
   en localStorage, fallback a `prefers-color-scheme`; toggle en login y header.
 - Shell de la app (`components/AppLayout.tsx`): sidebar, espacio activo,
@@ -109,15 +109,14 @@ Calidad: `ruff check` ✅ · `ruff format` ✅ · `mypy app` (strict) ✅ ·
   Los modelos usan solo tipos portables; la unicidad CAT-01 se resuelve con
   columna `name_normalized` calculada en Python (equivalente a
   `unaccent+lower`) para comportamiento idéntico en ambos motores.
-- **Provisioning perezoso**: Supabase es dueño del registro; el backend ve al
+- **Provisioning perezoso**: el proveedor de auth es dueño del registro; el backend ve al
   usuario por primera vez en su primer request autenticado y ahí ejecuta
   ESP-01 (idempotente).
 - `payment_methods.credit_card_id` queda como UUID sin FK hasta que exista
   `credit_cards` (Fase 2, CAT-07).
-- RLS en Supabase se escribe/verifica en Fase 5 según PLAN §6.
-- **Pendiente de configuración del usuario**: crear el proyecto Supabase y
-  llenar `backend/.env` (`SUPABASE_JWT_SECRET`, `DATABASE_URL`) y
-  `frontend/.env` (URL + anon key); luego `uv run alembic upgrade head`.
+- RLS se escribe/verifica en Fase 5 según PLAN §6.
+- **Pendiente de configuración del usuario**: configurar la base y el auth en
+  `backend/.env` y `frontend/.env`; luego `uv run alembic upgrade head`.
 
 ---
 
@@ -434,11 +433,10 @@ Calidad: ruff ✅ · mypy strict ✅ · `npm run build` ✅.
   y deja notificación in-app a cada miembro (en su espacio personal, que
   sobrevive al cascade); `default_space_id` de los afectados regresa a su
   personal (fallback ESP-01). El espacio personal jamás se elimina.
-- **Migración `0006`**: tabla `space_invites` + **RLS** para Postgres/
-  Supabase: función `is_space_member(uuid)` (SECURITY DEFINER sobre
-  `auth.uid()`) y políticas por `space_id` en las 13 tablas de dominio, más
-  políticas especiales (profiles=self, installments vía plan, holdings vía
-  cuenta). En SQLite (tests) la sección RLS se omite — FastAPI filtra primero.
+- **Migración `0006`**: tabla `space_invites` + **RLS** en Postgres por
+  `space_id` en las tablas de dominio. En SQLite (tests) la sección RLS se
+  omite — FastAPI filtra primero. *(Las políticas RLS se retiraron al pasar a
+  modo local, GLO-07: FastAPI es la única capa.)*
 
 ### Frontend
 
@@ -558,9 +556,8 @@ Los **8 casos de prueba obligatorios** de REGLAS_NEGOCIO.md están cubiertos
 `test_msi`+`test_dashboard`, 5 en `test_recurring`, 6 en `test_transactions`,
 7 en `test_cards`, 8 en `test_spaces`/`test_catalogs`).
 
-**Para usar la app:** crear el proyecto Supabase, llenar `backend/.env`
-(`DATABASE_URL` al Postgres de Supabase, `SUPABASE_JWT_SECRET`) y
-`frontend/.env` (URL + anon key + habilitar Google OAuth), correr
+**Para usar la app:** configurar `backend/.env` (`DATABASE_URL`) y el auth
+en `frontend/.env`, correr
 `uv run alembic upgrade head` y levantar ambos servidores
 (`uv run uvicorn app.main:app --reload` y `npm run dev`). Activar jobs con
 `SCHEDULER_ENABLED=true`.

@@ -1,6 +1,6 @@
 # Plan: Plataforma de Finanzas Personales
 
-**Stack:** FastAPI + Supabase (Postgres + Auth) + React/TypeScript · **Alcance:** producto multi-tenant desde el inicio · **Fecha:** 2026-06-10 · **v2** (áreas de oportunidad integradas como requerimientos)
+**Stack:** FastAPI + Postgres local + React/TypeScript · **Alcance:** producto multi-tenant desde el inicio · **Fecha:** 2026-06-10 · **v2** (áreas de oportunidad integradas como requerimientos)
 
 > Reglas de negocio detalladas (IDs referenciables, fórmulas, edge cases y casos de prueba): ver [`REGLAS_NEGOCIO.md`](REGLAS_NEGOCIO.md).
 
@@ -89,21 +89,22 @@ Ya son requerimientos (R9-R15); aquí el racional y dónde caen:
 
 ```
 ┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│  React + TS     │     │  FastAPI (Python)     │     │  Supabase        │
-│  (Vite, SPA)    │────▶│  - API REST /api/v1   │────▶│  - Postgres      │
-│                 │     │  - Lógica de negocio  │     │  - Auth (JWT)    │
-│  Móvil futuro:  │     │  - Verifica JWT       │     │  - Storage       │
-│  React Native/  │     │    de Supabase        │     └─────────────────┘
-│  Expo (mismo TS)│     │  - Proxy precios+caché│────▶ CoinGecko API (CMC alterno)
+│  React + TS     │     │  FastAPI (Python)     │     │  Postgres local  │
+│  (Vite, SPA)    │────▶│  - API REST /api/v1   │────▶│  (socket, sin    │
+│  servida por    │     │  - Lógica de negocio  │     │   red; respaldo  │
+│  FastAPI        │     │  - Modo local GLO-07  │     │   diario GLO-08) │
+│  Móvil futuro   │     │    (AUTH_MODE=jwt     │     └─────────────────┘
+│  (AUTH_MODE=jwt)│     │    para móvil)        │
+│                 │     │  - Proxy precios+caché│────▶ CoinGecko API (CMC alterno)
 └─────────────────┘     │  - Jobs (APScheduler) │
                         └──────────────────────┘
 ```
 
 **Por qué así:**
 
-- **Supabase Auth** resuelve req. #7 completo (Google OAuth, email magic link/password, SMS) sin escribir código de seguridad. El frontend habla con Supabase para login; FastAPI solo **verifica el JWT** (JWKS) — stateless y simple.
-- **FastAPI como única API de negocio** (no usar el cliente Supabase directo desde React para datos): la lógica de ciclos de TDC, MSI y agregaciones del dashboard vive en Python, testeada, y la app móvil la reutiliza tal cual. API-first = req. móvil futuro resuelto.
-- **RLS de Supabase como segunda capa**: políticas Row-Level Security por `space_id` como defensa en profundidad, aunque FastAPI ya filtre.
+- **Modo local (GLO-07)**: uso personal en una sola máquina; sin login, el backend actúa como `LOCAL_USER_ID` y solo acepta `Host`/`Origin` loopback. `AUTH_MODE=jwt` queda para un futuro cliente móvil.
+- **FastAPI como única API de negocio** (React nunca habla directo con la base): la lógica de ciclos de TDC, MSI y agregaciones del dashboard vive en Python, testeada, y la app móvil la reutiliza tal cual. API-first = req. móvil futuro resuelto.
+- **Aislamiento por espacio en FastAPI** (GLO-05): toda query filtra por `space_id`; no hay RLS.
 - **Jobs**: APScheduler dentro de FastAPI basta al inicio (snapshot diario de precios, generación de transacciones recurrentes, recordatorios). Si crece → Celery/arq.
 
 ---
@@ -111,8 +112,7 @@ Ya son requerimientos (R9-R15); aquí el racional y dónde caen:
 ## 3. Modelo de datos (Postgres)
 
 ```
-users  (gestionada por Supabase Auth: auth.users)
-profiles              id (=auth uid), display_name, default_space_id, locale, ...
+profiles              id (=LOCAL_USER_ID o sub del JWT), display_name, default_space_id, locale, ...
 
 spaces                id, name, type(personal|shared), base_currency, created_by
 space_members         space_id, user_id, role(owner|editor|viewer), joined_at
@@ -195,7 +195,6 @@ finanzas/
 ├── frontend/
 │   ├── src/
 │   │   ├── api/                     # cliente generado desde OpenAPI + TanStack Query
-│   │   ├── auth/                    # supabase-js, AuthProvider, guards
 │   │   ├── features/                # transactions/, catalogs/, cards/, msi/,
 │   │   │                            #   investments/, dashboard/, spaces/, settings/
 │   │   ├── components/ui/           # shadcn/ui
@@ -203,7 +202,6 @@ finanzas/
 │   │   └── routes/                  # TanStack Router o React Router
 │   ├── package.json
 │   └── vite.config.ts
-├── docker-compose.yml               # dev local (opcional: supabase local)
 └── PLAN.md
 ```
 
@@ -221,12 +219,12 @@ Organización del frontend por **features** (vertical), no por tipo de archivo �
 | sqlalchemy 2.x + alembic | ORM y migraciones |
 | asyncpg | driver Postgres async |
 | pydantic v2 + pydantic-settings | validación y config |
-| pyjwt[crypto] | verificación de JWT de Supabase (JWKS) |
+| pyjwt[crypto] | verificación de JWT HS256 (`AUTH_MODE=jwt`) |
 | httpx | cliente CoinGecko (y CMC alterno) |
 | apscheduler | jobs |
 | python-dateutil | aritmética de fechas (ciclos, MSI) |
 | pytest + pytest-asyncio + freezegun | tests (freezegun es clave para probar ciclos de corte) |
-| resend (o SMTP Supabase) | emails de recordatorio (R14) |
+| resend (o SMTP) | emails de recordatorio (R14) |
 | API Banxico SIE (httpx) | tipo de cambio MXN/USD oficial (R11), gratuita |
 
 **Frontend:**
@@ -234,7 +232,6 @@ Organización del frontend por **features** (vertical), no por tipo de archivo �
 | Paquete | Uso |
 |---|---|
 | react 18 + typescript + vite | base |
-| @supabase/supabase-js | auth |
 | @tanstack/react-query | estado de servidor, caché |
 | react-router (o TanStack Router) | rutas |
 | react-hook-form + zod | formularios (captura rápida de gastos) |
@@ -244,7 +241,7 @@ Organización del frontend por **features** (vertical), no por tipo de archivo �
 | date-fns | fechas |
 | dinero.js (opcional) | manejo seguro de montos |
 
-**Infra sugerida:** Supabase (DB+Auth, free tier) · backend en Railway/Render/Fly.io · frontend en Vercel/Cloudflare Pages. Costo inicial: ~$0-5/mes.
+**Infra:** local — Postgres nativo + servicio `systemd --user` que sirve API y SPA en `127.0.0.1:8765` (ver `GUIA_INICIO.md`). Costo: $0.
 
 ---
 
@@ -253,7 +250,7 @@ Organización del frontend por **features** (vertical), no por tipo de archivo �
 Cada fase termina en algo usable. Estimaciones para tiempo parcial.
 
 ### Fase 0 — Fundación (1 semana) → R7, base de R8 y R11
-Monorepo, Supabase project, FastAPI esqueleto + verificación JWT, Vite + login (Google + email; teléfono/SMS al final, requiere Twilio), CI básico (lint, tests), Alembic con `profiles`, `spaces`, `space_members`. Seed de espacio personal al registrarse. `base_currency` en el espacio y `currency` en los modelos desde la primera migración (R11).
+Monorepo, base Postgres, FastAPI esqueleto + verificación JWT, Vite + login (Google + email; teléfono/SMS al final, requiere Twilio), CI básico (lint, tests), Alembic con `profiles`, `spaces`, `space_members`. Seed de espacio personal al registrarse. `base_currency` en el espacio y `currency` en los modelos desde la primera migración (R11).
 **Sale:** puedes hacer login y existe tu espacio personal.
 
 ### Fase 1 — Registro de gastos + catálogos + recurrentes (2 semanas) → R1, R2, R9, R11
@@ -261,7 +258,7 @@ CRUD de categorías y métodos de pago (seed por defecto, soft-delete). CRUD de 
 **Sale:** registras tu día a día y las suscripciones se capturan solas. **Empieza a usarla tú mismo desde aquí.**
 
 ### Fase 2 — TDC, MSI y recordatorios (2-3 semanas) → R3, R4, R14
-CRUD de tarjetas. Motor de ciclos de facturación (`billing_cycles.py` — el código más delicado del proyecto, tests primero). Compras a MSI → plan + cuotas. Vista por tarjeta: ciclo actual, pago proyectado, deuda total, MSI restantes. Vista MSI global con proyección de meses futuros. Recordatorios (R14): job que crea avisos N días antes de la fecha límite, canal in-app + email (Resend/SMTP de Supabase); push queda para la PWA.
+CRUD de tarjetas. Motor de ciclos de facturación (`billing_cycles.py` — el código más delicado del proyecto, tests primero). Compras a MSI → plan + cuotas. Vista por tarjeta: ciclo actual, pago proyectado, deuda total, MSI restantes. Vista MSI global con proyección de meses futuros. Recordatorios (R14): job que crea avisos N días antes de la fecha límite, canal in-app + email (Resend/SMTP); push queda para la PWA.
 **Sale:** sabes cuánto y cuándo pagar cada tarjeta, y la app te lo recuerda.
 
 ### Fase 3 — Dashboard + presupuestos (2 semanas) → R6, R10
@@ -273,14 +270,14 @@ Cuentas de inversión y holdings. Crypto (R5): proxy CoinGecko en FastAPI con ca
 **Sale:** portafolio completo + patrimonio neto con historia.
 
 ### Fase 5 — Espacios compartidos (1 semana) → R8
-Invitaciones por email, roles, switcher de espacio en la UI, RLS verificada con tests. (El modelo existe desde Fase 0; aquí solo se expone.)
+Invitaciones por email, roles, switcher de espacio en la UI, aislamiento verificado con tests (GLO-05). (El modelo existe desde Fase 0; aquí solo se expone.)
 **Sale:** espacio compartido con tu pareja.
 
 ### Fase 6 — Importación y pulido (continuo) → R13
 Importación CSV (R13): wizard de mapeo de columnas por banco, dedupe contra existentes, `import_batches` con rollback. PWA instalable (puente barato antes de React Native). Login por teléfono si aún pendiente. Exportación de datos. Backlog: categorización automática por reglas.
 
 ### Móvil (futuro)
-Con la API ya completa: **React Native + Expo** reutilizando tipos TS, cliente API y supabase-js. Antes de eso, la PWA de la Fase 6 cubre el 80% del caso de uso móvil (capturar gastos al vuelo) y habilita push para R14.
+Con la API ya completa: **React Native + Expo** reutilizando tipos TS y cliente API. Antes de eso, la PWA de la Fase 6 cubre el 80% del caso de uso móvil (capturar gastos al vuelo) y habilita push para R14.
 
 ---
 
@@ -292,7 +289,7 @@ Con la API ya completa: **React Native + Expo** reutilizando tipos TS, cliente A
 | Free tier CoinGecko insuficiente | Caché server-side; 1 batch c/10 min ≈ 4,300 de 10,000 llamadas/mes (crédito plano por llamada); fallback a CMC vía `PriceProvider` |
 | Fricción de captura manual → abandono | Formulario ultra-rápido, recurrentes, importación CSV en Fase 6 |
 | Errores de redondeo en dinero | `Decimal`/`NUMERIC` siempre; tests de suma de cuotas MSI = total exacto (la última cuota absorbe el residuo) |
-| Lock-in Supabase | Es Postgres estándar + JWT estándar; SQLAlchemy y Alembic hacen la DB portable |
+| Pérdida de datos (sin proveedor gestionado) | Respaldo diario `pg_dump` con rotación y verificación (GLO-08) |
 | Recurrentes generan transacciones erróneas (R9) | Se crean con flag "por revisar"; idempotencia por (rule_id, fecha) |
 | Conversión FX inconsistente en agregados (R11) | Tasa del día de la transacción persistida en `exchange_rates`; un solo servicio `fx` para toda conversión |
 | Importación CSV duplica transacciones (R13) | Hash por (fecha, monto, descripción normalizada) + revisión manual de colisiones; rollback por batch |

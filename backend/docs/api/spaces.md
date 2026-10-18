@@ -22,7 +22,7 @@ Un **espacio** es un área compartida donde múltiples usuarios colaboran. El pr
 - `profile` (`ProfileOut`):
   - `id` (uuid) — ID del usuario.
   - `display_name` (string) — nombre a mostrar.
-  - `email` (string | null) — email de Supabase.
+  - `email` (string | null) — email del perfil (`LOCAL_USER_EMAIL` en modo local).
   - `default_space_id` (uuid | null) — espacio por defecto del usuario.
   - `locale` (string) — idioma preferido.
 - `spaces` (list[`SpaceOut`]) — espacios donde es miembro.

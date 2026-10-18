@@ -1,6 +1,6 @@
 # Documentación de API — Finanzas
 
-Documentación completa de los endpoints de la API REST de Finanzas. Todos los endpoints requieren un JWT de Supabase válido en el header `Authorization: Bearer <token>` (excepto los de meta).
+Documentación completa de los endpoints de la API REST de Finanzas. En modo local (`AUTH_MODE=local`, GLO-07) no se envía token: toda petición actúa como `LOCAL_USER_ID` y solo se aceptan `Host`/`Origin` loopback. Con `AUTH_MODE=jwt` los endpoints (excepto los de meta) requieren `Authorization: Bearer <token>` HS256 firmado con `JWT_SECRET`; las menciones a "JWT" en estos documentos aplican a ese modo.
 
 **Prefijo base:** `/api/v1`
 
