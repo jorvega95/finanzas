@@ -29,6 +29,10 @@ if [[ -n "$existing_addr" ]]; then
     || hyprctl dispatch focuswindow "address:$existing_addr"
 else
   # Perfil aislado: siempre abre como ventana app independiente.
+  # Idioma es-MX solo para esta ventana (tu sistema y tu Brave normal siguen
+  # en inglés): así los <input type="date"> muestran dd/mm/aaaa. El env va
+  # dentro del comando porque uwsm-app no hereda el entorno de quien lo llama.
   mkdir -p "$BRAVE_PROFILE_DIR"
-  exec setsid uwsm-app -- brave --app="$APP_URL" --user-data-dir="$BRAVE_PROFILE_DIR"
+  exec setsid uwsm-app -- env LANGUAGE=es_MX:es brave --lang=es-MX \
+    --app="$APP_URL" --user-data-dir="$BRAVE_PROFILE_DIR"
 fi
