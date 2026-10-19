@@ -1,9 +1,11 @@
-"""Agregados del dashboard. Implementa DSH-01..DSH-05.
+"""Agregados del dashboard. Implementa DSH-01..DSH-06, EVT-04.
 
 Todo en SQL con predicados compartidos (DSH-03): este módulo es EL único
 lugar que define qué cuenta como gasto/ingreso. Excluye transfers (TXN-02) y
 transacciones-madre MSI (MSI-03); incluye cuotas MSI cargadas en el mes.
-Conversión a base con la tasa congelada (FX-03/FX-05).
+Conversión a base con la tasa congelada (FX-03/FX-05). Con `exclude_events`
+(EVT-04) se excluyen además los movimientos ligados a un evento y las cuotas
+de compras MSI ligadas.
 """
 
 import calendar
@@ -45,12 +47,23 @@ def month_bounds(month: str) -> tuple[dt.date, dt.date]:
     return dt.date(year, month_number, 1), dt.date(year, month_number, last)
 
 
+def event_predicates(txn: Any = Transaction, exclude_events: bool = False) -> list[Any]:
+    """EVT-04: con el toggle activo, fuera todo lo ligado a un evento. `txn` es
+    la transacción (o el alias de la madre MSI cuando se agregan cuotas)."""
+    return [txn.event_id.is_(None)] if exclude_events else []
+
+
 def expense_predicates(
-    space_id: uuid.UUID, start: dt.date, end: dt.date, today: dt.date
+    space_id: uuid.UUID,
+    start: dt.date,
+    end: dt.date,
+    today: dt.date,
+    exclude_events: bool = False,
 ) -> list[ColumnElement[bool]]:
     """DSH-02/03: el único predicado de 'gasto directo' del sistema.
 
-    Excluye transfers (TXN-02), madres MSI (MSI-03) y fechas futuras (TXN-03).
+    Excluye transfers (TXN-02), madres MSI (MSI-03) y fechas futuras (TXN-03);
+    con `exclude_events`, también los gastos de eventos (EVT-04).
     """
     return [
         Transaction.space_id == space_id,
@@ -59,11 +72,16 @@ def expense_predicates(
         Transaction.date >= start,
         Transaction.date <= end,
         Transaction.date <= today,
+        *event_predicates(Transaction, exclude_events),
     ]
 
 
 def income_predicates(
-    space_id: uuid.UUID, start: dt.date, end: dt.date, today: dt.date
+    space_id: uuid.UUID,
+    start: dt.date,
+    end: dt.date,
+    today: dt.date,
+    exclude_events: bool = False,
 ) -> list[ColumnElement[bool]]:
     return [
         Transaction.space_id == space_id,
@@ -71,10 +89,27 @@ def income_predicates(
         Transaction.date >= start,
         Transaction.date <= end,
         Transaction.date <= today,
+        *event_predicates(Transaction, exclude_events),
     ]
 
 
-def _msi_quota_query(space_id: uuid.UUID, start: dt.date, end: dt.date) -> Any:
+def msi_quota_predicates(
+    parent: Any, space_id: uuid.UUID, start: dt.date, end: dt.date, exclude_events: bool = False
+) -> list[Any]:
+    """DSH-02/MSI-03: cuotas cargadas cuyo corte cae en el periodo. Requiere
+    el join Installment → InstallmentPlan → `parent` (madre) → Statement."""
+    return [
+        InstallmentPlan.space_id == space_id,
+        Installment.status.in_([InstallmentStatus.charged, InstallmentStatus.paid]),
+        Statement.period_end >= start,
+        Statement.period_end <= end,
+        *event_predicates(parent, exclude_events),
+    ]
+
+
+def _msi_quota_query(
+    space_id: uuid.UUID, start: dt.date, end: dt.date, exclude_events: bool = False
+) -> Any:
     """DSH-02/MSI-03: cuotas MSI cargadas en el periodo, con la categoría y
     naturaleza heredadas de la compra original y su tasa congelada."""
     parent = aliased(Transaction)
@@ -88,39 +123,42 @@ def _msi_quota_query(space_id: uuid.UUID, start: dt.date, end: dt.date) -> Any:
         .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
         .join(parent, InstallmentPlan.transaction_id == parent.id)
         .join(Statement, Installment.statement_id == Statement.id)
-        .where(
-            InstallmentPlan.space_id == space_id,
-            Installment.status.in_([InstallmentStatus.charged, InstallmentStatus.paid]),
-            Statement.period_end >= start,
-            Statement.period_end <= end,
-        )
+        .where(*msi_quota_predicates(parent, space_id, start, end, exclude_events))
     )
 
 
 async def _msi_total(
-    session: AsyncSession, space_id: uuid.UUID, start: dt.date, end: dt.date
+    session: AsyncSession,
+    space_id: uuid.UUID,
+    start: dt.date,
+    end: dt.date,
+    exclude_events: bool = False,
 ) -> Decimal:
-    sub = _msi_quota_query(space_id, start, end).subquery()
+    sub = _msi_quota_query(space_id, start, end, exclude_events).subquery()
     total = await session.scalar(select(func.coalesce(func.sum(sub.c.amount_base), 0)))
     return to_money(total)
 
 
 async def monthly_totals(
-    session: AsyncSession, space: Space, start: dt.date, end: dt.date
+    session: AsyncSession,
+    space: Space,
+    start: dt.date,
+    end: dt.date,
+    exclude_events: bool = False,
 ) -> dict[str, Decimal]:
     """DSH-02: ingresos, gastos (directos + cuotas MSI) y neto, en base."""
     today = today_in_tz(space.timezone)
     income = await session.scalar(
         select(func.coalesce(func.sum(AMOUNT_BASE), 0)).where(
-            *income_predicates(space.id, start, end, today)
+            *income_predicates(space.id, start, end, today, exclude_events)
         )
     )
     direct_expense = await session.scalar(
         select(func.coalesce(func.sum(AMOUNT_BASE), 0)).where(
-            *expense_predicates(space.id, start, end, today)
+            *expense_predicates(space.id, start, end, today, exclude_events)
         )
     )
-    msi = await _msi_total(session, space.id, start, end)
+    msi = await _msi_total(session, space.id, start, end, exclude_events)
     income_total = to_money(income)
     expense_total = to_money(direct_expense) + msi
     return {
@@ -167,7 +205,11 @@ def _roll_up_to_root(
 
 
 async def expenses_by_category(
-    session: AsyncSession, space: Space, start: dt.date, end: dt.date
+    session: AsyncSession,
+    space: Space,
+    start: dt.date,
+    end: dt.date,
+    exclude_events: bool = False,
 ) -> list[dict[str, Any]]:
     """DSH-03 + CAT-06: agrega por categoría raíz (subcategorías suman al
     padre); incluye cuotas MSI con la categoría de la compra."""
@@ -175,11 +217,11 @@ async def expenses_by_category(
     rows = (
         await session.execute(
             select(Transaction.category_id, func.sum(AMOUNT_BASE).label("total"))
-            .where(*expense_predicates(space.id, start, end, today))
+            .where(*expense_predicates(space.id, start, end, today, exclude_events))
             .group_by(Transaction.category_id)
         )
     ).all()
-    sub = _msi_quota_query(space.id, start, end).subquery()
+    sub = _msi_quota_query(space.id, start, end, exclude_events).subquery()
     msi_rows = (
         await session.execute(
             select(sub.c.category_id, func.sum(sub.c.amount_base)).group_by(sub.c.category_id)
@@ -191,7 +233,11 @@ async def expenses_by_category(
 
 
 async def expenses_by_nature(
-    session: AsyncSession, space: Space, start: dt.date, end: dt.date
+    session: AsyncSession,
+    space: Space,
+    start: dt.date,
+    end: dt.date,
+    exclude_events: bool = False,
 ) -> dict[str, Decimal]:
     """DSH-03 + CAT-03: por naturaleza con COALESCE(override, categoría)."""
     today = today_in_tz(space.timezone)
@@ -200,7 +246,7 @@ async def expenses_by_nature(
         await session.execute(
             select(nature.label("nature"), func.sum(AMOUNT_BASE))
             .join(Category, Transaction.category_id == Category.id)
-            .where(*expense_predicates(space.id, start, end, today))
+            .where(*expense_predicates(space.id, start, end, today, exclude_events))
             .group_by(nature)
         )
     ).all()
@@ -219,12 +265,7 @@ async def expenses_by_nature(
             .join(parent_txn, InstallmentPlan.transaction_id == parent_txn.id)
             .join(parent_cat, parent_txn.category_id == parent_cat.id)
             .join(Statement, Installment.statement_id == Statement.id)
-            .where(
-                InstallmentPlan.space_id == space.id,
-                Installment.status.in_([InstallmentStatus.charged, InstallmentStatus.paid]),
-                Statement.period_end >= start,
-                Statement.period_end <= end,
-            )
+            .where(*msi_quota_predicates(parent_txn, space.id, start, end, exclude_events))
             .group_by(msi_nature)
         )
     ).all()
@@ -248,7 +289,12 @@ def _nature_filter(expr: Any, nature: ExpenseNature) -> ColumnElement[bool]:
 
 
 async def expenses_by_nature_detail(
-    session: AsyncSession, space: Space, nature: ExpenseNature, start: dt.date, end: dt.date
+    session: AsyncSession,
+    space: Space,
+    nature: ExpenseNature,
+    start: dt.date,
+    end: dt.date,
+    exclude_events: bool = False,
 ) -> dict[str, Any]:
     """DSH-06: drill-down de una naturaleza con los MISMOS predicados de
     DSH-02/03, de modo que Σ movimientos == Σ categorías == total del pie.
@@ -275,7 +321,7 @@ async def expenses_by_nature_detail(
             .join(Category, Transaction.category_id == Category.id)
             .outerjoin(Account, Transaction.account_id == Account.id)
             .where(
-                *expense_predicates(space.id, start, end, today),
+                *expense_predicates(space.id, start, end, today, exclude_events),
                 _nature_filter(direct_nature, nature),
             )
         )
@@ -308,10 +354,7 @@ async def expenses_by_nature_detail(
             .join(Statement, Installment.statement_id == Statement.id)
             .outerjoin(Account, parent_txn.account_id == Account.id)
             .where(
-                InstallmentPlan.space_id == space.id,
-                Installment.status.in_([InstallmentStatus.charged, InstallmentStatus.paid]),
-                Statement.period_end >= start,
-                Statement.period_end <= end,
+                *msi_quota_predicates(parent_txn, space.id, start, end, exclude_events),
                 _nature_filter(msi_nature, nature),
             )
         )
@@ -366,7 +409,11 @@ async def expenses_by_nature_detail(
 
 
 async def trend(
-    session: AsyncSession, space: Space, month: str, months_back: int = 6
+    session: AsyncSession,
+    space: Space,
+    month: str,
+    months_back: int = 6,
+    exclude_events: bool = False,
 ) -> list[dict[str, Any]]:
     """DSH-03: tendencia de N meses con los MISMOS predicados de DSH-02."""
     year, month_number = int(month[:4]), int(month[5:7])
@@ -374,7 +421,7 @@ async def trend(
     for _ in range(months_back):
         key = f"{year:04d}-{month_number:02d}"
         start, end = month_bounds(key)
-        totals = await monthly_totals(session, space, start, end)
+        totals = await monthly_totals(session, space, start, end, exclude_events)
         points.append({"month": key, **totals})
         month_number -= 1
         if month_number == 0:

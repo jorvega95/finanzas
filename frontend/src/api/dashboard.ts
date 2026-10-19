@@ -1,4 +1,5 @@
-// Dashboard (DSH-01..05) y presupuestos (PRE-01..04).
+// Dashboard (DSH-01..06) y presupuestos (PRE-01..04). EVT-04: `excludeEvents`
+// saca los movimientos ligados a eventos de los agregados.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 
@@ -36,10 +37,13 @@ export interface DashboardSummary {
   upcoming: UpcomingItem[];
 }
 
-export function useDashboard(month: string) {
+export function useDashboard(month: string, excludeEvents = false) {
   return useQuery({
-    queryKey: ["dashboard", month],
-    queryFn: () => api<DashboardSummary>(`/api/v1/dashboard/summary?month=${month}`),
+    queryKey: ["dashboard", month, { excludeEvents }],
+    queryFn: () =>
+      api<DashboardSummary>(
+        `/api/v1/dashboard/summary?month=${month}${excludeEvents ? "&exclude_events=true" : ""}`,
+      ),
   });
 }
 
@@ -67,12 +71,14 @@ export interface NatureDetail {
   items: NatureDetailItem[];
 }
 
-export function useNatureDetail(month: string, nature: string | null) {
+export function useNatureDetail(month: string, nature: string | null, excludeEvents = false) {
   return useQuery({
-    queryKey: ["dashboard", "by-nature", month, nature],
+    queryKey: ["dashboard", "by-nature", month, nature, { excludeEvents }],
     enabled: nature !== null,
     queryFn: () =>
-      api<NatureDetail>(`/api/v1/dashboard/by-nature/${nature}?month=${month}`),
+      api<NatureDetail>(
+        `/api/v1/dashboard/by-nature/${nature}?month=${month}${excludeEvents ? "&exclude_events=true" : ""}`,
+      ),
   });
 }
 
@@ -91,10 +97,13 @@ export interface BudgetProgress {
   remaining: string;
 }
 
-export function useBudgets(month: string) {
+export function useBudgets(month: string, excludeEvents = false) {
   return useQuery({
-    queryKey: ["budgets", month],
-    queryFn: () => api<BudgetProgress[]>(`/api/v1/budgets?month=${month}`),
+    queryKey: ["budgets", month, { excludeEvents }],
+    queryFn: () =>
+      api<BudgetProgress[]>(
+        `/api/v1/budgets?month=${month}${excludeEvents ? "&exclude_events=true" : ""}`,
+      ),
   });
 }
 

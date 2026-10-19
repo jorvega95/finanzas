@@ -14,6 +14,7 @@ const NAV: { to: string; label: string; icon: IconName }[] = [
   { to: "/transacciones", label: "Transacciones", icon: "transactions" },
   { to: "/cuentas", label: "Cuentas", icon: "wallet" },
   { to: "/msi", label: "MSI", icon: "calendar" },
+  { to: "/eventos", label: "Eventos", icon: "party" }, // EVT-01
   { to: "/inversiones", label: "Inversiones", icon: "investments" },
   { to: "/ajustes", label: "Ajustes", icon: "settings" },
 ];

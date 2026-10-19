@@ -64,6 +64,7 @@ class TransactionBase(BaseModel):
     cycle_hint: Literal["current", "next"] | None = None
     # TXN-09: explicit statement to pay when account_to is a credit account.
     target_statement_id: uuid.UUID | None = None
+    event_id: uuid.UUID | None = None  # EVT-02: at most one event
 
 
 class TransactionCreate(TransactionBase):
@@ -95,6 +96,14 @@ class TransactionOut(BaseModel):
     expense_nature_override: ExpenseNature | None
     recurring_rule_id: uuid.UUID | None
     needs_review: bool
+    event_id: uuid.UUID | None = None  # EVT-02
+    installment_plan_id: uuid.UUID | None = None  # MSI-03: set on an MSI parent
+
+
+class TransactionEventUpdate(BaseModel):
+    """EVT-02: link (or unlink with null) a transaction to an event."""
+
+    event_id: uuid.UUID | None
 
 
 class TransactionConfirm(BaseModel):

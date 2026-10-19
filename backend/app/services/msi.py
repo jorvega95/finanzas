@@ -382,6 +382,7 @@ async def settle_plan_early(
         currency=purchase.currency,
         category_id=purchase.category_id,
         account_id=account.id,
+        event_id=purchase.event_id,  # EVT-02: the settlement stays in the event
         created_by=user_id,
     )
     session.add(settlement)

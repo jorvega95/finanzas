@@ -26,17 +26,21 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/summary", response_model=DashboardSummary)
 async def summary(
-    db: DbSession, space_and_member: ActiveSpace, month: str | None = None
+    db: DbSession,
+    space_and_member: ActiveSpace,
+    month: str | None = None,
+    exclude_events: bool = False,
 ) -> DashboardSummary:
-    """DSH-02/03/05 en un solo payload; agregados 100% en SQL."""
+    """DSH-02/03/05 en un solo payload; agregados 100% en SQL. EVT-04:
+    `exclude_events` saca los movimientos ligados a eventos."""
     space, _ = space_and_member
     month = month or today_in_tz(space.timezone).strftime("%Y-%m")
     start, end = svc.month_bounds(month)
 
-    totals = await svc.monthly_totals(db, space, start, end)
-    by_category = await svc.expenses_by_category(db, space, start, end)
-    by_nature = await svc.expenses_by_nature(db, space, start, end)
-    trend = await svc.trend(db, space, month)
+    totals = await svc.monthly_totals(db, space, start, end, exclude_events)
+    by_category = await svc.expenses_by_category(db, space, start, end, exclude_events)
+    by_nature = await svc.expenses_by_nature(db, space, start, end, exclude_events)
+    trend = await svc.trend(db, space, month, exclude_events=exclude_events)
     upcoming = await svc.upcoming_commitments(db, space)
 
     return DashboardSummary(
@@ -55,13 +59,15 @@ async def nature_detail(
     space_and_member: ActiveSpace,
     nature: ExpenseNature,
     month: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}$")] = None,
+    exclude_events: bool = False,
 ) -> NatureDetail:
-    """DSH-06: drill-down de una naturaleza; mismos predicados que DSH-02/03."""
+    """DSH-06: drill-down de una naturaleza; mismos predicados que DSH-02/03
+    (incluido el toggle EVT-04)."""
     space, _ = space_and_member
     month = month or today_in_tz(space.timezone).strftime("%Y-%m")
     start, end = svc.month_bounds(month)
 
-    detail = await svc.expenses_by_nature_detail(db, space, nature, start, end)
+    detail = await svc.expenses_by_nature_detail(db, space, nature, start, end, exclude_events)
     return NatureDetail(
         nature=detail["nature"],
         month=month,

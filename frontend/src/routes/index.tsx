@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import AccountsPage from "../features/accounts/AccountsPage";
 import DashboardPage from "../features/dashboard/DashboardPage";
+import EventsPage from "../features/events/EventsPage";
 import ForecastPage from "../features/forecast/ForecastPage";
 import InvestmentsPage from "../features/investments/InvestmentsPage";
 import MsiPage from "../features/msi/MsiPage";
@@ -33,6 +34,7 @@ export const router = createBrowserRouter([
           { path: "/cuentas", element: <AccountsPage /> },
           { path: "/tarjetas", element: <Navigate to="/cuentas" replace /> },
           { path: "/msi", element: <MsiPage /> },
+          { path: "/eventos", element: <EventsPage /> },
           { path: "/inversiones", element: <InvestmentsPage /> },
           { path: "/ajustes", element: <SettingsPage /> },
         ],

@@ -19,11 +19,11 @@ router = APIRouter(prefix="/budgets", tags=["budgets"])
 
 @router.get("", response_model=list[BudgetProgressOut])
 async def list_budgets(
-    db: DbSession, space_and_member: ActiveSpace, month: str
+    db: DbSession, space_and_member: ActiveSpace, month: str, exclude_events: bool = False
 ) -> list[BudgetProgressOut]:
-    """PRE-04: presupuesto vs consumido por categoría."""
+    """PRE-04: presupuesto vs consumido por categoría (EVT-04: sin eventos)."""
     space, _ = space_and_member
-    rows = await svc.budgets_with_progress(db, space, svc.parse_month(month))
+    rows = await svc.budgets_with_progress(db, space, svc.parse_month(month), exclude_events)
     return [
         BudgetProgressOut(
             budget=BudgetOut.model_validate(row["budget"]),

@@ -1,6 +1,7 @@
 // Dashboard (R6): resumen mensual de gasto devengado (DSH-02/04),
 // desgloses (DSH-03), tendencia 6 meses y próximos compromisos (DSH-05).
-// Presupuestos con barra de avance (PRE-04, R10).
+// Presupuestos con barra de avance (PRE-04, R10). Toggle "excluir eventos"
+// (EVT-04) para ver el mes sin gastos extraordinarios.
 import { useState, type FormEvent } from "react";
 import {
   Bar,
@@ -25,6 +26,7 @@ import {
   useDashboard,
   useDeleteBudget,
 } from "../../api/dashboard";
+import { useExcludeEvents } from "../../lib/excludeEvents";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import { useChartTheme } from "../../lib/chartTheme";
@@ -50,8 +52,8 @@ function prevMonth(month: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function BudgetsSection({ month }: { month: string }) {
-  const budgets = useBudgets(month);
+function BudgetsSection({ month, excludeEvents }: { month: string; excludeEvents: boolean }) {
+  const budgets = useBudgets(month, excludeEvents);
   const categories = useCategories();
   const createBudget = useCreateBudget();
   const deleteBudget = useDeleteBudget();
@@ -158,7 +160,8 @@ export default function DashboardPage() {
   const { activeSpace } = useSpace();
   const [month, setMonth] = useState(currentMonth);
   const [natureDetail, setNatureDetail] = useState<string | null>(null);
-  const dashboard = useDashboard(month);
+  const [excludeEvents, setExcludeEvents] = useExcludeEvents(); // EVT-04
+  const dashboard = useDashboard(month, excludeEvents);
   const data = dashboard.data;
   const totals = data?.totals;
   const currency = activeSpace.base_currency;
@@ -180,12 +183,25 @@ export default function DashboardPage() {
           <h1 className="page-title">Dashboard</h1>
           <p className="page-subtitle">Gasto devengado del mes y lo que viene.</p>
         </div>
-        <input
-          type="month"
-          className="input w-auto"
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <label
+            className="flex items-center gap-1.5 text-sm text-ink-muted"
+            title="Oculta los gastos e ingresos ligados a eventos (boda, viaje…) en totales, gráficas y presupuestos"
+          >
+            <input
+              type="checkbox"
+              checked={excludeEvents}
+              onChange={(e) => setExcludeEvents(e.target.checked)}
+            />
+            Excluir eventos
+          </label>
+          <input
+            type="month"
+            className="input w-auto"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+          />
+        </div>
       </div>
 
       {/* Totales del mes (DSH-02) */}
@@ -358,10 +374,11 @@ export default function DashboardPage() {
         </section>
       </div>
 
-      <BudgetsSection month={month} />
+      <BudgetsSection month={month} excludeEvents={excludeEvents} />
 
       <NatureDetailModal
         month={month}
+        excludeEvents={excludeEvents}
         nature={natureDetail}
         currency={currency}
         onClose={() => setNatureDetail(null)}

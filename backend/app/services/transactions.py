@@ -1,5 +1,5 @@
 """Transaction services. Implements TXN-01..TXN-14, TAR-03/05/10, FX-03,
-REC-03 (discard).
+REC-03 (discard), EVT-02 (event link).
 
 GLO-01: Decimal everywhere. GLO-02: pure dates. GLO-05: space-scoped.
 """
@@ -51,6 +51,7 @@ class TransactionInput:
     fx_rate_override: Decimal | None = None
     cycle_hint: str | None = None  # TDC-05a: "current" | "next" | None
     target_statement_id: uuid.UUID | None = None  # TXN-09: explicit statement for TDC payment
+    event_id: uuid.UUID | None = None  # EVT-02
 
 
 async def _validate_category(
@@ -133,10 +134,17 @@ def _reject(message: str) -> HTTPException:
     return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
 
 
-async def _validate_input(session: AsyncSession, space: Space, data: TransactionInput) -> _Resolved:
-    """Shared TXN-01/02/13/14 + TAR-10 validation; resolves the accounts."""
+async def _validate_input(
+    session: AsyncSession,
+    space: Space,
+    data: TransactionInput,
+    current_event_id: uuid.UUID | None = None,
+) -> _Resolved:
+    """Shared TXN-01/02/13/14 + TAR-10 + EVT-02 validation; resolves the accounts."""
     from app.services.accounts import account_behavior
+    from app.services.events import validate_event_link
 
+    await validate_event_link(session, space.id, data.event_id, current_event_id)
     if data.currency not in SUPPORTED_CURRENCIES:
         raise _reject(f"Moneda no soportada: {data.currency}")
     _validate_date(data.date, space)
@@ -327,6 +335,7 @@ async def _create_fee(
         category_id=category.id,
         account_id=transfer.account_id,
         fee_for_id=transfer.id,
+        event_id=transfer.event_id,  # EVT-02: the fee follows its transfer
         created_by=user_id,
     )
     session.add(fee)
@@ -383,6 +392,7 @@ async def create_transaction(
         account_id=data.account_id,
         account_to_id=data.account_to_id,
         amount_to=data.amount_to,
+        event_id=data.event_id,  # EVT-02
         recurring_rule_id=recurring_rule_id,
         scheduled_date=scheduled_date,
         needs_review=needs_review,
@@ -436,7 +446,7 @@ async def update_transaction(
     # the plan UI (adjust cuota by cuota); block direct editing here.
     if txn.installment_plan_id is not None:
         raise _reject("Esta transacción tiene un plan MSI activo; ajusta las cuotas desde el plan")
-    resolved = await _validate_input(session, space, data)
+    resolved = await _validate_input(session, space, data, current_event_id=txn.event_id)
     # TAR-05: the edited amount cannot overdraw the balance (excluding itself
     # and its current fee, which the edit replaces).
     current_fee = await get_fee(session, txn.id)
@@ -466,6 +476,7 @@ async def update_transaction(
     txn.account_id = data.account_id
     txn.account_to_id = data.account_to_id
     txn.amount_to = data.amount_to
+    txn.event_id = data.event_id  # EVT-02
     txn.updated_by = updated_by
     txn.needs_review = False  # REC-03: adjusting counts as reviewing.
 
@@ -548,6 +559,31 @@ async def delete_transaction(session: AsyncSession, space_id: uuid.UUID, txn_id:
     if old_statement_id is not None:
         await recompute_statement_total(session, old_statement_id)
     await session.commit()
+
+
+async def set_transaction_event(
+    session: AsyncSession,
+    space_id: uuid.UUID,
+    updated_by: uuid.UUID,
+    txn_id: uuid.UUID,
+    event_id: uuid.UUID | None,
+) -> Transaction:
+    """EVT-02: link/unlink a transaction to an event without a full edit. Works
+    for MSI parents too (their full edit is blocked by MSI-08); the fee row of a
+    transfer follows it (TXN-14)."""
+    from app.services.events import validate_event_link
+
+    txn = await get_transaction(session, space_id, txn_id)
+    _reject_fee_row(txn)
+    await validate_event_link(session, space_id, event_id, current_event_id=txn.event_id)
+    txn.event_id = event_id
+    txn.updated_by = updated_by
+    fee = await get_fee(session, txn.id)
+    if fee is not None:
+        fee.event_id = event_id
+    await session.commit()
+    await session.refresh(txn)
+    return txn
 
 
 async def confirm_transaction(

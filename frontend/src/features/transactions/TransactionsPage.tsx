@@ -3,8 +3,10 @@
 // TXN-11: aviso de posible duplicado + confirmación visual del alta.
 // TXN-12: búsqueda por descripción y periodo por mes o rango libre.
 // TAR-03/10: se paga con una cuenta y en su moneda. TXN-13/14: transferencias
-// entre monedas (monto recibido) y con comisión.
+// entre monedas (monto recibido) y con comisión. EVT-02/05: evento opcional
+// por movimiento y filtro por evento.
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useCategories } from "../../api/catalogs";
 import {
   hasBalance,
@@ -23,6 +25,7 @@ import {
   type TransactionBody,
   type TransactionOut,
 } from "../../api/transactions";
+import { useEvents, useSetTransactionEvent } from "../../api/events";
 import { useSpace } from "../spaces/SpaceProvider";
 import { formatMoney, impliedRate, isPositiveAmount } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
@@ -188,6 +191,33 @@ function TransferExtras({
   );
 }
 
+// EVT-02: selector de evento (solo activos; conserva el actual si ya está inactivo).
+function EventSelect({
+  id,
+  value,
+  onChange,
+  events,
+}: {
+  id?: string;
+  value: string;
+  onChange: (v: string) => void;
+  events: { id: string; name: string; is_active: boolean }[];
+}) {
+  return (
+    <select id={id} className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Sin evento</option>
+      {events
+        .filter((ev) => ev.is_active || ev.id === value)
+        .map((ev) => (
+          <option key={ev.id} value={ev.id}>
+            {ev.name}
+            {ev.is_active ? "" : " (inactivo)"}
+          </option>
+        ))}
+    </select>
+  );
+}
+
 export default function TransactionsPage() {
   const { activeSpace } = useSpace();
   const categories = useCategories();
@@ -209,6 +239,16 @@ export default function TransactionsPage() {
   const [feeAmount, setFeeAmount] = useState(""); // TXN-14
   const [formError, setFormError] = useState<string | null>(null);
   const [cycleHint, setCycleHint] = useState<"current" | "next" | null>(null);
+  // EVT-02: se conserva entre altas para capturar varios gastos del mismo evento.
+  const [eventId, setEventId] = useState("");
+  const eventsQuery = useEvents(true);
+  const eventList = useMemo(
+    () => (eventsQuery.data ?? []).map((e) => e.event),
+    [eventsQuery.data],
+  );
+  const eventById = useMemo(() => new Map(eventList.map((e) => [e.id, e])), [eventList]);
+  const hasActiveEvents = eventList.some((e) => e.is_active);
+  const setTxnEvent = useSetTransactionEvent();
 
   const [filterMode, setFilterMode] = useState<"month" | "range">("month");
   const [filterMonth, setFilterMonth] = useState(todayISO().slice(0, 7));
@@ -234,6 +274,9 @@ export default function TransactionsPage() {
   const [filterType, setFilterType] = useState("");
   const [filterCategoryId, setFilterCategoryId] = useState("");
   const [filterAccountId, setFilterAccountId] = useState("");
+  // EVT-05: `?evento=<id>` (desde la página de Eventos) abre el listado filtrado.
+  const [searchParams] = useSearchParams();
+  const [filterEventId, setFilterEventId] = useState(() => searchParams.get("evento") ?? "");
 
   const create = useCreateTransaction();
   const update = useUpdateTransaction();
@@ -253,6 +296,9 @@ export default function TransactionsPage() {
   const [editFeeAmount, setEditFeeAmount] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [editCycleHint, setEditCycleHint] = useState<"current" | "next" | null>(null);
+  const [editEventId, setEditEventId] = useState("");
+  // MSI-08: una compra MSI no se edita aquí; solo se le puede cambiar el evento.
+  const editingMsiParent = !!editingTxn?.installment_plan_id;
 
   function openEditModal(txn: TransactionOut) {
     setEditingTxn(txn);
@@ -267,12 +313,22 @@ export default function TransactionsPage() {
     setEditFeeAmount(txn.fee_amount ?? "");
     setEditError(null);
     setEditCycleHint(null);
+    setEditEventId(txn.event_id ?? "");
   }
 
   async function handleUpdate(e: FormEvent) {
     e.preventDefault();
     if (!editingTxn) return;
     setEditError(null);
+    if (editingMsiParent) {
+      try {
+        await setTxnEvent.mutateAsync({ id: editingTxn.id, event_id: editEventId || null });
+        setEditingTxn(null);
+      } catch (err) {
+        setEditError(err instanceof Error ? err.message : "Error al guardar");
+      }
+      return;
+    }
     if (!isPositiveAmount(editAmount)) {
       setEditError(
         editingTxn.needs_review
@@ -295,6 +351,7 @@ export default function TransactionsPage() {
         amount_to: editType === "transfer" && editCrossCurrency ? editAmountTo || null : null,
         fee_amount: editType === "transfer" && editFeeAmount ? editFeeAmount : null,
         cycle_hint: editCollision ? (editCycleHint ?? editCollision.defaultHint) : undefined,
+        event_id: editEventId || null, // EVT-02
       });
       setEditingTxn(null);
     } catch (err) {
@@ -329,18 +386,21 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     setListLimit(PAGE_SIZE);
-  }, [periodFilters, filterType, filterCategoryId, filterAccountId, debouncedSearch]);
+  }, [periodFilters, filterType, filterCategoryId, filterAccountId, filterEventId, debouncedSearch]);
 
   const list = useTransactions(
     {
-      ...periodFilters,
+      // EVT-05: un evento abarca varios meses; con el filtro de evento se
+      // listan todos sus movimientos, sin importar el periodo.
+      ...(filterEventId ? {} : periodFilters),
       type: filterType || undefined,
       category_id: filterCategoryId || undefined,
       account_id: filterAccountId || undefined,
+      event_id: filterEventId || undefined,
       q: debouncedSearch || undefined,
       limit: listLimit,
     },
-    { enabled: !invalidRange },
+    { enabled: !invalidRange || !!filterEventId },
   );
   const activePreset = useMemo(() => {
     if (filterMode !== "range") return null;
@@ -415,6 +475,7 @@ export default function TransactionsPage() {
       amount_to: crossCurrency ? amountTo || null : null,
       fee_amount: type === "transfer" && feeAmount ? feeAmount : null,
       cycle_hint: collision ? (cycleHint ?? collision.defaultHint) : undefined,
+      event_id: eventId || null, // EVT-02
     };
     // TXN-11: mismo tipo, fecha, monto, moneda, categoría y descripción
     // (la cuenta se ignora) ⇒ pedir confirmación antes de registrar.
@@ -590,7 +651,13 @@ export default function TransactionsPage() {
               setFee={setFeeAmount}
             />
           )}
-          <div className="col-span-2 md:col-span-3">
+          {(hasActiveEvents || eventId) && (
+            <div>
+              <label className="label" htmlFor="event">Evento</label>
+              <EventSelect id="event" value={eventId} onChange={setEventId} events={eventList} />
+            </div>
+          )}
+          <div className={`col-span-2 ${hasActiveEvents || eventId ? "md:col-span-2" : "md:col-span-3"}`}>
             <label className="label" htmlFor="description">Descripción</label>
             <input
               id="description"
@@ -695,7 +762,7 @@ export default function TransactionsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold tracking-tight">
               Movimientos
-              {list.data && !invalidRange && (
+              {list.data && (!invalidRange || filterEventId) && (
                 <span className="ml-2 text-xs font-normal text-ink-muted">
                   {list.data.total} {list.data.total === 1 ? "movimiento" : "movimientos"}
                 </span>
@@ -850,9 +917,38 @@ export default function TransactionsPage() {
               <option value="">Cuenta</option>
               <AccountOptions accounts={accountList} baseCurrency={activeSpace.base_currency} />
             </select>
+            {eventList.length > 0 && (
+              <select
+                className="input w-auto"
+                aria-label="Evento"
+                value={filterEventId}
+                onChange={(e) => setFilterEventId(e.target.value)}
+              >
+                <option value="">Evento</option>
+                {eventList.map((ev) => (
+                  <option key={ev.id} value={ev.id}>
+                    {ev.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
-        {invalidRange ? (
+        {filterEventId && (
+          <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
+            Mostrando todos los movimientos de{" "}
+            <strong className="text-ink">{eventById.get(filterEventId)?.name ?? "el evento"}</strong>,
+            sin importar el periodo.
+            <button
+              type="button"
+              className="font-medium text-accent hover:underline"
+              onClick={() => setFilterEventId("")}
+            >
+              Quitar filtro
+            </button>
+          </p>
+        )}
+        {invalidRange && !filterEventId ? (
           <p className="text-sm text-amber-700 dark:text-amber-300">
             La fecha inicial es posterior a la final. Ajusta el rango.
           </p>
@@ -912,6 +1008,11 @@ export default function TransactionsPage() {
                       ? ` → ${byId.accounts.get(t.account_to_id) ?? ""}`
                       : ""}
                     {t.fee_for_id ? " · comisión de transferencia" : ""}
+                    {t.event_id && eventById.get(t.event_id) && (
+                      <span className="ml-1.5 inline-flex items-center rounded-full bg-violet-500/15 px-1.5 py-px text-[11px] font-medium text-violet-800 dark:text-violet-200">
+                        {eventById.get(t.event_id)!.name}
+                      </span>
+                    )}
                   </p>
                   </div>
                 </div>
@@ -972,7 +1073,7 @@ export default function TransactionsPage() {
             ))}
           </ul>
         )}
-        {!invalidRange && list.data && list.data.items.length < list.data.total && (
+        {(!invalidRange || filterEventId) && list.data && list.data.items.length < list.data.total && (
           <div className="mt-4 flex justify-center">
             <button
               type="button"
@@ -1140,6 +1241,27 @@ export default function TransactionsPage() {
         title="Editar transacción"
         size="lg"
       >
+        {editingMsiParent ? (
+          <form onSubmit={handleUpdate} className="space-y-4">
+            <p className="text-sm text-ink-muted">
+              Es una compra a meses sin intereses: su monto y cuotas se ajustan desde{" "}
+              <strong>MSI</strong>. Aquí solo puedes ligarla a un evento.
+            </p>
+            <div>
+              <label className="label">Evento</label>
+              <EventSelect value={editEventId} onChange={setEditEventId} events={eventList} />
+            </div>
+            {editError && <p className="text-sm text-red-600 dark:text-red-400">{editError}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" className="btn-secondary" onClick={() => setEditingTxn(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primary" disabled={setTxnEvent.isPending}>
+                Guardar
+              </button>
+            </div>
+          </form>
+        ) : (
         <form onSubmit={handleUpdate} className="space-y-4">
           {/* Fila 1 — tipo */}
           <div className="flex flex-wrap gap-2">
@@ -1285,15 +1407,23 @@ export default function TransactionsPage() {
             </div>
           )}
 
-          {/* Fila 3 — Descripción (la moneda la define la cuenta, TAR-10) */}
-          <div>
-            <label className="label">Descripción</label>
-            <input
-              className="input"
-              placeholder="¿En qué fue?"
-              value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-            />
+          {/* Fila 3 — Descripción (la moneda la define la cuenta, TAR-10) y evento (EVT-02) */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className={eventList.length > 0 ? "col-span-2" : "col-span-3"}>
+              <label className="label">Descripción</label>
+              <input
+                className="input"
+                placeholder="¿En qué fue?"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+              />
+            </div>
+            {eventList.length > 0 && (
+              <div>
+                <label className="label">Evento</label>
+                <EventSelect value={editEventId} onChange={setEditEventId} events={eventList} />
+              </div>
+            )}
           </div>
 
           {editError && <p className="text-sm text-red-600 dark:text-red-400">{editError}</p>}
@@ -1306,6 +1436,7 @@ export default function TransactionsPage() {
             </button>
           </div>
         </form>
+        )}
       </Modal>
     </div>
   );

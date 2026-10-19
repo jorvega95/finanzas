@@ -13,11 +13,18 @@ interface Props {
   /** `null` cierra el modal. */
   nature: string | null;
   currency: string;
+  excludeEvents?: boolean; // EVT-04: mismo predicado que el pie
   onClose: () => void;
 }
 
-export default function NatureDetailModal({ month, nature, currency, onClose }: Props) {
-  const detail = useNatureDetail(month, nature);
+export default function NatureDetailModal({
+  month,
+  nature,
+  currency,
+  excludeEvents = false,
+  onClose,
+}: Props) {
+  const detail = useNatureDetail(month, nature, excludeEvents);
   const data = detail.data;
   const total = Number(data?.total ?? 0);
 

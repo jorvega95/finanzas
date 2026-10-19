@@ -14,6 +14,7 @@ from app.schemas.accounts import MoveCycle
 from app.schemas.transactions import (
     TransactionConfirm,
     TransactionCreate,
+    TransactionEventUpdate,
     TransactionListOut,
     TransactionOut,
     TransactionUpdate,
@@ -56,6 +57,7 @@ def _to_input(payload: TransactionCreate | TransactionUpdate) -> TransactionInpu
         fx_rate_override=payload.fx_rate_override,
         cycle_hint=payload.cycle_hint,
         target_statement_id=payload.target_statement_id,  # TXN-09
+        event_id=payload.event_id,  # EVT-02
     )
 
 
@@ -68,6 +70,7 @@ async def list_transactions(
     type: TransactionType | None = None,
     category_id: uuid.UUID | None = None,
     account_id: uuid.UUID | None = None,
+    event_id: uuid.UUID | None = None,
     needs_review: bool | None = None,
     q: str | None = Query(None, max_length=200),
     limit: int = 50,
@@ -89,6 +92,8 @@ async def list_transactions(
         filters.append(
             or_(Transaction.account_id == account_id, Transaction.account_to_id == account_id)
         )
+    if event_id is not None:
+        filters.append(Transaction.event_id == event_id)  # EVT-05
     if needs_review is not None:
         filters.append(Transaction.needs_review.is_(needs_review))
     if q is not None and q.strip():
@@ -163,6 +168,20 @@ async def delete_transaction(
 ) -> None:
     space, _ = space_and_member
     await svc.delete_transaction(db, space.id, txn_id)
+
+
+@router.patch("/{txn_id}/event", response_model=TransactionOut)
+async def set_event(
+    db: DbSession,
+    space_and_member: EditorSpace,
+    user: CurrentUser,
+    txn_id: uuid.UUID,
+    payload: TransactionEventUpdate,
+) -> TransactionOut:
+    """EVT-02: link/unlink one transaction to an event (MSI parents included)."""
+    space, _ = space_and_member
+    txn = await svc.set_transaction_event(db, space.id, user.id, txn_id, payload.event_id)
+    return await transaction_out(db, txn)
 
 
 @router.post("/{txn_id}/confirm", response_model=TransactionOut)

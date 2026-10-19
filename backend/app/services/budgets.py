@@ -50,10 +50,13 @@ async def _category_tree_ids(
     return [root_id, *children]
 
 
-async def budget_consumption(session: AsyncSession, space: Space, budget: Budget) -> Decimal:
+async def budget_consumption(
+    session: AsyncSession, space: Space, budget: Budget, exclude_events: bool = False
+) -> Decimal:
     """PRE-02: gastos del mes de la categoría (y subcategorías) en base,
     incluyendo cuotas MSI cargadas ese mes; transfers y madres MSI fuera
-    (vía expense_predicates de DSH-02)."""
+    (vía expense_predicates de DSH-02). `exclude_events` aplica EVT-04; las
+    alertas (PRE-03) usan siempre el consumo completo."""
     import calendar
 
     start = budget.month
@@ -63,11 +66,11 @@ async def budget_consumption(session: AsyncSession, space: Space, budget: Budget
 
     direct = await session.scalar(
         select(func.coalesce(func.sum(AMOUNT_BASE), 0)).where(
-            *expense_predicates(space.id, start, end, today),
+            *expense_predicates(space.id, start, end, today, exclude_events),
             Transaction.category_id.in_(category_ids),
         )
     )
-    sub = _msi_quota_query(space.id, start, end).subquery()
+    sub = _msi_quota_query(space.id, start, end, exclude_events).subquery()
     msi = await session.scalar(
         select(func.coalesce(func.sum(sub.c.amount_base), 0)).where(
             sub.c.category_id.in_(category_ids)
@@ -230,7 +233,7 @@ async def check_budget_alerts(session: AsyncSession, space: Space, month: dt.dat
 
 
 async def budgets_with_progress(
-    session: AsyncSession, space: Space, month: dt.date
+    session: AsyncSession, space: Space, month: dt.date, exclude_events: bool = False
 ) -> list[dict[str, Any]]:
     """PRE-04: presupuesto vs consumido (variación) por categoría."""
     budgets = (
@@ -243,7 +246,7 @@ async def budgets_with_progress(
     ).all()
     result = []
     for budget, category_name in budgets:
-        consumed = await budget_consumption(session, space, budget)
+        consumed = await budget_consumption(session, space, budget, exclude_events)
         result.append(
             {
                 "budget": budget,
