@@ -6,7 +6,13 @@
 // entre monedas (monto recibido) y con comisión.
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useCategories } from "../../api/catalogs";
-import { hasBalance, useAccounts, type AccountBehavior, type AccountOut } from "../../api/accounts";
+import {
+  hasBalance,
+  isLoan,
+  useAccounts,
+  type AccountBehavior,
+  type AccountOut,
+} from "../../api/accounts";
 import {
   fetchPossibleDuplicates,
   useConfirmTransaction,
@@ -92,6 +98,7 @@ const ACCOUNT_GROUPS: { label: string; behaviors: AccountBehavior[] }[] = [
   { label: "Efectivo y cuentas", behaviors: ["cash", "debit", "prepaid"] },
   { label: "Ahorro", behaviors: ["savings"] },
   { label: "Tarjetas de crédito", behaviors: ["credit"] },
+  { label: "Préstamos", behaviors: ["loan"] }, // TAR-11
 ];
 
 function AccountOptions({
@@ -379,10 +386,11 @@ export default function TransactionsPage() {
     [editDate, editAccount],
   );
 
-  // TXN-08: saldo disponible del origen (cuentas con saldo, TAR-05).
-  const transferFromBalance = account && hasBalance(account.behavior) ? account.balance : null;
-  const editTransferFromBalance =
-    editAccount && hasBalance(editAccount.behavior) ? editAccount.balance : null;
+  // TXN-08: saldo disponible del origen (cuentas con saldo, TAR-05). Un
+  // préstamo no tiene "disponible" (TAR-11).
+  const showsAvailable = (a: AccountOut | undefined) => !!a && hasBalance(a.behavior) && !isLoan(a.behavior);
+  const transferFromBalance = account && showsAvailable(account) ? account.balance : null;
+  const editTransferFromBalance = editAccount && showsAvailable(editAccount) ? editAccount.balance : null;
 
   // TDC-16: un ingreso a una tarjeta de crédito es un abono/devolución.
   const showIncomeWarning = type === "income" && account?.behavior === "credit";

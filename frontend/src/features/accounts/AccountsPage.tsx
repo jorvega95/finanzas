@@ -1,6 +1,7 @@
-// Cuentas (TAR-01..10): tarjetas de crédito con ciclos/deuda (TDC), cuentas con
-// saldo (débito, billeteras, vales, ahorro) y efectivo con saldo ajustable
-// (TAR-09). Alta con selector de tipo (CAT-08) y campos condicionales.
+// Cuentas (TAR-01..11): tarjetas de crédito con ciclos/deuda (TDC), cuentas con
+// saldo (débito, billeteras, vales, ahorro), efectivo con saldo ajustable
+// (TAR-09) y préstamos personales (TAR-11). Alta con selector de tipo (CAT-08)
+// y campos condicionales.
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -20,6 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   hasBalance,
+  isLoan,
   isPlastic,
   saveAccountLayoutRequest,
   useAccounts,
@@ -38,7 +40,7 @@ import {
   type StatementOut,
 } from "../../api/accounts";
 import { useAccountTypes } from "../../api/catalogs";
-import { formatMoney, isNegativeAmount, sumMoney } from "../../lib/money";
+import { formatMoney, isNegativeAmount, isPositiveAmount, subtractMoney, sumMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
@@ -59,6 +61,7 @@ const BEHAVIOR_LABELS: Record<AccountBehavior, string> = {
   prepaid: "Prepago / vales",
   savings: "Ahorro",
   credit: "Tarjeta de crédito",
+  loan: "Préstamo personal",
 };
 
 // Secciones de la página; el orden dentro de cada una respeta TAR-07.
@@ -73,6 +76,11 @@ const GROUPS: { title: string; hint: string; behaviors: AccountBehavior[] }[] = 
     title: "Tarjetas de crédito",
     hint: "Ciclos de corte, pagos y deuda.",
     behaviors: ["credit"],
+  },
+  {
+    title: "Préstamos",
+    hint: "Dinero que debes a alguien o que te deben; no cuenta como disponible.",
+    behaviors: ["loan"],
   },
 ];
 
@@ -148,6 +156,58 @@ function PlasticFields({
   );
 }
 
+// TAR-11: el saldo de un préstamo se captura como monto positivo + dirección y
+// se guarda con signo (negativo = debes, positivo = te deben).
+type LoanDirection = "owe" | "owed";
+
+function splitLoanBalance(balance: string | null): { direction: LoanDirection; amount: string } {
+  const value = balance ?? "0";
+  return isNegativeAmount(value)
+    ? { direction: "owe", amount: subtractMoney("0", value) }
+    : { direction: "owed", amount: isPositiveAmount(value) ? value : "" };
+}
+
+function signedLoanBalance(direction: LoanDirection, amount: string): string {
+  if (!amount) return "0";
+  return direction === "owe" ? subtractMoney("0", amount) : amount;
+}
+
+function LoanBalanceFields({
+  direction,
+  setDirection,
+  amount,
+  setAmount,
+}: {
+  direction: LoanDirection;
+  setDirection: (v: LoanDirection) => void;
+  amount: string;
+  setAmount: (v: string) => void;
+}) {
+  return (
+    <>
+      <div>
+        <label className="label">¿Quién debe?</label>
+        <select
+          className="input"
+          value={direction}
+          onChange={(e) => setDirection(e.target.value as LoanDirection)}
+        >
+          <option value="owe">Yo debo</option>
+          <option value="owed">Me deben</option>
+        </select>
+      </div>
+      <div>
+        <label className="label">Monto pendiente hoy</label>
+        <MoneyInput value={amount} onChange={setAmount} placeholder="0.00" />
+      </div>
+      <p className="col-span-2 self-end text-xs text-ink-muted md:col-span-2">
+        Si te van a prestar después, déjalo en 0 y registra una transferencia desde el préstamo
+        cuando recibas el dinero.
+      </p>
+    </>
+  );
+}
+
 function NewAccountForm({
   initialBehavior,
   onDone,
@@ -174,6 +234,7 @@ function NewAccountForm({
   const [openingBalance, setOpeningBalance] = useState("");
   const [initialBalance, setInitialBalance] = useState("");
   const [allowOverdraft, setAllowOverdraft] = useState(false);
+  const [loanDirection, setLoanDirection] = useState<LoanDirection>("owe"); // TAR-11
   const [design, setDesign] = useState<AccountDesign>({ color: null, image: null }); // TAR-08
 
   // Tipo inicial: el de la sección desde la que se abrió; si no, débito.
@@ -204,6 +265,9 @@ function NewAccountForm({
       if (dueDays) body.payment_due_days = Number(dueDays);
       if (limit) body.credit_limit = limit;
       if (openingBalance) body.opening_balance = openingBalance; // TDC-14
+    } else if (isLoan(behavior)) {
+      // TAR-11: sobregiro siempre permitido; el saldo lleva signo.
+      body.initial_balance = signedLoanBalance(loanDirection, initialBalance);
     } else {
       body.initial_balance = initialBalance || "0";
       if (behavior !== "cash") body.allow_overdraft = allowOverdraft; // TAR-09: cash siempre
@@ -216,7 +280,7 @@ function NewAccountForm({
       <div>
         <label className="label">Tipo</label>
         <select className="input" value={typeId} onChange={(e) => setTypeId(e.target.value)}>
-          {(["cash", "debit", "prepaid", "savings", "credit"] as AccountBehavior[]).map((b) => {
+          {(["cash", "debit", "prepaid", "savings", "credit", "loan"] as AccountBehavior[]).map((b) => {
             const group = types.filter((t) => t.behavior === b);
             if (group.length === 0) return null;
             return (
@@ -236,7 +300,15 @@ function NewAccountForm({
         <input
           className="input"
           required
-          placeholder={isCredit ? "BBVA Azul" : behavior === "cash" ? "Efectivo" : "XTRM, Mercado Pago…"}
+          placeholder={
+            isCredit
+              ? "BBVA Azul"
+              : behavior === "cash"
+                ? "Efectivo"
+                : isLoan(behavior)
+                  ? "Préstamo papás"
+                  : "XTRM, Mercado Pago…"
+          }
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
@@ -305,6 +377,13 @@ function NewAccountForm({
             <MoneyInput value={openingBalance} onChange={setOpeningBalance} placeholder="opcional" />
           </div>
         </>
+      ) : isLoan(behavior) ? (
+        <LoanBalanceFields
+          direction={loanDirection}
+          setDirection={setLoanDirection}
+          amount={initialBalance}
+          setAmount={setInitialBalance}
+        />
       ) : (
         <>
           <div className="col-span-2">
@@ -485,6 +564,10 @@ function EditAccountForm({ account, onDone }: { account: AccountOut; onDone: () 
   const [openingBalance, setOpeningBalance] = useState(account.opening_balance ?? "");
   const [initialBalance, setInitialBalance] = useState(account.initial_balance ?? "0");
   const [allowOverdraft, setAllowOverdraft] = useState(account.allow_overdraft);
+  // TAR-11: el saldo inicial del préstamo se edita como monto + dirección.
+  const initialLoan = splitLoanBalance(account.initial_balance);
+  const [loanDirection, setLoanDirection] = useState<LoanDirection>(initialLoan.direction);
+  const [loanAmount, setLoanAmount] = useState(initialLoan.amount);
   const [design, setDesign] = useState<AccountDesign>({ color: account.color, image: account.image });
 
   function handleSubmit(e: FormEvent) {
@@ -511,6 +594,8 @@ function EditAccountForm({ account, onDone }: { account: AccountOut; onDone: () 
       }
       body.credit_limit = limit || null;
       if (openingBalance) body.opening_balance = openingBalance; // TDC-14
+    } else if (isLoan(behavior)) {
+      body.initial_balance = signedLoanBalance(loanDirection, loanAmount); // TAR-11
     } else if (behavior !== "cash") {
       // TAR-09: el efectivo se ajusta con "Ajustar saldo", no con el saldo inicial.
       body.initial_balance = initialBalance || "0";
@@ -621,6 +706,19 @@ function EditAccountForm({ account, onDone }: { account: AccountOut; onDone: () 
             El saldo del efectivo se corrige con <strong>Ajustar saldo</strong> en la lista de
             cuentas. Puede quedar en negativo si registras más gastos de los que tenías.
           </p>
+        ) : isLoan(behavior) ? (
+          <>
+            <LoanBalanceFields
+              direction={loanDirection}
+              setDirection={setLoanDirection}
+              amount={loanAmount}
+              setAmount={setLoanAmount}
+            />
+            <p className="col-span-2 -mt-1 text-xs text-ink-muted md:col-span-4">
+              Es lo que se debía al empezar a registrar el préstamo; préstamos nuevos, abonos y
+              condonaciones se registran como movimientos.
+            </p>
+          </>
         ) : (
           <>
             <div className="col-span-2">
@@ -888,6 +986,29 @@ function SortableAccountRow({ account }: { account: AccountOut }) {
   );
 }
 
+// TAR-11: saldo del préstamo en lenguaje de deuda.
+function LoanBalance({ account }: { account: AccountOut }) {
+  const balance = account.balance ?? "0";
+  const owe = isNegativeAmount(balance);
+  const owed = isPositiveAmount(balance);
+  return (
+    <div className="rounded-lg border border-line bg-surface px-4 py-3">
+      <p className="text-xs text-ink-muted">{owe ? "Debes" : owed ? "Te deben" : "Préstamo"}</p>
+      <p
+        className={`tabular text-2xl font-semibold tracking-tight ${
+          owe ? "text-amber-700 dark:text-amber-300" : owed ? "text-emerald-700 dark:text-emerald-300" : ""
+        }`}
+      >
+        {owe || owed ? formatMoney(owe ? subtractMoney("0", balance) : balance, account.currency) : "Saldado"}
+      </p>
+      <p className="mt-1 text-xs text-ink-muted">
+        Recibir lo prestado o abonar: transferencia. Si te lo pagan directo a un tercero: gasto con
+        esta cuenta. Si te perdonan una parte: ingreso «Regalos recibidos».
+      </p>
+    </div>
+  );
+}
+
 function Stat({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
     <div className="rounded-lg border border-line bg-surface px-3 py-2.5">
@@ -1022,7 +1143,9 @@ function AccountItem({
             </div>
           )}
 
-          {hasBalance(account.behavior) && account.balance !== null && (
+          {isLoan(account.behavior) && account.balance !== null && <LoanBalance account={account} />}
+
+          {hasBalance(account.behavior) && !isLoan(account.behavior) && account.balance !== null && (
             <div className="rounded-lg border border-line bg-surface px-4 py-3">
               <p className="text-xs text-ink-muted">Saldo actual</p>
               <p
@@ -1085,7 +1208,15 @@ export default function AccountsPage() {
   const paySources = list.filter((a) => a.is_active && hasBalance(a.behavior));
 
   const balances = totalsByCurrency(
-    list.filter((a) => hasBalance(a.behavior)).map((a) => ({ currency: a.currency, amount: a.balance })),
+    list
+      .filter((a) => hasBalance(a.behavior) && !isLoan(a.behavior))
+      .map((a) => ({ currency: a.currency, amount: a.balance })),
+  );
+  // TAR-11: lo que debes en préstamos (solo saldos negativos, en positivo).
+  const loanDebts = totalsByCurrency(
+    list
+      .filter((a) => isLoan(a.behavior) && a.balance !== null && isNegativeAmount(a.balance))
+      .map((a) => ({ currency: a.currency, amount: subtractMoney("0", a.balance ?? "0") })),
   );
   const debts = totalsByCurrency(
     list
@@ -1161,7 +1292,7 @@ export default function AccountsPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="page-title">Cuentas</h1>
-          <p className="page-subtitle">Efectivo, débito, billeteras, ahorro y tarjetas de crédito.</p>
+          <p className="page-subtitle">Efectivo, débito, billeteras, ahorro, tarjetas de crédito y préstamos.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="mr-1 flex items-center gap-1.5 text-sm text-ink-muted">
@@ -1201,6 +1332,9 @@ export default function AccountsPage() {
           ))}
           {debts.map(([currency, total]) => (
             <Stat key={`d-${currency}`} label={`Deuda de tarjetas · ${currency}`} value={formatMoney(total, currency)} strong />
+          ))}
+          {loanDebts.map(([currency, total]) => (
+            <Stat key={`l-${currency}`} label={`Debes en préstamos · ${currency}`} value={formatMoney(total, currency)} strong />
           ))}
         </div>
       )}

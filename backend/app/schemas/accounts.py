@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.accounts import CutoffDayPolicy, StatementStatus
 from app.models.catalogs import AccountBehavior
 from app.models.msi import InstallmentStatus, PlanStatus
-from app.schemas.transactions import Money, MoneyNonNeg, MoneyOut
+from app.schemas.transactions import Money, MoneyNonNeg, MoneyOut, MoneySigned
 
 # TAR-08: account design. Hex base color and a front-image data URL (never the PAN:
 # TDC-01 — the UI warns; the backend only checks format and size).
@@ -37,8 +37,9 @@ class AccountCreate(BaseModel):
     credit_limit: Money | None = None
     reminder_days: list[int] | None = None  # REM-01, default [3, 1]
     opening_balance: MoneyNonNeg | None = None  # TDC-14: deuda del corte anterior
-    # TAR-05 balance fields. Opening balance may be zero.
-    initial_balance: MoneyNonNeg | None = None
+    # TAR-05 balance fields. Opening balance may be zero; only a loan's may be
+    # negative (TAR-11: what you owe), checked in the service.
+    initial_balance: MoneySigned | None = None
     allow_overdraft: bool = False  # TAR-09: ignored for cash (always allowed)
 
 
@@ -63,8 +64,8 @@ class AccountUpdate(BaseModel):
     credit_limit: Money | None = None
     reminder_days: list[int] | None = None
     opening_balance: MoneyNonNeg | None = None  # TDC-14: deuda del corte anterior
-    # Balance accounts (TAR-05):
-    initial_balance: MoneyNonNeg | None = None
+    # Balance accounts (TAR-05; negative only for a loan, TAR-11):
+    initial_balance: MoneySigned | None = None
     allow_overdraft: bool | None = None
     is_active: bool | None = None  # TDC-12
 

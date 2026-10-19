@@ -14,6 +14,7 @@ export const DEFAULT_CARD_COLOR = "#1f1f1f";
 const TILE_DEFAULTS: Record<AccountBehavior, { color: string; icon: IconName; label: string }> = {
   cash: { color: "#1f6b47", icon: "banknote", label: "Efectivo" },
   savings: { color: "#0f4c75", icon: "piggy", label: "Ahorro" },
+  loan: { color: "#6b2d5c", icon: "handshake", label: "Préstamo" },
   debit: { color: "#33316b", icon: "wallet", label: "Billetera" },
   prepaid: { color: "#7a4b00", icon: "wallet", label: "Prepago" },
   credit: { color: DEFAULT_CARD_COLOR, icon: "card", label: "Crédito" },

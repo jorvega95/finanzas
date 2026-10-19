@@ -27,6 +27,8 @@ const KIND_LABEL: Record<ForecastEvent["kind"], string> = {
   card_due: "Pago de tarjeta",
   recurring_expense: "Domiciliado",
   manual_expense: "Gasto programado",
+  loan_in: "Préstamo recibido",
+  loan_out: "Abono a préstamo",
 };
 
 const KIND_ICON: Record<ForecastEvent["kind"], IconName> = {
@@ -35,6 +37,8 @@ const KIND_ICON: Record<ForecastEvent["kind"], IconName> = {
   card_due: "card",
   recurring_expense: "refresh",
   manual_expense: "transactions",
+  loan_in: "handshake",
+  loan_out: "handshake",
 };
 
 export default function ForecastPage() {

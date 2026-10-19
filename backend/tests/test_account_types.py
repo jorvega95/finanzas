@@ -87,12 +87,14 @@ async def test_cat08_seed_account_types(client):
         "Tarjeta de regalo",
         "Efectivo",
         "Ahorro",
+        "Préstamo personal",  # TAR-11
     }
     assert sorted(ct["behavior"] for ct in types.values()) == [
         "cash",
         "credit",
         "debit",
         "debit",
+        "loan",
         "prepaid",
         "prepaid",
         "savings",

@@ -32,7 +32,14 @@ SEED_EXPENSE_CATEGORIES: list[tuple[str, ExpenseNature]] = [
     ("Regalos", ExpenseNature.discretionary),
     ("Otros", ExpenseNature.variable),
 ]
-SEED_INCOME_CATEGORIES: list[str] = ["Nómina", "Freelance", "Intereses", "Otros"]
+# "Regalos recibidos": cash gifts and loan forgiveness (TAR-11).
+SEED_INCOME_CATEGORIES: list[str] = [
+    "Nómina",
+    "Freelance",
+    "Intereses",
+    "Regalos recibidos",
+    "Otros",
+]
 # CAT-08: default account types. Name is free/editable; behavior is fixed.
 SEED_ACCOUNT_TYPES: list[tuple[str, AccountBehavior]] = [
     ("Crédito", AccountBehavior.credit),
@@ -42,6 +49,7 @@ SEED_ACCOUNT_TYPES: list[tuple[str, AccountBehavior]] = [
     ("Tarjeta de regalo", AccountBehavior.prepaid),
     ("Efectivo", AccountBehavior.cash),
     ("Ahorro", AccountBehavior.savings),
+    ("Préstamo personal", AccountBehavior.loan),  # TAR-11
 ]
 CASH_ACCOUNT_NAME = "Efectivo"  # CAT-02: seeded cash account (TAR-09).
 

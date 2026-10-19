@@ -1,4 +1,4 @@
-// Cuentas (TAR-01..10): tarjetas, efectivo, billeteras, ahorro; statements y
+// Cuentas (TAR-01..11): tarjetas, efectivo, billeteras, ahorro, préstamos; statements y
 // pagos de crédito (TDC-01..16, REM-04).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
@@ -11,11 +11,17 @@ export interface DebtSummary {
 }
 
 // CAT-08: clasificador de sistema del tipo de cuenta.
-export type AccountBehavior = "credit" | "debit" | "prepaid" | "cash" | "savings";
+export type AccountBehavior = "credit" | "debit" | "prepaid" | "cash" | "savings" | "loan";
 
 // TAR-01: todo lo que no es crédito lleva saldo (TAR-05).
 export function hasBalance(behavior: AccountBehavior | null | undefined): boolean {
   return behavior != null && behavior !== "credit";
+}
+
+// TAR-11: un préstamo lleva saldo, pero es deuda (negativo) o cuenta por cobrar
+// (positivo), nunca dinero disponible.
+export function isLoan(behavior: AccountBehavior | null | undefined): boolean {
+  return behavior === "loan";
 }
 
 // TAR-02: los datos de plástico (banco, red, last4) aplican a tarjetas.

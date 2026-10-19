@@ -52,6 +52,7 @@ def add_months(d: dt.date, months: int) -> dt.date:
 class _Event:
     date: dt.date
     kind: str  # income | recurring_income | card_due | recurring_expense | manual_expense
+    # | loan_in | loan_out (TAR-11)
     direction: str  # in | out
     description: str
     amount: Decimal  # base, magnitud positiva
@@ -106,8 +107,19 @@ async def _credit_account_ids(session: AsyncSession, space_id: uuid.UUID) -> set
     return set(rows.scalars().all())
 
 
-# PRO-02: cuentas líquidas; el ahorro y las inversiones no entran a la caja.
+# PRO-02: cuentas líquidas; el ahorro, los préstamos y las inversiones no entran a la caja.
 LIQUID_BEHAVIORS = (AccountBehavior.debit, AccountBehavior.prepaid, AccountBehavior.cash)
+
+
+async def _account_ids(
+    session: AsyncSession, space_id: uuid.UUID, behaviors: tuple[AccountBehavior, ...]
+) -> set[uuid.UUID]:
+    rows = await session.execute(
+        select(Account.id)
+        .join(AccountType, Account.account_type_id == AccountType.id)
+        .where(Account.space_id == space_id, AccountType.behavior.in_(behaviors))
+    )
+    return set(rows.scalars().all())
 
 
 async def _as_of_balance(
@@ -334,8 +346,10 @@ async def _income_events(
     today: dt.date,
     horizon_end: dt.date,
 ) -> list[_Event]:
-    """PRO-04: ingresos recurrentes (nómina) + ingresos futuros manuales."""
+    """PRO-04: ingresos recurrentes (nómina) + ingresos futuros manuales.
+    Un ingreso en un préstamo (condonación, TAR-11) no es flujo de caja."""
     events: list[_Event] = []
+    loan_ids = await _account_ids(session, space_id, (AccountBehavior.loan,))
     rules = (
         (
             await session.execute(
@@ -350,6 +364,8 @@ async def _income_events(
         .all()
     )
     for rule in rules:
+        if rule.account_id in loan_ids:
+            continue
         for occ in occurrences(rule, horizon_end):
             if occ <= today:
                 continue
@@ -384,6 +400,8 @@ async def _income_events(
         .all()
     )
     for txn in future:
+        if txn.account_id in loan_ids:
+            continue
         events.append(
             _Event(
                 date=txn.date,
@@ -405,11 +423,15 @@ async def _non_credit_expense_events(
     horizon_end: dt.date,
 ) -> list[_Event]:
     """PRO-03/TAR-04: salidas inmediatas (efectivo/débito/prepago): domiciliados
-    no-crédito + gastos futuros manuales sin statement."""
+    no-crédito + gastos futuros manuales sin statement. Un gasto que paga el
+    acreedor de un préstamo (TAR-11) no sale de tu caja."""
     events: list[_Event] = []
+    loan_ids = await _account_ids(session, space_id, (AccountBehavior.loan,))
     for rule, rule_credit_id in await _active_expense_rules(session, space_id):
         if rule_credit_id is not None:
             continue  # crédito: va al statement proyectado, no es flujo inmediato
+        if rule.account_id in loan_ids:
+            continue
         for occ in occurrences(rule, horizon_end):
             if occ <= today:
                 continue
@@ -443,6 +465,8 @@ async def _non_credit_expense_events(
         .all()
     )
     for txn in future:
+        if txn.account_id in loan_ids:
+            continue
         events.append(
             _Event(
                 date=txn.date,
@@ -451,6 +475,59 @@ async def _non_credit_expense_events(
                 description=txn.description or "Gasto",
                 amount=to_money(await rates.to_base(txn.amount, txn.currency)),
                 currency=txn.currency,
+            )
+        )
+    return events
+
+
+async def _loan_transfer_events(
+    session: AsyncSession,
+    rates: _RateCache,
+    space_id: uuid.UUID,
+    today: dt.date,
+    horizon_end: dt.date,
+) -> list[_Event]:
+    """PRO-03/TAR-11: transferencias futuras entre una cuenta líquida y un
+    préstamo. Abonar (líquida → préstamo) es salida; recibir lo prestado
+    (préstamo → líquida) es entrada, por el monto recibido (TXN-13)."""
+    loan_ids = await _account_ids(session, space_id, (AccountBehavior.loan,))
+    if not loan_ids:
+        return []
+    liquid_ids = await _account_ids(session, space_id, LIQUID_BEHAVIORS)
+    future = (
+        (
+            await session.execute(
+                select(Transaction).where(
+                    Transaction.space_id == space_id,
+                    Transaction.type == TransactionType.transfer,
+                    Transaction.date > today,
+                    Transaction.date <= horizon_end,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    events: list[_Event] = []
+    for txn in future:
+        if txn.account_id in liquid_ids and txn.account_to_id in loan_ids:
+            amount, currency, kind, direction = txn.amount, txn.currency, "loan_out", "out"
+        elif txn.account_id in loan_ids and txn.account_to_id in liquid_ids:
+            received = txn.amount_to if txn.amount_to is not None else txn.amount
+            target = await session.get(Account, txn.account_to_id)
+            currency = target.currency if target is not None else txn.currency
+            amount, kind, direction = received, "loan_in", "in"
+        else:
+            continue
+        events.append(
+            _Event(
+                date=txn.date,
+                kind=kind,
+                direction=direction,
+                description=txn.description
+                or ("Abono a préstamo" if direction == "out" else "Préstamo recibido"),
+                amount=to_money(await rates.to_base(amount, currency)),
+                currency=currency,
             )
         )
     return events
@@ -473,6 +550,7 @@ async def forecast(
     events: list[_Event] = []
     events += await _income_events(session, rates, space.id, today, horizon_end)
     events += await _non_credit_expense_events(session, rates, space.id, today, horizon_end)
+    events += await _loan_transfer_events(session, rates, space.id, today, horizon_end)
     for account in await _credit_cards(session, space.id):
         if not cycle_ready(account):
             continue  # TDC-15: sin día de corte no se proyectan ciclos

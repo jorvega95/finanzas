@@ -20,6 +20,7 @@ from app.core.dates import today_in_tz
 from app.core.text import normalize_name
 from app.models.accounts import Account, AccountLayout, Statement, StatementStatus
 from app.models.catalogs import (
+    ALWAYS_OVERDRAFT_BEHAVIORS,
     BALANCE_BEHAVIORS,
     AccountBehavior,
     AccountType,
@@ -385,6 +386,7 @@ async def create_account(
         "created_by": created_by,
     }
 
+    _validate_initial_balance(behavior, initial_balance)
     if behavior == AccountBehavior.credit:
         # TDC-15: cycle fields are optional and can be completed later via edit.
         if initial_balance is not None:
@@ -413,7 +415,8 @@ async def create_account(
         account = Account(
             **common,
             initial_balance=initial_balance if initial_balance is not None else ZERO,
-            allow_overdraft=True if behavior == AccountBehavior.cash else allow_overdraft,
+            # TAR-09/TAR-11: cash and loans always allow overdraft.
+            allow_overdraft=True if behavior in ALWAYS_OVERDRAFT_BEHAVIORS else allow_overdraft,
             reminder_days=[],
         )
     session.add(account)
@@ -425,6 +428,15 @@ async def create_account(
     await session.commit()
     await session.refresh(account)
     return account
+
+
+def _validate_initial_balance(behavior: AccountBehavior, value: Decimal | None) -> None:
+    """TAR-05/TAR-11: only a loan opens with a negative balance (what you owe)."""
+    if value is not None and value < ZERO and behavior != AccountBehavior.loan:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "El saldo inicial no puede ser negativo",
+        )
 
 
 async def update_account(
@@ -451,8 +463,10 @@ async def update_account(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "Una tarjeta de crédito no lleva saldo"
         )
-    if behavior == AccountBehavior.cash:
-        changes.pop("allow_overdraft", None)  # TAR-09: always allowed for cash.
+    if behavior in ALWAYS_OVERDRAFT_BEHAVIORS:
+        changes.pop("allow_overdraft", None)  # TAR-09/TAR-11: always allowed.
+    if "initial_balance" in changes:
+        _validate_initial_balance(behavior, changes["initial_balance"])  # type: ignore[arg-type]
     if "last4" in changes:
         _validate_last4(changes["last4"])
     if "name" in changes:
@@ -1114,6 +1128,7 @@ async def account_signed_balance(session: AsyncSession, account: Account) -> Dec
     """TAR-06: asset-perspective balance with sign.
 
     balance accounts → +account_balance() (asset; negative if overdrawn)
+    loan             → +account_balance() (negative = debt, positive = receivable)
     credit           → -(total_debt) (liability), null if not cycle-ready
     """
     behavior = await account_behavior(session, account)

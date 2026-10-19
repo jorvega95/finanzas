@@ -279,9 +279,9 @@ async def snapshot_portfolio(
 
 async def snapshot_net_worth(session: AsyncSession, space: Space) -> NetWorthSnapshot:
     """PAT-01/PAT-02: activos = portafolio + saldos de cuentas con saldo
-    (TAR-05); pasivos = deuda de tarjetas de crédito (TDC-09 a+b+c). Saldos y
-    deudas en moneda ≠ base se valúan a la tasa del día (FX-04). Idempotente
-    por día."""
+    (TAR-05) + préstamos que te deben (TAR-11); pasivos = deuda de tarjetas de
+    crédito (TDC-09 a+b+c) + préstamos que debes (TAR-11). Saldos y deudas en
+    moneda ≠ base se valúan a la tasa del día (FX-04). Idempotente por día."""
     from app.models.accounts import Account
     from app.models.catalogs import AccountBehavior, AccountType
     from app.services.accounts import account_balance, debt_summary
@@ -301,7 +301,9 @@ async def snapshot_net_worth(session: AsyncSession, space: Space) -> NetWorthSna
             .where(Account.space_id == space.id)
         )
     ).all()
-    liabilities = ZERO
+    card_debt = ZERO
+    loan_debt = ZERO
+    loans_receivable = ZERO
     account_balances = ZERO
     unvalued: set[str] = set()
     for account, behavior in accounts:
@@ -316,11 +318,18 @@ async def snapshot_net_worth(session: AsyncSession, space: Space) -> NetWorthSna
             unvalued.add(account.currency)
             continue
         if behavior == AccountBehavior.credit:
-            liabilities += valued
+            card_debt += valued
+        elif behavior == AccountBehavior.loan:
+            # TAR-11: negative = you owe (liability); positive = they owe you.
+            if valued < ZERO:
+                loan_debt -= valued
+            else:
+                loans_receivable += valued
         else:
             account_balances += valued
 
-    assets = portfolio_value + account_balances
+    assets = portfolio_value + account_balances + loans_receivable
+    liabilities = card_debt + loan_debt
 
     existing = await session.scalar(
         select(NetWorthSnapshot).where(
@@ -330,7 +339,9 @@ async def snapshot_net_worth(session: AsyncSession, space: Space) -> NetWorthSna
     breakdown: dict[str, Any] = {
         "portfolio": str(portfolio_value),
         "account_balances": str(account_balances),
-        "card_debt": str(liabilities),
+        "card_debt": str(card_debt),
+        "loan_debt": str(loan_debt),
+        "loans_receivable": str(loans_receivable),
     }
     if unvalued:
         breakdown["unvalued_currencies"] = sorted(unvalued)  # no rate known (FX-04)

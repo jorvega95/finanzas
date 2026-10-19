@@ -137,7 +137,7 @@ async def test_cat05_cannot_deactivate_last_active(client):
     """CAT-05: ni la última categoría activa de un kind ni la última cuenta."""
     ctx = await bootstrap_space(client)
     income = list(ctx["income_categories"].values())
-    assert len(income) == 4
+    assert len(income) == 5
     for cat in income[:-1]:
         res = await client.patch(
             f"/api/v1/catalogs/categories/{cat['id']}",

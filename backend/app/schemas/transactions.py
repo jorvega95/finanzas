@@ -25,6 +25,12 @@ MoneyNonNeg = Annotated[
     Field(ge=0, max_digits=14, decimal_places=2),
     PlainSerializer(lambda v: str(v), return_type=str, when_used="json"),
 ]
+# Signed money: a loan's opening balance is negative when you owe (TAR-11).
+MoneySigned = Annotated[
+    Decimal,
+    Field(max_digits=14, decimal_places=2),
+    PlainSerializer(lambda v: str(v), return_type=str, when_used="json"),
+]
 # Output-only money: may be zero or negative (e.g. statement credit, TDC-10).
 MoneyOut = Annotated[
     Decimal,

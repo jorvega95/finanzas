@@ -4,7 +4,14 @@ import { api } from "./client";
 
 export interface ForecastEvent {
   date: string;
-  kind: "income" | "recurring_income" | "card_due" | "recurring_expense" | "manual_expense";
+  kind:
+    | "income"
+    | "recurring_income"
+    | "card_due"
+    | "recurring_expense"
+    | "manual_expense"
+    | "loan_in" // TAR-11: recibes lo prestado
+    | "loan_out"; // TAR-11: abonas a un préstamo
   direction: "in" | "out";
   description: string;
   amount: string; // base, magnitud positiva

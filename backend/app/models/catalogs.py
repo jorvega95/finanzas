@@ -29,12 +29,23 @@ class AccountBehavior(enum.StrEnum):
     prepaid = "prepaid"  # vales/regalo: saldo (TAR-05)
     cash = "cash"  # efectivo: saldo ajustable, admite negativo (TAR-09)
     savings = "savings"  # ahorro: saldo, no líquido para el pronóstico (PRO-02)
+    loan = "loan"  # préstamo personal: saldo negativo = debes, positivo = te deben (TAR-11)
 
 
 # TAR-01: behaviors that carry a stored-value balance (everything but credit).
+# A loan (TAR-11) uses the same balance model, but its balance is a debt or a
+# receivable, never available money.
 BALANCE_BEHAVIORS = frozenset(
-    {AccountBehavior.debit, AccountBehavior.prepaid, AccountBehavior.cash, AccountBehavior.savings}
+    {
+        AccountBehavior.debit,
+        AccountBehavior.prepaid,
+        AccountBehavior.cash,
+        AccountBehavior.savings,
+        AccountBehavior.loan,
+    }
 )
+# TAR-09/TAR-11: behaviors whose overdraft is always allowed (not editable).
+ALWAYS_OVERDRAFT_BEHAVIORS = frozenset({AccountBehavior.cash, AccountBehavior.loan})
 
 
 class AccountType(Base, AuditMixin):

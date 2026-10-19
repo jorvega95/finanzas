@@ -69,7 +69,7 @@ async def test_cat02_seed_catalogs_on_personal_space(client, db_session):
         "Regalos",
         "Otros",
     }
-    assert income == {"Nómina", "Freelance", "Intereses", "Otros"}
+    assert income == {"Nómina", "Freelance", "Intereses", "Regalos recibidos", "Otros"}
     # CAT-03: every expense category carries a nature; income ones do not.
     assert all(c.expense_nature is not None for c in cats if c.kind == CategoryKind.expense)
     assert all(c.expense_nature is None for c in cats if c.kind == CategoryKind.income)
@@ -79,7 +79,7 @@ async def test_cat02_seed_catalogs_on_personal_space(client, db_session):
         .scalars()
         .all()
     )
-    assert len(types) == 7
+    assert len(types) == 8  # CAT-08 seed, incl. "Préstamo personal" (TAR-11)
     accounts = (
         (await db_session.execute(select(Account).where(Account.space_id == space_id)))
         .scalars()
