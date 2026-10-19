@@ -190,12 +190,21 @@ async def _check_sufficient_funds(
     does, TAR-09)."""
     if data.type == TransactionType.income:
         return
+    needed = data.amount + (data.fee_amount or ZERO)
+    await _ensure_funds(session, resolved, needed, exclude_txn_ids)
+
+
+async def _ensure_funds(
+    session: AsyncSession,
+    resolved: _Resolved,
+    needed: Decimal,
+    exclude_txn_ids: tuple[uuid.UUID, ...] = (),
+) -> None:
     if resolved.behavior not in BALANCE_BEHAVIORS or resolved.account.allow_overdraft:
         return
 
     from app.services.accounts import account_balance
 
-    needed = data.amount + (data.fee_amount or ZERO)
     available = await account_balance(session, resolved.account, exclude_txn_ids=exclude_txn_ids)
     if needed > available:
         raise _reject(f"Saldo insuficiente en {resolved.account.name} (disponible {available})")
@@ -549,11 +558,32 @@ async def confirm_transaction(
 ) -> Transaction:
     """REC-03: one-tap confirm from the review tray, optionally adjusting the
     amount (variable bills)."""
+    from app.services.accounts import recompute_statement_total
+
     txn = await get_transaction(session, space_id, txn_id)
-    if amount is not None:
+    _reject_fee_row(txn)  # TXN-14
+    if amount is not None and amount != txn.amount:
         if amount <= 0:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Monto inválido")
+        # Only a pending expense/income may change its amount here; transfers
+        # (TXN-09/13/14) and MSI purchases (MSI-08) go through their own flows.
+        if (
+            not txn.needs_review
+            or txn.type == TransactionType.transfer
+            or txn.installment_plan_id is not None
+        ):
+            raise _reject("Edita esta transacción para cambiar su monto")
+        if txn.type == TransactionType.expense:
+            # TAR-05: the confirmed amount cannot overdraw the account.
+            from app.services.accounts import account_behavior
+
+            account = await validate_account(session, space_id, txn.account_id)
+            resolved = _Resolved(account=account, behavior=await account_behavior(session, account))
+            await _ensure_funds(session, resolved, amount, exclude_txn_ids=(txn.id,))
         txn.amount = amount
+        await session.flush()
+        if txn.statement_id is not None:
+            await recompute_statement_total(session, txn.statement_id)  # TDC-05
     txn.needs_review = False
     await session.commit()
     await session.refresh(txn)

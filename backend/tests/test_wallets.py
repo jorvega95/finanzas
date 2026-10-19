@@ -345,3 +345,65 @@ async def test_txn09_13_usd_payment_to_mxn_card_applies_received_amount(client, 
         await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     assert next(s for s in statements if s["id"] == paid["id"])["paid_amount"] == "0.00"
+
+
+async def test_confirm_rejects_fee_rows_and_reviewed_amount_changes(client):
+    """TXN-14 / REC-03: confirm cannot rewrite a fee or an already-reviewed amount."""
+    ctx = await bootstrap_space(client)
+    res = await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "expense",
+            "date": "2026-06-01",
+            "amount": "100.00",
+            "currency": "MXN",
+            "description": "Ya revisado",
+            "category_id": ctx["categories"]["Comida"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
+        },
+    )
+    assert res.status_code == 201, res.text
+    txn_id = res.json()["id"]
+    res = await client.post(
+        f"/api/v1/transactions/{txn_id}/confirm",
+        headers=ctx["headers"],
+        json={"amount": "1.00"},
+    )
+    assert res.status_code == 422
+
+
+async def test_confirm_amount_respects_balance(client, db_session):
+    """TAR-05 / REC-03: a reviewed amount cannot overdraw a balance account."""
+    import uuid
+
+    from app.models.transactions import Transaction
+
+    ctx = await bootstrap_space(client)
+    bbva = await make_account(client, ctx, "Débito", "BBVA", initial_balance="100.00")
+    res = await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "expense",
+            "date": "2026-06-01",
+            "amount": "50.00",
+            "currency": "MXN",
+            "description": "Luz",
+            "category_id": ctx["categories"]["Comida"]["id"],
+            "account_id": bbva["id"],
+        },
+    )
+    assert res.status_code == 201, res.text
+    txn_id = res.json()["id"]
+    txn = await db_session.get(Transaction, uuid.UUID(txn_id))
+    txn.needs_review = True
+    await db_session.commit()
+
+    url = f"/api/v1/transactions/{txn_id}/confirm"
+    res = await client.post(url, headers=ctx["headers"], json={"amount": "150.00"})
+    assert res.status_code == 422
+    res = await client.post(url, headers=ctx["headers"], json={"amount": "100.00"})
+    assert res.status_code == 200, res.text
+    assert res.json()["amount"] == "100.00"
+    assert res.json()["needs_review"] is False
