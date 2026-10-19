@@ -8,11 +8,14 @@ import {
   useMsiPlans,
   useMsiProjection,
   useSettleMsiPlan,
+  type PlanSummaryOut,
 } from "../../api/msi";
 import { useAccounts } from "../../api/accounts";
 import { useCategories } from "../../api/catalogs";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
+import Icon from "../../components/ui/Icon";
+import Modal from "../../components/ui/Modal";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Activo",
@@ -20,7 +23,7 @@ const STATUS_LABELS: Record<string, string> = {
   settled_early: "Liquidado anticipado",
 };
 
-function ConvertSection() {
+function ConvertForm({ onDone }: { onDone: () => void }) {
   const txns = useTransactions({ type: "expense", limit: 100 });
   const accounts = useAccounts();
   const create = useCreateMsiPlan();
@@ -38,9 +41,8 @@ function ConvertSection() {
   const candidates = (txns.data?.items ?? []).filter((t) => creditAccountIds.has(t.account_id));
 
   return (
-    <section className="card p-5">
-      <h2 className="mb-1 text-base font-semibold tracking-tight">Convertir compra a MSI</h2>
-      <p className="mb-3 text-xs text-ink-muted">
+    <div>
+      <p className="mb-4 text-xs text-ink-muted">
         Elige una compra ya registrada con tarjeta y el número de meses.
       </p>
       <form
@@ -48,12 +50,12 @@ function ConvertSection() {
           e.preventDefault();
           create.mutate(
             { transaction_id: txnId, months: Number(months) },
-            { onSuccess: () => setTxnId("") },
+            { onSuccess: onDone },
           );
         }}
-        className="flex flex-wrap items-end gap-2"
+        className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]"
       >
-        <div className="min-w-64 flex-1">
+        <div>
           <label className="label">Compra</label>
           <select className="input" required value={txnId} onChange={(e) => setTxnId(e.target.value)}>
             <option value="">Selecciona…</option>
@@ -67,7 +69,7 @@ function ConvertSection() {
         <div>
           <label className="label">Meses</label>
           <input
-            className="input w-24"
+            className="input sm:w-24"
             type="number"
             min={2}
             max={60}
@@ -76,16 +78,23 @@ function ConvertSection() {
             onChange={(e) => setMonths(e.target.value)}
           />
         </div>
-        <button className="btn-primary" disabled={create.isPending}>Crear plan</button>
+        <div className="flex justify-end gap-2 sm:col-span-2">
+          <button type="button" className="btn-secondary" onClick={onDone}>
+            Cancelar
+          </button>
+          <button className="btn-primary" disabled={create.isPending}>
+            Crear plan
+          </button>
+        </div>
       </form>
       {create.error && (
         <p className="mt-2 text-sm text-red-600 dark:text-red-400">{create.error.message}</p>
       )}
-    </section>
+    </div>
   );
 }
 
-function BackfillSection() {
+function BackfillForm({ onDone }: { onDone: () => void }) {
   const accounts = useAccounts();
   const categories = useCategories();
   const create = useCreateMsiBackfill();
@@ -130,26 +139,13 @@ function BackfillSection() {
         category_id: form.category_id,
         current_is_charged: form.current_is_charged,
       },
-      {
-        onSuccess: () =>
-          setForm({
-            description: "",
-            monthly_amount: "",
-            currency: "MXN",
-            account_id: "",
-            current_number: "1",
-            total_months: "12",
-            category_id: "",
-            current_is_charged: true,
-          }),
-      },
+      { onSuccess: onDone },
     );
   }
 
   return (
-    <section className="card p-5">
-      <h2 className="mb-1 text-base font-semibold tracking-tight">Registrar MSI existente</h2>
-      <p className="mb-3 text-xs text-ink-muted">
+    <div>
+      <p className="mb-4 text-xs text-ink-muted">
         Registra una compra a meses que ya tenías antes de usar el sistema. Ingresa el cobro que
         aparece en tu estado de cuenta actual (ej. "Pago 6 de 12 · $2,692").
       </p>
@@ -254,16 +250,19 @@ function BackfillSection() {
               : `La cuota ${form.current_number} entrará al ciclo en curso como cobrada (🧾); las anteriores como pagadas.`}
           </p>
         </div>
-        <div className="sm:col-span-2">
+        <div className="flex justify-end gap-2 sm:col-span-2">
+          <button type="button" className="btn-secondary" onClick={onDone}>
+            Cancelar
+          </button>
           <button className="btn-primary" disabled={create.isPending}>
-            Registrar MSI existente
+            Registrar MSI
           </button>
         </div>
       </form>
       {create.error && (
         <p className="mt-2 text-sm text-red-600 dark:text-red-400">{create.error.message}</p>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -271,14 +270,19 @@ export default function MsiPage() {
   const plans = useMsiPlans();
   const projection = useMsiProjection();
   const settle = useSettleMsiPlan();
+  const [dialog, setDialog] = useState<"convert" | "backfill" | null>(null);
+  const closeDialog = () => setDialog(null);
 
-  const sortedPlans = useMemo(
-    () =>
-      [...(plans.data ?? [])].sort(
-        (a, b) => (a.charged_count + a.pending_count) - (b.charged_count + b.pending_count),
-      ),
-    [plans.data],
-  );
+  // Más avanzados primero (proporción de cuotas cubiertas); empate: menos cuotas restantes.
+  const sortedPlans = useMemo(() => {
+    const progress = (p: PlanSummaryOut) =>
+      p.plan.months ? (p.plan.months - p.charged_count - p.pending_count) / p.plan.months : 0;
+    return [...(plans.data ?? [])].sort(
+      (a, b) =>
+        progress(b) - progress(a) ||
+        a.charged_count + a.pending_count - (b.charged_count + b.pending_count),
+    );
+  }, [plans.data]);
 
   const projectionByMonth = useMemo(() => {
     const months = [...new Set((projection.data ?? []).map((r) => r.month))].sort();
@@ -288,10 +292,36 @@ export default function MsiPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <h1 className="page-title">Meses sin intereses</h1>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <h1 className="page-title">Meses sin intereses</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <button className="btn-secondary" onClick={() => setDialog("backfill")}>
+            <Icon name="plus" />
+            Registrar MSI existente
+          </button>
+          <button className="btn-primary" onClick={() => setDialog("convert")}>
+            <Icon name="plus" />
+            Convertir compra a MSI
+          </button>
+        </div>
+      </div>
 
-      <ConvertSection />
-      <BackfillSection />
+      <Modal
+        open={dialog === "convert"}
+        onClose={closeDialog}
+        title="Convertir compra a MSI"
+        size="lg"
+      >
+        <ConvertForm onDone={closeDialog} />
+      </Modal>
+      <Modal
+        open={dialog === "backfill"}
+        onClose={closeDialog}
+        title="Registrar MSI existente"
+        size="lg"
+      >
+        <BackfillForm onDone={closeDialog} />
+      </Modal>
 
       {sortedPlans.length === 0 ? (
         <div className="card grid h-40 place-items-center p-8 text-center text-sm text-ink-muted">
@@ -299,8 +329,9 @@ export default function MsiPage() {
         </div>
       ) : (
         sortedPlans.map((summary) => {
-          const done = summary.paid_count + summary.charged_count;
           const total = summary.plan.months;
+          // Cuotas canceladas por liquidación anticipada (MSI-07) cuentan como cubiertas.
+          const done = total - summary.charged_count - summary.pending_count;
           return (
             <section key={summary.plan.id} className="card p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">

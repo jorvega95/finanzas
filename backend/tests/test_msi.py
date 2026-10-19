@@ -219,6 +219,51 @@ async def test_msi07_settle_early(client):
 
 
 @freeze_time("2026-06-20 18:00:00")
+async def test_msi11_settled_plan_hidden_once_resolved(client):
+    """MSI-11 + MSI-07: un plan liquidado sigue visible mientras tenga una cuota
+    charged sin pagar; al pagarse queda resuelto (paid/canceled) y se oculta."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    debito = ctx["accounts"]["Débito"]["id"]
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "600.00")
+    plan = await make_plan(client, ctx, txn["id"], 3)
+    await close_cycles(client, ctx)  # cuota 1 paid, cuota 2 charged (ciclo abierto)
+
+    res = await client.post(
+        f"/api/v1/installment-plans/{plan['id']}/settle", headers=ctx["headers"]
+    )
+    assert res.status_code == 200
+    # Cuota 2 charged aún sin pagar -> el plan liquidado sigue visible.
+    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    assert len(plans) == 1
+    assert plans[0]["plan"]["status"] == "settled_early"
+    assert plans[0]["charged_count"] == 1
+
+    with freeze_time("2026-07-20 18:00:00"):
+        closed = await close_cycles(client, ctx)  # corte 15-jul: cuota 2 + liquidación
+        statement = next(st for st in closed if st["period_end"] == "2026-07-15")
+        await client.post(
+            f"/api/v1/accounts/{card['id']}/payments",
+            headers=ctx["headers"],
+            json={
+                "amount": statement["computed_total"],
+                "from_account_id": debito,
+                "date": "2026-07-21",
+                "statement_id": statement["id"],
+            },
+        )
+    # Cuotas 1-2 paid, cuota 3 canceled -> nada que dar seguimiento.
+    plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
+    assert plans == []
+
+    plans = (
+        await client.get("/api/v1/installment-plans?include_completed=true", headers=ctx["headers"])
+    ).json()
+    assert len(plans) == 1
+    assert plans[0]["plan"]["status"] == "settled_early"
+
+
+@freeze_time("2026-06-20 18:00:00")
 async def test_msi08_delete_purchase_rules(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)

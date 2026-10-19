@@ -9,7 +9,7 @@ from decimal import ROUND_FLOOR, Decimal
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -440,7 +440,17 @@ async def plans_summary(
         .where(InstallmentPlan.space_id == space_id)
     )
     if not include_completed:
-        stmt = stmt.where(InstallmentPlan.status != PlanStatus.completed)
+        # MSI-11: un plan resuelto (completed, o settled_early sin cuotas
+        # charged/pending) ya no tiene nada que dar seguimiento.
+        open_installment = (
+            select(Installment.id)
+            .where(
+                Installment.plan_id == InstallmentPlan.id,
+                Installment.status.in_([InstallmentStatus.pending, InstallmentStatus.charged]),
+            )
+            .exists()
+        )
+        stmt = stmt.where(or_(InstallmentPlan.status == PlanStatus.active, open_installment))
     plans = (
         (await session.execute(stmt.order_by(InstallmentPlan.start_date.desc())))
         .scalars()
