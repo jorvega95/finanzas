@@ -95,6 +95,14 @@ class ForecastAlert(BaseModel):
     shortfall: MoneyOut
 
 
+class UndatedCommitment(BaseModel):
+    """CXP-07: pending with a vendor that has no date (not in the series)."""
+
+    description: str
+    amount: MoneyOut  # base
+    currency: str
+
+
 class ForecastSummary(BaseModel):
     """PRO-01..06: pronóstico de flujo a futuro."""
 
@@ -109,6 +117,7 @@ class ForecastSummary(BaseModel):
     total_shortfall: MoneyOut
     events: list[ForecastEvent]
     alerts: list[ForecastAlert]
+    undated_commitments: list[UndatedCommitment] = []  # CXP-07
 
 
 class BudgetCreate(BaseModel):

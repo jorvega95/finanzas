@@ -14,6 +14,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.dates import today_in_tz
 from app.core.text import normalize_name
 from app.models.accounts import Account
 from app.models.catalogs import AccountBehavior, AccountType
@@ -111,13 +112,19 @@ async def update_event(session: AsyncSession, event: Event, changes: dict[str, A
 async def delete_event(session: AsyncSession, event: Event) -> None:
     """GLO-03: physical delete only without linked movements; otherwise 409 so
     the client deactivates it."""
+    from app.models.commitments import Commitment
+
     linked = await session.scalar(
         select(Transaction.id).where(Transaction.event_id == event.id).limit(1)
     )
+    if linked is None:
+        linked = await session.scalar(
+            select(Commitment.id).where(Commitment.event_id == event.id).limit(1)
+        )
     if linked is not None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "El evento tiene movimientos ligados; desactívalo en lugar de eliminarlo",
+            "El evento tiene movimientos o compromisos ligados; desactívalo en lugar de eliminarlo",
         )
     await session.delete(event)
     await session.commit()
@@ -142,7 +149,9 @@ async def event_summary(session: AsyncSession, space: Space, event: Event) -> di
     received = Σ linked incomes (cash gifts).
     net      = spent − received.
     """
+    from app.services import fx
     from app.services.accounts import account_balance
+    from app.services.commitments import list_commitments
 
     linked = [Transaction.space_id == space.id, Transaction.event_id == event.id]
     direct_rows = (
@@ -221,7 +230,18 @@ async def event_summary(session: AsyncSession, space: Space, event: Event) -> di
         for account in loan_accounts
     ]
 
+    # CXP-03: what is still owed to its vendors, in base at today's rate (it
+    # is a future payment, like PRO-06; amounts in base pass through).
+    today = today_in_tz(space.timezone)
+    pending_commitments = ZERO
+    for state in await list_commitments(session, space, event_id=event.id):
+        valued = await fx.mark_to_market(
+            session, state.pending, state.commitment.currency, space.base_currency, today
+        )
+        pending_commitments += valued if valued is not None else ZERO
+
     return {
+        "pending_commitments": to_money(pending_commitments),
         "spent": spent,
         "received": received_total,
         "net": spent - received_total,

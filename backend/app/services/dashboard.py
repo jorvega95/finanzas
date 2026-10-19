@@ -432,7 +432,8 @@ async def trend(
 async def upcoming_commitments(
     session: AsyncSession, space: Space, limit: int = 10
 ) -> list[dict[str, Any]]:
-    """DSH-05: statements por vencer, cuotas MSI próximas y recurrentes."""
+    """DSH-05: statements por vencer, cuotas MSI próximas, recurrentes y pagos
+    pendientes a proveedores (CXP-08)."""
     from app.services.recurring import occurrences
 
     today = today_in_tz(space.timezone)
@@ -522,6 +523,23 @@ async def upcoming_commitments(
                     "is_overdue": False,
                 }
             )
+
+    # CXP-08/DSH-05: payments still owed to vendors (dated ones only).
+    from app.services.commitments import pending_obligations
+
+    for obligation in await pending_obligations(session, space):
+        if obligation.due_date is None or obligation.due_date > horizon:
+            continue
+        items.append(
+            {
+                "kind": "commitment",
+                "date": obligation.due_date,
+                "description": f"Pago a {obligation.commitment.name}",
+                "amount": obligation.amount,
+                "ref_id": obligation.commitment.id,
+                "is_overdue": obligation.is_overdue,
+            }
+        )
 
     items.sort(key=lambda item: item["date"])
     return items[:limit]

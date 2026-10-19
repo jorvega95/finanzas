@@ -4,6 +4,7 @@ from app.api.v1 import (
     accounts,
     budgets,
     catalogs,
+    commitments,
     dashboard,
     events,
     imports,
@@ -26,5 +27,6 @@ api_router.include_router(investments.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(budgets.router)
 api_router.include_router(events.router)
+api_router.include_router(commitments.router)
 api_router.include_router(imports.router)
 api_router.include_router(notifications.router)

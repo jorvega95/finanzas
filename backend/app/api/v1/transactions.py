@@ -58,6 +58,7 @@ def _to_input(payload: TransactionCreate | TransactionUpdate) -> TransactionInpu
         cycle_hint=payload.cycle_hint,
         target_statement_id=payload.target_statement_id,  # TXN-09
         event_id=payload.event_id,  # EVT-02
+        commitment_id=payload.commitment_id,  # CXP-03
     )
 
 
@@ -71,6 +72,7 @@ async def list_transactions(
     category_id: uuid.UUID | None = None,
     account_id: uuid.UUID | None = None,
     event_id: uuid.UUID | None = None,
+    commitment_id: uuid.UUID | None = None,
     needs_review: bool | None = None,
     q: str | None = Query(None, max_length=200),
     limit: int = 50,
@@ -94,6 +96,8 @@ async def list_transactions(
         )
     if event_id is not None:
         filters.append(Transaction.event_id == event_id)  # EVT-05
+    if commitment_id is not None:
+        filters.append(Transaction.commitment_id == commitment_id)  # CXP-03
     if needs_review is not None:
         filters.append(Transaction.needs_review.is_(needs_review))
     if q is not None and q.strip():

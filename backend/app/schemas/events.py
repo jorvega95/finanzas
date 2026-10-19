@@ -56,6 +56,7 @@ class EventSummaryOut(BaseModel):
     received: MoneyOut
     net: MoneyOut
     budget_remaining: MoneyOut | None
+    pending_commitments: MoneyOut  # CXP-03: still owed to the event's vendors
     movements: int
     by_category: list[CategoryBreakdownRow]
     loans: list[EventLoanOut]

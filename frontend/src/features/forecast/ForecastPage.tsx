@@ -29,6 +29,7 @@ const KIND_LABEL: Record<ForecastEvent["kind"], string> = {
   manual_expense: "Gasto programado",
   loan_in: "Préstamo recibido",
   loan_out: "Abono a préstamo",
+  commitment: "Pago a proveedor",
 };
 
 const KIND_ICON: Record<ForecastEvent["kind"], IconName> = {
@@ -39,6 +40,7 @@ const KIND_ICON: Record<ForecastEvent["kind"], IconName> = {
   manual_expense: "transactions",
   loan_in: "handshake",
   loan_out: "handshake",
+  commitment: "party",
 };
 
 export default function ForecastPage() {
@@ -248,6 +250,23 @@ export default function ForecastPage() {
                   );
                 })}
               </ul>
+            )}
+            {/* CXP-07: lo pendiente sin fecha no entra a la serie; se avisa aparte. */}
+            {data.undated_commitments.length > 0 && (
+              <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">
+                <p className="font-medium">Pendientes con proveedores sin fecha (no están en la proyección):</p>
+                <ul className="mt-1 space-y-0.5">
+                  {data.undated_commitments.map((c, i) => (
+                    <li key={`${c.description}-${i}`} className="flex justify-between gap-3">
+                      <span>{c.description}</span>
+                      <span className="tabular font-medium">{formatMoney(c.amount, currency)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-xs">
+                  Ponles fecha o calendario en <strong>Compromisos</strong> para incluirlos.
+                </p>
+              </div>
             )}
           </section>
         </>

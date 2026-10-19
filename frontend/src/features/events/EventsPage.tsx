@@ -245,6 +245,22 @@ function EventCard({
         </div>
       )}
 
+      {/* CXP-03: lo que aún se debe a los proveedores del evento. */}
+      {isPositiveAmount(summary.pending_commitments) && (
+        <Link
+          to={`/compromisos?evento=${event.id}`}
+          className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm hover:bg-sky-500/15"
+        >
+          <span className="flex items-center gap-2 text-sky-900 dark:text-sky-200">
+            <Icon name="target" className="size-4" />
+            Por pagar a proveedores
+          </span>
+          <span className="tabular font-semibold">
+            {formatMoney(summary.pending_commitments, currency)}
+          </span>
+        </Link>
+      )}
+
       {/* TAR-11: préstamos usados para el evento, con su saldo actual. */}
       {summary.loans.length > 0 && (
         <ul className="mt-3 space-y-1.5">

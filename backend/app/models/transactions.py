@@ -1,4 +1,5 @@
-"""Transactions. Implements TXN-01..TXN-06, TXN-13/14, FX-03, REC-02/03, EVT-02, GLO-01/02/04."""
+"""Transactions. Implements TXN-01..TXN-06, TXN-13/14, FX-03, REC-02/03, EVT-02, CXP-03,
+GLO-01/02/04."""
 
 import datetime as dt
 import enum
@@ -88,6 +89,10 @@ class Transaction(Base, AuditMixin):
     # what counts as income/expense, TXN-02/MSI-03).
     event_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("events.id", ondelete="RESTRICT"), index=True
+    )
+    # CXP-03: an expense that is an abono to a vendor commitment.
+    commitment_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("commitments.id", ondelete="RESTRICT"), index=True
     )
 
     # TDC-05: billing cycle this charge (or payment, TDC-10) belongs to.

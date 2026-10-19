@@ -16,6 +16,7 @@ from app.models.catalogs import (
     CategoryKind,
     ExpenseNature,
 )
+from app.models.commitments import Commitment, CommitmentPayment
 from app.models.events import Event
 from app.models.fx import ExchangeRate
 from app.models.imports import ImportBatch, ImportStatus
@@ -56,6 +57,8 @@ __all__ = [
     "PortfolioSnapshot",
     "Category",
     "CategoryKind",
+    "Commitment",
+    "CommitmentPayment",
     "Event",
     "CutoffDayPolicy",
     "ExchangeRate",

@@ -4,7 +4,8 @@
 // TXN-12: búsqueda por descripción y periodo por mes o rango libre.
 // TAR-03/10: se paga con una cuenta y en su moneda. TXN-13/14: transferencias
 // entre monedas (monto recibido) y con comisión. EVT-02/05: evento opcional
-// por movimiento y filtro por evento.
+// por movimiento y filtro por evento. CXP-03: abonos a compromisos (filtro,
+// etiqueta y vínculo en la edición).
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useCategories } from "../../api/catalogs";
@@ -26,6 +27,7 @@ import {
   type TransactionOut,
 } from "../../api/transactions";
 import { useEvents, useSetTransactionEvent } from "../../api/events";
+import { useCommitments } from "../../api/commitments";
 import { useSpace } from "../spaces/SpaceProvider";
 import { formatMoney, impliedRate, isPositiveAmount } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
@@ -249,6 +251,12 @@ export default function TransactionsPage() {
   const eventById = useMemo(() => new Map(eventList.map((e) => [e.id, e])), [eventList]);
   const hasActiveEvents = eventList.some((e) => e.is_active);
   const setTxnEvent = useSetTransactionEvent();
+  const commitmentsQuery = useCommitments(true);
+  const commitmentList = useMemo(() => commitmentsQuery.data ?? [], [commitmentsQuery.data]);
+  const commitmentById = useMemo(
+    () => new Map(commitmentList.map((c) => [c.id, c])),
+    [commitmentList],
+  );
 
   const [filterMode, setFilterMode] = useState<"month" | "range">("month");
   const [filterMonth, setFilterMonth] = useState(todayISO().slice(0, 7));
@@ -277,6 +285,10 @@ export default function TransactionsPage() {
   // EVT-05: `?evento=<id>` (desde la página de Eventos) abre el listado filtrado.
   const [searchParams] = useSearchParams();
   const [filterEventId, setFilterEventId] = useState(() => searchParams.get("evento") ?? "");
+  // CXP-03: `?compromiso=<id>` lista los abonos de un compromiso.
+  const [filterCommitmentId, setFilterCommitmentId] = useState(
+    () => searchParams.get("compromiso") ?? "",
+  );
 
   const create = useCreateTransaction();
   const update = useUpdateTransaction();
@@ -297,6 +309,7 @@ export default function TransactionsPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const [editCycleHint, setEditCycleHint] = useState<"current" | "next" | null>(null);
   const [editEventId, setEditEventId] = useState("");
+  const [editCommitmentId, setEditCommitmentId] = useState(""); // CXP-03
   // MSI-08: una compra MSI no se edita aquí; solo se le puede cambiar el evento.
   const editingMsiParent = !!editingTxn?.installment_plan_id;
 
@@ -314,6 +327,7 @@ export default function TransactionsPage() {
     setEditError(null);
     setEditCycleHint(null);
     setEditEventId(txn.event_id ?? "");
+    setEditCommitmentId(txn.commitment_id ?? "");
   }
 
   async function handleUpdate(e: FormEvent) {
@@ -352,6 +366,8 @@ export default function TransactionsPage() {
         fee_amount: editType === "transfer" && editFeeAmount ? editFeeAmount : null,
         cycle_hint: editCollision ? (editCycleHint ?? editCollision.defaultHint) : undefined,
         event_id: editEventId || null, // EVT-02
+        // CXP-03: solo un gasto puede ser abono; el vínculo se conserva al editar.
+        commitment_id: editType === "expense" ? editCommitmentId || null : null,
       });
       setEditingTxn(null);
     } catch (err) {
@@ -386,21 +402,32 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     setListLimit(PAGE_SIZE);
-  }, [periodFilters, filterType, filterCategoryId, filterAccountId, filterEventId, debouncedSearch]);
+  }, [
+    periodFilters,
+    filterType,
+    filterCategoryId,
+    filterAccountId,
+    filterEventId,
+    filterCommitmentId,
+    debouncedSearch,
+  ]);
+  // EVT-05/CXP-03: un evento o un compromiso abarca varios meses.
+  const spansPeriods = !!filterEventId || !!filterCommitmentId;
 
   const list = useTransactions(
     {
       // EVT-05: un evento abarca varios meses; con el filtro de evento se
       // listan todos sus movimientos, sin importar el periodo.
-      ...(filterEventId ? {} : periodFilters),
+      ...(spansPeriods ? {} : periodFilters),
       type: filterType || undefined,
       category_id: filterCategoryId || undefined,
       account_id: filterAccountId || undefined,
       event_id: filterEventId || undefined,
+      commitment_id: filterCommitmentId || undefined,
       q: debouncedSearch || undefined,
       limit: listLimit,
     },
-    { enabled: !invalidRange || !!filterEventId },
+    { enabled: !invalidRange || spansPeriods },
   );
   const activePreset = useMemo(() => {
     if (filterMode !== "range") return null;
@@ -762,7 +789,7 @@ export default function TransactionsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold tracking-tight">
               Movimientos
-              {list.data && (!invalidRange || filterEventId) && (
+              {list.data && (!invalidRange || spansPeriods) && (
                 <span className="ml-2 text-xs font-normal text-ink-muted">
                   {list.data.total} {list.data.total === 1 ? "movimiento" : "movimientos"}
                 </span>
@@ -934,21 +961,35 @@ export default function TransactionsPage() {
             )}
           </div>
         </div>
-        {filterEventId && (
+        {spansPeriods && (
           <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-            Mostrando todos los movimientos de{" "}
-            <strong className="text-ink">{eventById.get(filterEventId)?.name ?? "el evento"}</strong>,
-            sin importar el periodo.
+            {filterCommitmentId ? (
+              <>
+                Mostrando los abonos a{" "}
+                <strong className="text-ink">
+                  {commitmentById.get(filterCommitmentId)?.name ?? "el compromiso"}
+                </strong>
+              </>
+            ) : (
+              <>
+                Mostrando todos los movimientos de{" "}
+                <strong className="text-ink">{eventById.get(filterEventId)?.name ?? "el evento"}</strong>
+              </>
+            )}
+            , sin importar el periodo.
             <button
               type="button"
               className="font-medium text-accent hover:underline"
-              onClick={() => setFilterEventId("")}
+              onClick={() => {
+                setFilterEventId("");
+                setFilterCommitmentId("");
+              }}
             >
               Quitar filtro
             </button>
           </p>
         )}
-        {invalidRange && !filterEventId ? (
+        {invalidRange && !spansPeriods ? (
           <p className="text-sm text-amber-700 dark:text-amber-300">
             La fecha inicial es posterior a la final. Ajusta el rango.
           </p>
@@ -1008,6 +1049,11 @@ export default function TransactionsPage() {
                       ? ` → ${byId.accounts.get(t.account_to_id) ?? ""}`
                       : ""}
                     {t.fee_for_id ? " · comisión de transferencia" : ""}
+                    {t.commitment_id && commitmentById.get(t.commitment_id) && (
+                      <span className="ml-1.5 inline-flex items-center rounded-full bg-sky-500/15 px-1.5 py-px text-[11px] font-medium text-sky-800 dark:text-sky-200">
+                        Abono · {commitmentById.get(t.commitment_id)!.name}
+                      </span>
+                    )}
                     {t.event_id && eventById.get(t.event_id) && (
                       <span className="ml-1.5 inline-flex items-center rounded-full bg-violet-500/15 px-1.5 py-px text-[11px] font-medium text-violet-800 dark:text-violet-200">
                         {eventById.get(t.event_id)!.name}
@@ -1073,7 +1119,7 @@ export default function TransactionsPage() {
             ))}
           </ul>
         )}
-        {(!invalidRange || filterEventId) && list.data && list.data.items.length < list.data.total && (
+        {(!invalidRange || spansPeriods) && list.data && list.data.items.length < list.data.total && (
           <div className="mt-4 flex justify-center">
             <button
               type="button"
@@ -1425,6 +1471,30 @@ export default function TransactionsPage() {
               </div>
             )}
           </div>
+          {editType === "expense" && (commitmentList.some((c) => c.status === "pending") || editCommitmentId) && (
+            <div>
+              <label className="label">Abono a compromiso</label>
+              <select
+                className="input"
+                value={editCommitmentId}
+                onChange={(e) => {
+                  setEditCommitmentId(e.target.value);
+                  // CXP-03: el abono toma el evento de su compromiso.
+                  const c = commitmentById.get(e.target.value);
+                  if (c?.event_id) setEditEventId(c.event_id);
+                }}
+              >
+                <option value="">No es abono</option>
+                {commitmentList
+                  .filter((c) => c.status === "pending" || c.id === editCommitmentId)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} · pendiente {formatMoney(c.pending, c.currency)}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
 
           {editError && <p className="text-sm text-red-600 dark:text-red-400">{editError}</p>}
           <div className="flex justify-end gap-2 pt-1">

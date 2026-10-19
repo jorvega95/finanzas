@@ -20,7 +20,7 @@ export interface TrendPoint extends Totals {
 }
 
 export interface UpcomingItem {
-  kind: "card_due" | "msi_quota" | "recurring";
+  kind: "card_due" | "msi_quota" | "recurring" | "commitment"; // CXP-08
   date: string;
   description: string;
   amount: string;

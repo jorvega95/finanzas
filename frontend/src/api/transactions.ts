@@ -22,6 +22,7 @@ export interface TransactionOut {
   recurring_rule_id: string | null;
   needs_review: boolean;
   event_id: string | null; // EVT-02
+  commitment_id: string | null; // CXP-03: abono a un compromiso
   installment_plan_id: string | null; // MSI-03: compra MSI (madre)
 }
 
@@ -37,6 +38,7 @@ export interface TransactionFilters {
   category_id?: string;
   account_id?: string; // TXN-10: movements touching the account
   event_id?: string; // EVT-05
+  commitment_id?: string; // CXP-03
   needs_review?: boolean;
   q?: string; // TXN-12: búsqueda por descripción
   limit?: number;
@@ -57,6 +59,7 @@ export interface TransactionBody {
   cycle_hint?: "current" | "next" | null; // TDC-05a
   target_statement_id?: string | null; // TXN-09: explicit statement for TDC payment
   event_id?: string | null; // EVT-02
+  commitment_id?: string | null; // CXP-03
 }
 
 export interface DuplicateQuery {
@@ -95,7 +98,16 @@ export function fetchPossibleDuplicates(query: DuplicateQuery): Promise<Transact
 function useInvalidateTransactions() {
   const qc = useQueryClient();
   return () =>
-    ["transactions", "accounts", "statements", "budgets", "forecast", "events", "dashboard"].forEach(
+    [
+      "transactions",
+      "accounts",
+      "statements",
+      "budgets",
+      "forecast",
+      "events",
+      "dashboard",
+      "commitments",
+    ].forEach(
       (k) => void qc.invalidateQueries({ queryKey: [k] }),
     );
 }

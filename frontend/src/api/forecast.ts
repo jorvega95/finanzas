@@ -11,7 +11,8 @@ export interface ForecastEvent {
     | "recurring_expense"
     | "manual_expense"
     | "loan_in" // TAR-11: recibes lo prestado
-    | "loan_out"; // TAR-11: abonas a un préstamo
+    | "loan_out" // TAR-11: abonas a un préstamo
+    | "commitment"; // CXP-07: pago pendiente a un proveedor
   direction: "in" | "out";
   description: string;
   amount: string; // base, magnitud positiva
@@ -40,6 +41,8 @@ export interface ForecastSummary {
   total_shortfall: string;
   events: ForecastEvent[];
   alerts: ForecastAlert[];
+  // CXP-07: pendientes con proveedores sin fecha (no entran a la serie).
+  undated_commitments: { description: string; amount: string; currency: string }[];
 }
 
 export function useForecast(horizonMonths: number, cashAdjustment: string) {

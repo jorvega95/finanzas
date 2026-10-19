@@ -14,6 +14,7 @@ import Icon, { type IconName } from "./ui/Icon";
 const KIND_ICON: Record<NotificationOut["kind"], IconName> = {
   card_due: "card",
   budget_alert: "target",
+  commitment_due: "party", // CXP-08: pago a proveedor
   custom: "bell",
 };
 

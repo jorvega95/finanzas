@@ -74,6 +74,7 @@ async def _summary_out(db: DbSession, space: Space, event: Event) -> EventSummar
         received=summary["received"],
         net=summary["net"],
         budget_remaining=summary["budget_remaining"],
+        pending_commitments=summary["pending_commitments"],
         movements=summary["movements"],
         by_category=[CategoryBreakdownRow(**row) for row in summary["by_category"]],
         loans=[EventLoanOut.model_validate(loan) for loan in summary["loans"]],

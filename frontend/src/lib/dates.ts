@@ -15,3 +15,9 @@ export function formatDate(iso: string): string {
   if (!iso || iso.length < 10) return iso ?? "";
   return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 }
+
+/** Hoy como `YYYY-MM-DD` en la fecha local del dispositivo (GLO-02). */
+export function todayISO(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}

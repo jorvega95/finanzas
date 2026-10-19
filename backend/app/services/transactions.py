@@ -1,5 +1,5 @@
 """Transaction services. Implements TXN-01..TXN-14, TAR-03/05/10, FX-03,
-REC-03 (discard), EVT-02 (event link).
+REC-03 (discard), EVT-02 (event link), CXP-03 (abonos).
 
 GLO-01: Decimal everywhere. GLO-02: pure dates. GLO-05: space-scoped.
 """
@@ -52,6 +52,7 @@ class TransactionInput:
     cycle_hint: str | None = None  # TDC-05a: "current" | "next" | None
     target_statement_id: uuid.UUID | None = None  # TXN-09: explicit statement for TDC payment
     event_id: uuid.UUID | None = None  # EVT-02
+    commitment_id: uuid.UUID | None = None  # CXP-03: abono to a vendor commitment
 
 
 async def _validate_category(
@@ -138,13 +139,29 @@ async def _validate_input(
     session: AsyncSession,
     space: Space,
     data: TransactionInput,
-    current_event_id: uuid.UUID | None = None,
+    current: Transaction | None = None,
 ) -> _Resolved:
-    """Shared TXN-01/02/13/14 + TAR-10 + EVT-02 validation; resolves the accounts."""
+    """Shared TXN-01/02/13/14 + TAR-10 + EVT-02 + CXP-03 validation; resolves
+    the accounts. `current` is the transaction being edited, if any."""
     from app.services.accounts import account_behavior
+    from app.services.commitments import validate_abono
     from app.services.events import validate_event_link
 
-    await validate_event_link(session, space.id, data.event_id, current_event_id)
+    # CXP-03 first: an abono inherits its commitment's event.
+    data.event_id = await validate_abono(
+        session,
+        space.id,
+        commitment_id=data.commitment_id,
+        txn_type=data.type,
+        currency=data.currency,
+        amount=data.amount,
+        event_id=data.event_id,
+        txn_id=current.id if current is not None else None,
+        current_commitment_id=current.commitment_id if current is not None else None,
+    )
+    await validate_event_link(
+        session, space.id, data.event_id, current.event_id if current is not None else None
+    )
     if data.currency not in SUPPORTED_CURRENCIES:
         raise _reject(f"Moneda no soportada: {data.currency}")
     _validate_date(data.date, space)
@@ -370,7 +387,10 @@ async def create_transaction(
     recurring_rule_id: uuid.UUID | None = None,
     scheduled_date: date | None = None,
     needs_review: bool = False,
+    commit: bool = True,
 ) -> Transaction:
+    """`commit=False` leaves the transaction flushed so a caller can create
+    several movements atomically (CXP-04)."""
     from app.services.accounts import apply_card_payment, recompute_statement_total
 
     resolved = await _validate_input(session, space, data)
@@ -393,6 +413,7 @@ async def create_transaction(
         account_to_id=data.account_to_id,
         amount_to=data.amount_to,
         event_id=data.event_id,  # EVT-02
+        commitment_id=data.commitment_id,  # CXP-03
         recurring_rule_id=recurring_rule_id,
         scheduled_date=scheduled_date,
         needs_review=needs_review,
@@ -412,9 +433,25 @@ async def create_transaction(
         await apply_card_payment(session, space, resolved.target, txn, data.target_statement_id)
     if data.type == TransactionType.transfer and data.fee_amount is not None:
         await _create_fee(session, space, created_by, txn, resolved, data.fee_amount)
+    await _sync_commitment_reminders(session, space, [txn.commitment_id])
+    if not commit:
+        await session.flush()
+        return txn
     await session.commit()
     await session.refresh(txn)
     return txn
+
+
+async def _sync_commitment_reminders(
+    session: AsyncSession, space: Space, commitment_ids: Sequence[uuid.UUID | None]
+) -> None:
+    """CXP-08: an abono can cover (or uncover) a scheduled payment."""
+    from app.services.commitments import sync_reminders
+
+    ids = {cid for cid in commitment_ids if cid is not None}
+    if ids:
+        await session.flush()
+        await sync_reminders(session, space, ids)
 
 
 def _reject_fee_row(txn: Transaction) -> None:
@@ -446,7 +483,8 @@ async def update_transaction(
     # the plan UI (adjust cuota by cuota); block direct editing here.
     if txn.installment_plan_id is not None:
         raise _reject("Esta transacción tiene un plan MSI activo; ajusta las cuotas desde el plan")
-    resolved = await _validate_input(session, space, data, current_event_id=txn.event_id)
+    resolved = await _validate_input(session, space, data, current=txn)
+    old_commitment_id = txn.commitment_id
     # TAR-05: the edited amount cannot overdraw the balance (excluding itself
     # and its current fee, which the edit replaces).
     current_fee = await get_fee(session, txn.id)
@@ -477,6 +515,7 @@ async def update_transaction(
     txn.account_to_id = data.account_to_id
     txn.amount_to = data.amount_to
     txn.event_id = data.event_id  # EVT-02
+    txn.commitment_id = data.commitment_id  # CXP-03
     txn.updated_by = updated_by
     txn.needs_review = False  # REC-03: adjusting counts as reviewing.
 
@@ -507,6 +546,7 @@ async def update_transaction(
     await _drop_fee(session, txn)
     if data.type == TransactionType.transfer and data.fee_amount is not None:
         await _create_fee(session, space, updated_by, txn, resolved, data.fee_amount)
+    await _sync_commitment_reminders(session, space, [old_commitment_id, txn.commitment_id])
 
     await session.commit()
     await session.refresh(txn)
@@ -554,10 +594,14 @@ async def delete_transaction(session: AsyncSession, space_id: uuid.UUID, txn_id:
             session.add(
                 RecurringTombstone(rule_id=txn.recurring_rule_id, scheduled_date=txn.scheduled_date)
             )
+    commitment_id = txn.commitment_id
     await session.delete(txn)
     await session.flush()
     if old_statement_id is not None:
         await recompute_statement_total(session, old_statement_id)
+    space = await session.get(Space, space_id)
+    if space is not None:
+        await _sync_commitment_reminders(session, space, [commitment_id])  # CXP-08
     await session.commit()
 
 
@@ -575,6 +619,13 @@ async def set_transaction_event(
 
     txn = await get_transaction(session, space_id, txn_id)
     _reject_fee_row(txn)
+    if txn.commitment_id is not None:
+        # CXP-03: an abono belongs to its commitment's event.
+        from app.models.commitments import Commitment
+
+        commitment = await session.get(Commitment, txn.commitment_id)
+        if commitment is not None and commitment.event_id not in (None, event_id):
+            raise _reject("Un abono pertenece al evento de su compromiso")
     await validate_event_link(session, space_id, event_id, current_event_id=txn.event_id)
     txn.event_id = event_id
     txn.updated_by = updated_by

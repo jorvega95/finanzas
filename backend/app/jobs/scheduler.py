@@ -41,6 +41,7 @@ async def run_card_close_job() -> None:
     from app.core.dates import today_in_tz
     from app.services.accounts import close_due_statements
     from app.services.budgets import check_budget_alerts
+    from app.services.commitments import sync_reminders
     from app.services.reminders import fire_due_reminders
 
     async with SessionLocal() as session:
@@ -51,6 +52,9 @@ async def run_card_close_job() -> None:
                 today = today_in_tz(space.timezone)
                 # PRE-03: evaluate current-month budget alerts (idempotent).
                 await check_budget_alerts(session, space, today.replace(day=1))
+                # CXP-08: vendor payment reminders (idempotent).
+                await sync_reminders(session, space)
+                await session.commit()
                 await fire_due_reminders(session, today)
             except Exception:
                 logger.exception("account close job failed for space %s", space.id)

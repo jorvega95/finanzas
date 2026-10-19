@@ -39,6 +39,7 @@ const KIND_ICONS: Record<string, IconName> = {
   card_due: "card",
   msi_quota: "calendar",
   recurring: "refresh",
+  commitment: "party", // CXP-08: pago a proveedor
 };
 
 function currentMonth(): string {

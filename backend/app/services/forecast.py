@@ -52,7 +52,7 @@ def add_months(d: dt.date, months: int) -> dt.date:
 class _Event:
     date: dt.date
     kind: str  # income | recurring_income | card_due | recurring_expense | manual_expense
-    # | loan_in | loan_out (TAR-11)
+    # | loan_in | loan_out (TAR-11) | commitment (CXP-07)
     direction: str  # in | out
     description: str
     amount: Decimal  # base, magnitud positiva
@@ -533,6 +533,48 @@ async def _loan_transfer_events(
     return events
 
 
+async def _commitment_events(
+    session: AsyncSession,
+    rates: _RateCache,
+    space: Space,
+    today: dt.date,
+    horizon_end: dt.date,
+) -> tuple[list[_Event], list[dict[str, Any]]]:
+    """CXP-07: what is still owed to vendors. Uncovered schedule rows on their
+    date (overdue ones today); the unscheduled pending on `due_date`; without
+    any date it is reported apart and doesn't enter the series. Future abonos
+    already captured count as paid, so nothing is projected twice."""
+    from app.services.commitments import pending_obligations
+
+    events: list[_Event] = []
+    undated: list[dict[str, Any]] = []
+    for item in await pending_obligations(session, space):
+        amount = to_money(await rates.to_base(item.amount, item.commitment.currency))
+        if item.due_date is None:
+            undated.append(
+                {
+                    "description": item.commitment.name,
+                    "amount": amount,
+                    "currency": item.commitment.currency,
+                }
+            )
+            continue
+        when = max(item.due_date, today)
+        if when > horizon_end:
+            continue
+        events.append(
+            _Event(
+                date=when,
+                kind="commitment",
+                direction="out",
+                description=f"Pago a {item.commitment.name}",
+                amount=amount,
+                currency=item.commitment.currency,
+            )
+        )
+    return events, undated
+
+
 async def forecast(
     session: AsyncSession,
     space: Space,
@@ -551,6 +593,10 @@ async def forecast(
     events += await _income_events(session, rates, space.id, today, horizon_end)
     events += await _non_credit_expense_events(session, rates, space.id, today, horizon_end)
     events += await _loan_transfer_events(session, rates, space.id, today, horizon_end)
+    commitment_events, undated_commitments = await _commitment_events(
+        session, rates, space, today, horizon_end
+    )
+    events += commitment_events
     for account in await _credit_cards(session, space.id):
         if not cycle_ready(account):
             continue  # TDC-15: sin día de corte no se proyectan ciclos
@@ -608,4 +654,5 @@ async def forecast(
             for e in events
         ],
         "alerts": alerts,
+        "undated_commitments": undated_commitments,  # CXP-07
     }

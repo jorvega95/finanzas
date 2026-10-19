@@ -14,6 +14,7 @@ from app.models.base import TimestampMixin
 class ReminderKind(enum.StrEnum):
     card_due = "card_due"
     budget_alert = "budget_alert"
+    commitment_due = "commitment_due"  # CXP-08
     custom = "custom"
 
 

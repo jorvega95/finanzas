@@ -27,6 +27,7 @@ export interface EventSummary {
   received: string;
   net: string;
   budget_remaining: string | null;
+  pending_commitments: string; // CXP-03: lo que aún se debe a sus proveedores
   movements: number;
   by_category: CategoryRow[];
   loans: EventLoan[];

@@ -4,7 +4,7 @@ import { api } from "./client";
 
 export interface NotificationOut {
   id: string;
-  kind: "card_due" | "budget_alert" | "custom";
+  kind: "card_due" | "budget_alert" | "commitment_due" | "custom"; // CXP-08
   ref_id: string;
   fire_at: string;
   channel: "in_app" | "email";
