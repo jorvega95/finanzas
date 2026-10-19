@@ -13,7 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dates import today_in_tz
-from app.models.catalogs import Category, PaymentMethod
+from app.models.accounts import Account
+from app.models.catalogs import Category
 from app.models.recurring import RecurringFrequency, RecurringRule, RecurringTombstone
 from app.models.spaces import Space
 from app.models.transactions import Transaction, TransactionType
@@ -123,13 +124,9 @@ async def generate_due_instances(session: AsyncSession, space: Space) -> int:
     for rule in rules:
         # REC-04: rules pointing at deactivated catalog entries auto-pause.
         category = await session.get(Category, rule.category_id) if rule.category_id else None
-        method = (
-            await session.get(PaymentMethod, rule.payment_method_id)
-            if rule.payment_method_id
-            else None
-        )
+        account = await session.get(Account, rule.account_id)
         if (category is not None and not category.is_active) or (
-            method is not None and not method.is_active
+            account is not None and not account.is_active
         ):
             rule.is_active = False
             await session.commit()
@@ -169,7 +166,7 @@ async def generate_due_instances(session: AsyncSession, space: Space) -> int:
                     currency=rule.currency,
                     description=rule.description,
                     category_id=rule.category_id,
-                    payment_method_id=rule.payment_method_id,
+                    account_id=rule.account_id,
                 ),
                 recurring_rule_id=rule.id,
                 scheduled_date=scheduled,

@@ -121,26 +121,27 @@ space_invites         space_id, email, role, token, expires_at
 categories            id, space_id, name, icon, color, kind(expense|income),
                       expense_nature(fixed|variable|discretionary|null),
                       parent_id (subcategorías), is_active
-payment_methods       id, space_id, name, type(cash|debit|credit_card|transfer|other),
-                      credit_card_id (nullable), is_active
-
-credit_cards          id, space_id, alias, bank, network, last4,
-                      credit_limit, statement_day (1-28 o 'last'),
+account_types         id, space_id, name, behavior(credit|debit|prepaid|cash|savings),
+                      is_system, is_active                              (CAT-08)
+accounts              id, space_id, account_type_id, name, bank?, network?, last4?,
+                      currency, initial_balance?, allow_overdraft,
+                      credit_limit?, statement_day (1-28 o 'last'),
                       cutoff_day_policy(include|next_cycle),
-                      payment_due_days (o payment_day), is_active
-card_statements      id, credit_card_id, period_start, period_end,
+                      payment_due_days (o payment_day), color, image, is_active
+                      (TAR; sustituye a cards + payment_methods, migración 0017)
+statements            id, account_id, period_start, period_end,
                       due_date, computed_total, paid_amount, status
 
 transactions          id, space_id, type(expense|income|transfer),
                       date, description, amount, currency,
-                      category_id, payment_method_id, credit_card_id?,
-                      installment_plan_id?, recurring_rule_id?,
-                      notes, created_by, created_at
+                      category_id, account_id, account_to_id?, amount_to?,
+                      fee_for_id?, installment_plan_id?, recurring_rule_id?,
+                      notes, created_by, created_at       (TXN-13/14: amount_to, fee_for_id)
 recurring_rules       id, space_id, template(jsonb), frequency, next_run,
                       end_date?, is_active                              (R9)
 exchange_rates        base, quote, rate, date            (R11; fuente: Banxico/API FX)
 
-installment_plans     id, space_id, credit_card_id, transaction_id,
+installment_plans     id, space_id, account_id, transaction_id,
                       total_amount, months, monthly_amount, start_date, status
 installments          id, plan_id, number, amount, estimated_charge_date,
                       statement_id?, status(pending|charged|paid)
@@ -181,7 +182,7 @@ finanzas/
 │   │   ├── models/                  # modelos SQLAlchemy (1 archivo por dominio)
 │   │   ├── schemas/                 # Pydantic (request/response)
 │   │   ├── api/v1/                  # routers: spaces, catalogs, transactions,
-│   │   │                            #   cards, installments, investments, dashboard
+│   │   │                            #   accounts, installments, investments, dashboard
 │   │   ├── services/                # lógica: billing_cycles, msi, dashboard,
 │   │   │                            #   prices (PriceProvider → CoinGecko|CMC), fx (R11),
 │   │   │                            #   recurring (R9), budgets (R10),
@@ -195,7 +196,7 @@ finanzas/
 ├── frontend/
 │   ├── src/
 │   │   ├── api/                     # cliente generado desde OpenAPI + TanStack Query
-│   │   ├── features/                # transactions/, catalogs/, cards/, msi/,
+│   │   ├── features/                # transactions/, catalogs/, accounts/, msi/,
 │   │   │                            #   investments/, dashboard/, spaces/, settings/
 │   │   ├── components/ui/           # shadcn/ui
 │   │   ├── lib/                     # formato de moneda, fechas

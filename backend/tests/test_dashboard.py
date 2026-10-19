@@ -7,7 +7,7 @@ from freezegun import freeze_time
 
 from app.models.fx import ExchangeRate
 from tests.conftest import bootstrap_space
-from tests.test_cards import charge, close_cycles, create_card
+from tests.test_accounts import charge, close_cycles, create_card
 
 
 async def summary(client, ctx, month="2026-06"):
@@ -23,9 +23,11 @@ async def add_expense(client, ctx, amount, date_str="2026-06-05", category="Comi
         "amount": amount,
         "currency": "MXN",
         "category_id": ctx["categories"][category]["id"],
-        "payment_method_id": ctx["methods"]["Efectivo"]["id"],
+        "account_id": ctx["accounts"]["Efectivo"]["id"],
     }
     body.update(kw)
+    if body["currency"] == "USD" and "account_id" not in kw:
+        body["account_id"] = ctx["accounts"]["Dólares"]["id"]  # TAR-10
     res = await client.post("/api/v1/transactions", headers=ctx["headers"], json=body)
     assert res.status_code == 201, res.text
     return res.json()
@@ -47,7 +49,7 @@ async def test_dsh02_totals_exclude_transfers_and_future(client):
             "amount": "8000.00",
             "currency": "MXN",
             "category_id": ctx["categories"]["Nómina"]["id"],
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
         },
     )
     # Transfer (no debe sumar — TXN-02).
@@ -59,8 +61,8 @@ async def test_dsh02_totals_exclude_transfers_and_future(client):
             "date": "2026-06-02",
             "amount": "1000.00",
             "currency": "MXN",
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
-            "payment_method_to_id": ctx["methods"]["Efectivo"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
+            "account_to_id": ctx["accounts"]["Efectivo"]["id"],
         },
     )
     # Futura dentro del mes (25-jun > hoy 20-jun): excluida hasta su fecha.
@@ -78,7 +80,7 @@ async def test_dsh02_msi_case4_full_dashboard(client):
     refleja 1,000, no 12,000, y ningún agregado suma 13,000."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "12000.00", "Laptop")
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "12000.00", "Laptop")
     res = await client.post(
         "/api/v1/installment-plans",
         headers=ctx["headers"],
@@ -102,7 +104,7 @@ async def test_dsh04_accrued_spending(client):
     en su fecha; el pago del statement (transfer) nunca toca los agregados."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    await charge(client, ctx, card["payment_method_id"], "2026-06-10", "500.00")
+    await charge(client, ctx, card["id"], "2026-06-10", "500.00")
     await add_expense(client, ctx, "200.00")  # efectivo: gasto inmediato
     closed = await close_cycles(client, ctx)
 
@@ -112,11 +114,11 @@ async def test_dsh04_accrued_spending(client):
 
     # Pago de tarjeta: es transfer (TXN-02), no altera el gasto devengado.
     await client.post(
-        f"/api/v1/cards/{card['id']}/payments",
+        f"/api/v1/accounts/{card['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "500.00",
-            "from_payment_method_id": ctx["methods"]["Débito"]["id"],
+            "from_account_id": ctx["accounts"]["Débito"]["id"],
             "date": "2026-06-20",
             "statement_id": closed[0]["id"],
         },
@@ -157,8 +159,8 @@ async def test_dsh05_upcoming_commitments(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
     # Statement por vencer.
-    await charge(client, ctx, card["payment_method_id"], "2026-06-10", "500.00")
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-12", "300.00", "Cel")
+    await charge(client, ctx, card["id"], "2026-06-10", "500.00")
+    txn = await charge(client, ctx, card["id"], "2026-06-12", "300.00", "Cel")
     await client.post(
         "/api/v1/installment-plans",
         headers=ctx["headers"],
@@ -175,7 +177,7 @@ async def test_dsh05_upcoming_commitments(client):
             "currency": "MXN",
             "description": "Spotify",
             "category_id": ctx["categories"]["Entretenimiento"]["id"],
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
             "frequency": "monthly",
             "start_date": "2026-01-25",
             "month_day": 25,
@@ -231,8 +233,8 @@ async def test_dsh06_detail_matches_pie(client):
             "date": "2026-06-02",
             "amount": "1000.00",
             "currency": "MXN",
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
-            "payment_method_to_id": ctx["methods"]["Efectivo"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
+            "account_to_id": ctx["accounts"]["Efectivo"]["id"],
         },
     )
 
@@ -251,7 +253,7 @@ async def test_dsh06_detail_matches_pie(client):
     assert [i["kind"] for i in variable["items"]] == ["transaction", "transaction"]
     # Ordenado por monto desc.
     assert [i["amount"] for i in variable["items"]] == ["100.00", "50.00"]
-    assert variable["items"][0]["payment_method_name"] == "Efectivo"
+    assert variable["items"][0]["account_name"] == "Efectivo"
     assert variable["items"][0]["original_amount"] is None  # ya está en base
 
     fixed = await nature_detail(client, ctx, "fixed")
@@ -279,7 +281,7 @@ async def test_dsh06_msi_quota_not_parent(client):
     """DSH-06 + MSI-03: el detalle lista la CUOTA (1,000), nunca la madre."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "12000.00", "Laptop")
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "12000.00", "Laptop")
     res = await client.post(
         "/api/v1/installment-plans",
         headers=ctx["headers"],

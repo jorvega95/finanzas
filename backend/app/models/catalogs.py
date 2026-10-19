@@ -1,4 +1,4 @@
-"""Categories and payment methods. Implements CAT-01..CAT-07, GLO-03, GLO-05."""
+"""Categories and account types. Implements CAT-01..CAT-08, GLO-03, GLO-05."""
 
 import enum
 import uuid
@@ -21,29 +21,28 @@ class ExpenseNature(enum.StrEnum):
     discretionary = "discretionary"
 
 
-class PaymentMethodType(enum.StrEnum):
-    cash = "cash"
-    debit = "debit"
-    credit_card = "credit_card"
-    prepaid = "prepaid"  # CAT-07: vales/regalo y demás prepago
-    transfer = "transfer"
-    other = "other"
-
-
-class CardBehavior(enum.StrEnum):
-    """CAT-08: system classifier driving the card engine (TAR-01)."""
+class AccountBehavior(enum.StrEnum):
+    """CAT-08: system classifier driving the account engine (TAR-01)."""
 
     credit = "credit"  # deuda, ciclos, statements, MSI (TDC)
-    debit = "debit"  # saldo de valor almacenado (TAR-05)
-    prepaid = "prepaid"  # vales/regalo: saldo de valor almacenado (TAR-05)
+    debit = "debit"  # cuenta bancaria / billetera digital: saldo (TAR-05)
+    prepaid = "prepaid"  # vales/regalo: saldo (TAR-05)
+    cash = "cash"  # efectivo: saldo ajustable, admite negativo (TAR-09)
+    savings = "savings"  # ahorro: saldo, no líquido para el pronóstico (PRO-02)
 
 
-class CardType(Base, AuditMixin):
-    """CAT-08: per-space catalog of card types. The name is free/editable;
+# TAR-01: behaviors that carry a stored-value balance (everything but credit).
+BALANCE_BEHAVIORS = frozenset(
+    {AccountBehavior.debit, AccountBehavior.prepaid, AccountBehavior.cash, AccountBehavior.savings}
+)
+
+
+class AccountType(Base, AuditMixin):
+    """CAT-08: per-space catalog of account types. The name is free/editable;
     the behavior is a fixed system classifier the engine depends on."""
 
-    __tablename__ = "card_types"
-    __table_args__ = (UniqueConstraint("space_id", "name_normalized", name="uq_card_type_name"),)
+    __tablename__ = "account_types"
+    __table_args__ = (UniqueConstraint("space_id", "name_normalized", name="uq_account_type_name"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     space_id: Mapped[uuid.UUID] = mapped_column(
@@ -51,8 +50,8 @@ class CardType(Base, AuditMixin):
     )
     name: Mapped[str] = mapped_column(String(60), nullable=False)
     name_normalized: Mapped[str] = mapped_column(String(60), nullable=False)
-    behavior: Mapped[CardBehavior] = mapped_column(
-        Enum(CardBehavior, name="card_behavior", native_enum=False, length=10),
+    behavior: Mapped[AccountBehavior] = mapped_column(
+        Enum(AccountBehavior, name="account_behavior", native_enum=False, length=10),
         nullable=False,
     )
     icon: Mapped[str | None] = mapped_column(String(40))
@@ -94,25 +93,3 @@ class Category(Base, AuditMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     parent: Mapped["Category | None"] = relationship(remote_side=[id])
-
-
-class PaymentMethod(Base, AuditMixin):
-    __tablename__ = "payment_methods"
-    __table_args__ = (
-        # CAT-01: unique per space, accent/case-insensitive.
-        UniqueConstraint("space_id", "name_normalized", name="uq_payment_method_name"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    space_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    name: Mapped[str] = mapped_column(String(60), nullable=False)
-    name_normalized: Mapped[str] = mapped_column(String(60), nullable=False)
-    type: Mapped[PaymentMethodType] = mapped_column(
-        Enum(PaymentMethodType, name="payment_method_type", native_enum=False, length=15),
-        nullable=False,
-    )
-    # CAT-07/TAR-03: a card-linked method references its card (any type).
-    card_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

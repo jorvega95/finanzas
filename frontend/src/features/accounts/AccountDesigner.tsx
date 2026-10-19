@@ -1,11 +1,12 @@
-// TAR-08: editor del diseño de la tarjeta — color base (paleta o libre) y/o una
+// TAR-08: editor del diseño de la cuenta — color base (paleta o libre) y/o una
 // imagen del frente, con vista previa en vivo. La imagen se recorta a la
 // proporción de tarjeta y se comprime en el navegador antes de enviarse.
 import { useRef, useState, type ChangeEvent } from "react";
 import Icon from "../../components/ui/Icon";
-import CardVisual, { CARD_RATIO, DEFAULT_CARD_COLOR } from "./CardVisual";
+import type { AccountBehavior } from "../../api/accounts";
+import AccountVisual, { CARD_RATIO, defaultColorFor, looksLikeCard } from "./AccountVisual";
 
-export interface CardDesign {
+export interface AccountDesign {
   color: string | null;
   image: string | null;
 }
@@ -74,17 +75,25 @@ async function toCardDataUrl(file: File): Promise<string> {
   throw new Error("La imagen es demasiado grande incluso comprimida");
 }
 
-interface CardDesignerProps {
-  value: CardDesign;
-  onChange: (next: CardDesign) => void;
-  preview: { alias: string; bank: string; network: string; last4: string };
+interface AccountDesignerProps {
+  value: AccountDesign;
+  onChange: (next: AccountDesign) => void;
+  preview: {
+    name: string;
+    bank: string;
+    network: string;
+    last4: string;
+    currency: string;
+    behavior: AccountBehavior | null;
+  };
 }
 
-export default function CardDesigner({ value, onChange, preview }: CardDesignerProps) {
+export default function AccountDesigner({ value, onChange, preview }: AccountDesignerProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const current = value.color ?? DEFAULT_CARD_COLOR;
+  const current = value.color ?? defaultColorFor(preview.behavior, preview.last4);
+  const isCard = looksLikeCard(preview.behavior, preview.last4);
 
   async function handleFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -108,7 +117,7 @@ export default function CardDesigner({ value, onChange, preview }: CardDesignerP
   return (
     <div className="grid gap-5 sm:grid-cols-[minmax(0,17rem)_1fr]">
       <div className="space-y-2">
-        <CardVisual {...preview} color={value.color} image={value.image} />
+        <AccountVisual {...preview} color={value.color} image={value.image} />
         <p className="text-center text-xs text-ink-subtle">Vista previa</p>
       </div>
 
@@ -150,7 +159,7 @@ export default function CardDesigner({ value, onChange, preview }: CardDesignerP
         </div>
 
         <div>
-          <span className="label">Imagen del frente (opcional)</span>
+          <span className="label">{isCard ? "Imagen del frente (opcional)" : "Imagen (opcional)"}</span>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -179,10 +188,12 @@ export default function CardDesigner({ value, onChange, preview }: CardDesignerP
             />
           </div>
           {/* TDC-01: la imagen nunca debe exponer datos sensibles. */}
+          {isCard && (
           <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
             Usa solo el diseño del frente: tapa o recorta el número completo, el CVV y la fecha
             de vencimiento. Solo mostramos los últimos 4 dígitos.
           </p>
+          )}
           {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
         </div>
       </div>

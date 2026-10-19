@@ -46,9 +46,9 @@ class InstallmentPlan(Base, AuditMixin):
     space_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    # MSI-01: always a credit card; FK to the unified cards table.
-    credit_card_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("cards.id", ondelete="RESTRICT"), nullable=False
+    # MSI-01: always a credit account.
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
     # MSI-03: the purchase transaction never enters aggregates by its total.
     transaction_id: Mapped[uuid.UUID] = mapped_column(
@@ -86,7 +86,7 @@ class Installment(Base):
     # Cuota 1 = purchase_date; cuotas 2..n = period_start de su ciclo.
     estimated_charge_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     statement_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("card_statements.id", ondelete="SET NULL")
+        Uuid, ForeignKey("statements.id", ondelete="SET NULL")
     )
     status: Mapped[InstallmentStatus] = mapped_column(
         Enum(InstallmentStatus, name="installment_status", native_enum=False, length=10),

@@ -43,7 +43,7 @@ async def confirm(client, ctx, rows, expected=201, **overrides):
             "source": "bbva",
             "mapping": MAPPING,
             "rows": rows,
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
             **overrides,
         },
     )
@@ -135,7 +135,7 @@ async def test_imp04_rollback_excludes_manual_edits(client):
             "category_id": ctx["categories"]["Comida"]["id"]
             if edited["type"] == "expense"
             else ctx["categories"]["Nómina"]["id"],
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
         },
     )
     assert res.status_code == 200
@@ -190,7 +190,7 @@ async def test_imp07_export_csv_and_json(client):
     assert res.status_code == 200
     data = res.json()
     assert len(data["transactions"]) == 3
-    assert {"space", "categories", "payment_methods"} <= set(data.keys())
+    assert {"space", "categories", "accounts", "account_types"} <= set(data.keys())
 
     # Viewer puede exportar (lectura), no importar.
     # (cobertura ESP-03 del wizard)
@@ -200,15 +200,15 @@ async def test_imp07_export_csv_and_json(client):
 @freeze_time("2026-06-20 18:00:00")
 async def test_imp05_card_charges_get_cycle_assigned(client):
     """IMP-05: cargos importados a un método TDC se asignan a su ciclo."""
-    from tests.test_cards import create_card
+    from tests.test_accounts import create_card
 
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
     body = await preview(client, ctx)
     rows = [r for r in body["rows"] if r["type"] == "expense"]
-    await confirm(client, ctx, rows, payment_method_id=card["payment_method_id"])
+    await confirm(client, ctx, rows, account_id=card["id"])
 
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     # 150.50 + 89.90 cargados al ciclo abierto (corte 15-jun ya pasó? hoy 20-jun:
     # compras del 1-3 jun van al corte 15-jun, aún sin cerrar ⇒ saldo al corte 0
     # hasta cerrar; el total de deuda refleja ambos cargos.

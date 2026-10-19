@@ -7,7 +7,7 @@ from freezegun import freeze_time
 from tests.conftest import auth_headers, bootstrap_space
 
 CARD_PAYLOAD = {
-    "alias": "BBVA Azul",
+    "name": "BBVA Azul",
     "bank": "BBVA",
     "network": "Visa",
     "last4": "1234",
@@ -20,14 +20,14 @@ def credit_payload(ctx, **overrides):
     """CARD_PAYLOAD bound to the seeded 'credit' card type (CAT-08)."""
     return {
         **CARD_PAYLOAD,
-        "card_type_id": ctx["card_type_by_behavior"]["credit"]["id"],
+        "account_type_id": ctx["account_type_by_behavior"]["credit"]["id"],
         **overrides,
     }
 
 
 async def create_card(client, ctx, **overrides):
     res = await client.post(
-        "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, **overrides)
+        "/api/v1/accounts", headers=ctx["headers"], json=credit_payload(ctx, **overrides)
     )
     assert res.status_code == 201, res.text
     return res.json()
@@ -43,7 +43,7 @@ async def charge(client, ctx, method_id, date, amount, description="Compra"):
             "amount": amount,
             "currency": "MXN",
             "category_id": ctx["categories"]["Comida"]["id"],
-            "payment_method_id": method_id,
+            "account_id": method_id,
             "description": description,
         },
     )
@@ -52,7 +52,7 @@ async def charge(client, ctx, method_id, date, amount, description="Compra"):
 
 
 async def close_cycles(client, ctx):
-    res = await client.post("/api/v1/cards/close-cycles", headers=ctx["headers"])
+    res = await client.post("/api/v1/accounts/close-cycles", headers=ctx["headers"])
     assert res.status_code == 200, res.text
     return res.json()
 
@@ -67,7 +67,7 @@ async def refund(client, ctx, method_id, date, amount, description="Devolución"
             "amount": amount,
             "currency": "MXN",
             "category_id": ctx["categories"]["Nómina"]["id"],
-            "payment_method_id": method_id,
+            "account_id": method_id,
             "description": description,
         },
     )
@@ -80,28 +80,26 @@ async def test_tdc01_validation_and_cat07_method(client):
 
     # last4 inválido.
     res = await client.post(
-        "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, last4="12a4")
+        "/api/v1/accounts", headers=ctx["headers"], json=credit_payload(ctx, last4="12a4")
     )
     assert res.status_code == 422
     # Ambos payment_due_days y payment_day => 422 (exactamente uno).
     res = await client.post(
-        "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, payment_day=5)
+        "/api/v1/accounts", headers=ctx["headers"], json=credit_payload(ctx, payment_day=5)
     )
     assert res.status_code == 422
     # statement_day 31 inválido (TDC-02: 1-28 o 'last').
     res = await client.post(
-        "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, statement_day=31)
+        "/api/v1/accounts", headers=ctx["headers"], json=credit_payload(ctx, statement_day=31)
     )
     assert res.status_code == 422
 
     card = await create_card(client, ctx)
-    assert card["payment_method_id"] is not None
+    assert card["id"] is not None
 
-    # CAT-07: el método vinculado existe y referencia la tarjeta.
-    methods = (await client.get("/api/v1/catalogs/payment-methods", headers=ctx["headers"])).json()
-    linked = [m for m in methods if m["card_id"] == card["id"]]
-    assert len(linked) == 1
-    assert linked[0]["type"] == "credit_card"
+    # TAR-03: la cuenta misma es el medio de pago (sin catálogo de métodos).
+    assert card["name"] == "BBVA Azul"
+    assert "payment_method_id" not in card
 
     # TDC-13: categoría "Comisiones e intereses" sembrada con la primera tarjeta.
     cats = (await client.get("/api/v1/catalogs/categories", headers=ctx["headers"])).json()
@@ -112,7 +110,7 @@ async def test_tdc01_validation_and_cat07_method(client):
 async def test_tdc05_charge_assigned_to_cycle_and_tdc07_close(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     # Compra el 10-jun (corte 15-jun): ciclo [16-may, 15-jun], ya vencido hoy (20).
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
@@ -131,13 +129,13 @@ async def test_tdc05_charge_assigned_to_cycle_and_tdc07_close(client):
     assert await close_cycles(client, ctx) == []
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     by_status = {s["status"] for s in statements}
     assert "open" in by_status  # ciclo en curso materializado (TDC-11)
 
     # TDC-09: deuda = saldo al corte (500) + ciclo en curso (200) + MSI (0).
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["statement_balance"] == "500.00"
     assert detail["debt"]["current_cycle_spend"] == "200.00"
     assert detail["debt"]["committed_msi"] == "0.00"
@@ -150,8 +148,8 @@ async def test_tdc10_overpayment_credit_applied_next_close(client):
     al siguiente cierre."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
-    debito = ctx["methods"]["Débito"]["id"]
+    method_id = card["id"]
+    debito = ctx["accounts"]["Débito"]["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
     await charge(client, ctx, method_id, "2026-06-18", "300.00")
@@ -160,11 +158,11 @@ async def test_tdc10_overpayment_credit_applied_next_close(client):
 
     # Pago de 800 contra un statement de 500 ⇒ 300 a favor (TDC-10).
     res = await client.post(
-        f"/api/v1/cards/{card['id']}/payments",
+        f"/api/v1/accounts/{card['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "800.00",
-            "from_payment_method_id": debito,
+            "from_account_id": debito,
             "date": "2026-06-21",
             "statement_id": statement_id,
         },
@@ -173,7 +171,7 @@ async def test_tdc10_overpayment_credit_applied_next_close(client):
     assert res.json()["type"] == "transfer"  # TXN-02/TDC-10
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     paid = next(s for s in statements if s["id"] == statement_id)
     assert paid["status"] == "paid"
@@ -192,8 +190,8 @@ async def test_tdc10_overpayment_credit_applied_next_close(client):
 async def test_rem01_reminders_scheduled_and_canceled_on_payment(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, reminder_days=[3, 1])
-    method_id = card["payment_method_id"]
-    debito = ctx["methods"]["Débito"]["id"]
+    method_id = card["id"]
+    debito = ctx["accounts"]["Débito"]["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
     closed = await close_cycles(client, ctx)
@@ -218,11 +216,11 @@ async def test_rem01_reminders_scheduled_and_canceled_on_payment(client):
 
     # REM-01: pagar cancela los pendientes.
     await client.post(
-        f"/api/v1/cards/{card['id']}/payments",
+        f"/api/v1/accounts/{card['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "500.00",
-            "from_payment_method_id": debito,
+            "from_account_id": debito,
             "date": "2026-06-21",
             "statement_id": statement_id,
         },
@@ -234,7 +232,7 @@ async def test_rem01_reminders_scheduled_and_canceled_on_payment(client):
 async def test_tdc06_move_charge_between_cycles(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     txn = await charge(client, ctx, method_id, "2026-06-18", "200.00")
     res = await client.post(
@@ -245,7 +243,7 @@ async def test_tdc06_move_charge_between_cycles(client):
     assert res.status_code == 200
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     prev_st = next(s for s in statements if s["period_end"] == "2026-06-15")
     assert res.json()["id"] == txn["id"]
@@ -260,11 +258,11 @@ async def test_tdc06_move_charge_between_cycles(client):
 async def test_tdc12_deactivated_card_keeps_closing(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
     await charge(client, ctx, method_id, "2026-06-10", "100.00")
 
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"is_active": False}
+        f"/api/v1/accounts/{card['id']}", headers=ctx["headers"], json={"is_active": False}
     )
     assert res.status_code == 200
 
@@ -278,7 +276,7 @@ async def test_tdc12_deactivated_card_keeps_closing(client):
             "amount": "50.00",
             "currency": "MXN",
             "category_id": ctx["categories"]["Comida"]["id"],
-            "payment_method_id": method_id,
+            "account_id": method_id,
         },
     )
     assert res.status_code == 422
@@ -294,11 +292,11 @@ async def test_glo05_cards_cross_space_404(client):
 
     intruder = await bootstrap_space(client, uuid.uuid4())
     evil = {**auth_headers(intruder["user_id"]), "X-Space-Id": ctx["space_id"]}
-    res = await client.get(f"/api/v1/cards/{card['id']}", headers=evil)
+    res = await client.get(f"/api/v1/accounts/{card['id']}", headers=evil)
     assert res.status_code == 404
 
     own_headers = intruder["headers"]
-    res = await client.get(f"/api/v1/cards/{card['id']}", headers=own_headers)
+    res = await client.get(f"/api/v1/accounts/{card['id']}", headers=own_headers)
     assert res.status_code == 404
 
 
@@ -308,16 +306,16 @@ async def test_tdc12_reactivate_card_restores_method(client):
     método vinculado, que vuelve a aceptar cargos."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"is_active": False}
+        f"/api/v1/accounts/{card['id']}", headers=ctx["headers"], json={"is_active": False}
     )
     assert res.status_code == 200
     assert res.json()["is_active"] is False
 
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"is_active": True}
+        f"/api/v1/accounts/{card['id']}", headers=ctx["headers"], json={"is_active": True}
     )
     assert res.status_code == 200
     assert res.json()["is_active"] is True
@@ -332,7 +330,7 @@ async def test_tdc12_reactivate_card_restores_method(client):
             "amount": "50.00",
             "currency": "MXN",
             "category_id": ctx["categories"]["Comida"]["id"],
-            "payment_method_id": method_id,
+            "account_id": method_id,
         },
     )
     assert res.status_code == 201, res.text
@@ -345,15 +343,15 @@ async def test_list_cards_include_inactive(client):
     card = await create_card(client, ctx)
 
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"is_active": False}
+        f"/api/v1/accounts/{card['id']}", headers=ctx["headers"], json={"is_active": False}
     )
     assert res.status_code == 200
 
-    res = await client.get("/api/v1/cards", headers=ctx["headers"])
+    res = await client.get("/api/v1/accounts", headers=ctx["headers"])
     assert res.status_code == 200
     assert all(c["id"] != card["id"] for c in res.json())
 
-    res = await client.get("/api/v1/cards?include_inactive=true", headers=ctx["headers"])
+    res = await client.get("/api/v1/accounts?include_inactive=true", headers=ctx["headers"])
     assert res.status_code == 200
     assert any(c["id"] == card["id"] for c in res.json())
 
@@ -363,26 +361,30 @@ async def test_list_cards_include_inactive(client):
 
 async def create_card_for(client, headers, alias):
     """Create a credit card in whatever space `headers` points to."""
-    types = (await client.get("/api/v1/catalogs/card-types", headers=headers)).json()
+    types = (await client.get("/api/v1/catalogs/account-types", headers=headers)).json()
     credit = next(t for t in types if t["behavior"] == "credit")
     res = await client.post(
-        "/api/v1/cards",
+        "/api/v1/accounts",
         headers=headers,
-        json={**CARD_PAYLOAD, "alias": alias, "card_type_id": credit["id"]},
+        json={**CARD_PAYLOAD, "name": alias, "account_type_id": credit["id"]},
     )
     assert res.status_code == 201, res.text
     return res.json()
 
 
 async def put_layout(client, headers, card_ids, expected=204):
-    res = await client.put("/api/v1/cards/layout", headers=headers, json={"card_ids": card_ids})
+    res = await client.put(
+        "/api/v1/accounts/layout", headers=headers, json={"account_ids": card_ids}
+    )
     assert res.status_code == expected, res.text
 
 
 async def card_order(client, headers):
-    res = await client.get("/api/v1/cards", headers=headers)
+    """Ids of the credit cards in list order (the seeded cash/debit accounts
+    of the space are left out to keep the assertions about the created cards)."""
+    res = await client.get("/api/v1/accounts", headers=headers)
     assert res.status_code == 200
-    return [c["id"] for c in res.json()]
+    return [c["id"] for c in res.json() if c["behavior"] == "credit"]
 
 
 async def add_member(client, owner_headers, space_id, role, email):
@@ -421,7 +423,7 @@ async def test_tar07_new_card_appended_at_end(client):
     b = await create_card_for(client, ctx["headers"], "Beta")
     await put_layout(client, ctx["headers"], [b["id"], a["id"]])
 
-    # Una tarjeta nueva no está en el layout ⇒ va al final (orden por alias).
+    # Una tarjeta nueva no está en el layout ⇒ va al final (orden por nombre).
     c = await create_card_for(client, ctx["headers"], "Gama")
     assert await card_order(client, ctx["headers"]) == [b["id"], a["id"], c["id"]]
 
@@ -474,9 +476,9 @@ async def test_tar07_viewer_can_reorder_and_nonmember_404(client):
     intruder = auth_headers(uuid.uuid4(), "evil@example.com")
     await client.get("/api/v1/me", headers=intruder)
     res = await client.put(
-        "/api/v1/cards/layout",
+        "/api/v1/accounts/layout",
         headers={**intruder, "X-Space-Id": space_id},
-        json={"card_ids": []},
+        json={"account_ids": []},
     )
     assert res.status_code == 404
 
@@ -491,7 +493,7 @@ async def test_tdc14_opening_balance(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, opening_balance="1500.00")
 
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["statement_balance"] == "1500.00"
     assert detail["debt"]["total_debt"] == "1500.00"
     # TDC-14/Pieza 2: próximo pago = monto + fecha (corte 15-jun + 20 días = 5-jul).
@@ -499,25 +501,25 @@ async def test_tdc14_opening_balance(client):
     assert detail["next_payment"]["due_date"] == "2026-07-05"
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     opening = [s for s in statements if s["computed_total"] == "1500.00"]
     assert len(opening) == 1 and opening[0]["status"] == "closed"
 
     # TDC-10: se puede pagar.
-    debito = ctx["methods"]["Débito"]["id"]
+    debito = ctx["accounts"]["Débito"]["id"]
     res = await client.post(
-        f"/api/v1/cards/{card['id']}/payments",
+        f"/api/v1/accounts/{card['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "1500.00",
-            "from_payment_method_id": debito,
+            "from_account_id": debito,
             "date": "2026-06-20",
             "statement_id": opening[0]["id"],
         },
     )
     assert res.status_code == 201, res.text
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["statement_balance"] == "0.00"
     assert detail["next_payment"] is None  # ya no hay nada pendiente
 
@@ -529,12 +531,12 @@ async def test_tdc14_opening_balance_via_edit(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)  # sin deuda inicial
 
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["statement_balance"] == "0.00"
     assert detail["next_payment"] is None
 
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}",
+        f"/api/v1/accounts/{card['id']}",
         headers=ctx["headers"],
         json={"opening_balance": "2300.00"},
     )
@@ -546,14 +548,14 @@ async def test_tdc14_opening_balance_via_edit(client):
 
     # Idempotente: re-editar reemplaza el monto (no duplica el statement).
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}",
+        f"/api/v1/accounts/{card['id']}",
         headers=ctx["headers"],
         json={"opening_balance": "2000.00"},
     )
     assert res.status_code == 200, res.text
     assert res.json()["debt"]["statement_balance"] == "2000.00"
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     assert len([s for s in statements if s["status"] == "closed"]) == 1
 
@@ -564,10 +566,10 @@ async def test_tdc14_opening_balance_edit_collision(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
     # Cargo del 10-jun cae en el corte 15-jun (= el corte anterior a hoy 20-jun).
-    await charge(client, ctx, card["payment_method_id"], "2026-06-10", "400.00")
+    await charge(client, ctx, card["id"], "2026-06-10", "400.00")
 
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}",
+        f"/api/v1/accounts/{card['id']}",
         headers=ctx["headers"],
         json={"opening_balance": "1000.00"},
     )
@@ -576,13 +578,13 @@ async def test_tdc14_opening_balance_edit_collision(client):
 
 async def test_tdc14_opening_balance_requires_config(client):
     ctx = await bootstrap_space(client)
-    credit = ctx["card_type_by_behavior"]["credit"]["id"]
+    credit = ctx["account_type_by_behavior"]["credit"]["id"]
     res = await client.post(
-        "/api/v1/cards",
+        "/api/v1/accounts",
         headers=ctx["headers"],
         json={
-            "card_type_id": credit,
-            "alias": "Sin config",
+            "account_type_id": credit,
+            "name": "Sin config",
             "bank": "B",
             "network": "Visa",
             "last4": "0009",
@@ -598,13 +600,13 @@ async def test_tdc14_opening_balance_requires_config(client):
 @freeze_time("2026-06-20 18:00:00")
 async def test_tdc15_partial_create_then_complete_by_edit(client):
     ctx = await bootstrap_space(client)
-    credit = ctx["card_type_by_behavior"]["credit"]["id"]
+    credit = ctx["account_type_by_behavior"]["credit"]["id"]
     res = await client.post(
-        "/api/v1/cards",
+        "/api/v1/accounts",
         headers=ctx["headers"],
         json={
-            "card_type_id": credit,
-            "alias": "Parcial",
+            "account_type_id": credit,
+            "name": "Parcial",
             "bank": "B",
             "network": "Visa",
             "last4": "0010",
@@ -612,18 +614,18 @@ async def test_tdc15_partial_create_then_complete_by_edit(client):
     )
     assert res.status_code == 201, res.text
     card = res.json()
-    method = card["payment_method_id"]
+    method = card["id"]
 
     # TDC-15: sin día de corte, un cargo no se asigna a ningún ciclo.
     await charge(client, ctx, method, "2026-06-18", "500.00")
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     assert statements == []
 
     # Completar la configuración por edición.
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}",
+        f"/api/v1/accounts/{card['id']}",
         headers=ctx["headers"],
         json={"statement_day": 15, "payment_due_days": 20},
     )
@@ -632,7 +634,7 @@ async def test_tdc15_partial_create_then_complete_by_edit(client):
 
     # Ahora un nuevo cargo sí entra al ciclo en curso.
     await charge(client, ctx, method, "2026-06-19", "200.00")
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["current_cycle_spend"] == "200.00"
 
 
@@ -640,10 +642,10 @@ async def test_tdc15_edit_fields_and_method_rename(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}",
+        f"/api/v1/accounts/{card['id']}",
         headers=ctx["headers"],
         json={
-            "alias": "BBVA Oro",
+            "name": "BBVA Oro",
             "bank": "BBVA Bancomer",
             "last4": "4321",
             "credit_limit": "50000.00",
@@ -651,15 +653,10 @@ async def test_tdc15_edit_fields_and_method_rename(client):
     )
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["alias"] == "BBVA Oro"
+    assert body["name"] == "BBVA Oro"
     assert body["bank"] == "BBVA Bancomer"
     assert body["last4"] == "4321"
     assert body["credit_limit"] == "50000.00"
-
-    # CAT-07: el método vinculado se renombra con el alias.
-    methods = (await client.get("/api/v1/catalogs/payment-methods", headers=ctx["headers"])).json()
-    linked = [m for m in methods if m["card_id"] == card["id"]]
-    assert linked[0]["name"] == "BBVA Oro"
 
 
 async def test_tdc15_edit_revalidates(client):
@@ -667,12 +664,12 @@ async def test_tdc15_edit_revalidates(client):
     card = await create_card(client, ctx)
     # statement_day 31 inválido (TDC-02).
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"statement_day": 31}
+        f"/api/v1/accounts/{card['id']}", headers=ctx["headers"], json={"statement_day": 31}
     )
     assert res.status_code == 422
     # last4 no numérico.
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}", headers=ctx["headers"], json={"last4": "12a4"}
+        f"/api/v1/accounts/{card['id']}", headers=ctx["headers"], json={"last4": "12a4"}
     )
     assert res.status_code == 422
 
@@ -687,7 +684,7 @@ async def test_tdc06_late_charge_recomputes_closed_statement(client):
     Antes del fix, el total quedaba stale y la deuda se mostraba incorrecta."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     # Cargo del 10-jun → ciclo [16-may, 15-jun] → se cerrará al close_cycles.
     await charge(client, ctx, method_id, "2026-06-10", "300.00")
@@ -700,7 +697,7 @@ async def test_tdc06_late_charge_recomputes_closed_statement(client):
 
     # El statement cerrado debe reflejar 500 sin requerir otro close_cycles.
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     closed_st = next(s for s in statements if s["id"] == closed[0]["id"])
     assert closed_st["computed_total"] == "500.00", (
@@ -708,7 +705,7 @@ async def test_tdc06_late_charge_recomputes_closed_statement(client):
     )
 
     # La deuda de la tarjeta también debe reflejar el nuevo total.
-    card_data = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    card_data = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert card_data["debt"]["statement_balance"] == "500.00"
 
 
@@ -721,7 +718,7 @@ async def test_tdc16_refund_after_cutoff_reduces_pending_statement(client):
     un statement closed ⇒ se resta de ese computed_total, no del ciclo abierto."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
     closed = await close_cycles(client, ctx)
@@ -733,13 +730,13 @@ async def test_tdc16_refund_after_cutoff_reduces_pending_statement(client):
     assert txn["statement_id"] == statement_id
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     st = next(s for s in statements if s["id"] == statement_id)
     assert st["computed_total"] == "300.00"
     assert st["status"] == "closed"
 
-    card_data = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    card_data = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert card_data["debt"]["statement_balance"] == "300.00"
 
 
@@ -749,13 +746,13 @@ async def test_tdc16_refund_without_pending_statement_falls_back_to_tdc05(client
     pendiente, el reembolso cae en la asignación normal de TDC-05 (ciclo abierto)."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     # Tarjeta recién creada: no hay ningún statement closed todavía.
     txn = await refund(client, ctx, method_id, "2026-06-18", "200.00")
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     st = next(s for s in statements if s["id"] == txn["statement_id"])
     assert st["status"] == "open"
@@ -768,7 +765,7 @@ async def test_tdc16_refund_after_due_date_not_retroactive(client):
     statement pendiente NO lo abona retroactivamente; sigue TDC-05 normal."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
     closed = await close_cycles(client, ctx)
@@ -782,7 +779,7 @@ async def test_tdc16_refund_after_due_date_not_retroactive(client):
     assert txn["statement_id"] != statement_id
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     st = next(s for s in statements if s["id"] == statement_id)
     assert st["computed_total"] == "500.00"  # sin cambios
@@ -796,10 +793,10 @@ async def test_pend01_late_refund_does_not_wipe_manual_opening_balance(client):
     NO debe descartar los 1500 capturados a mano; debe restarse de ellos."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, opening_balance="1500.00")
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     opening = next(s for s in statements if s["computed_total"] == "1500.00")
     assert opening["due_date"] == "2026-07-05"
@@ -810,14 +807,14 @@ async def test_pend01_late_refund_does_not_wipe_manual_opening_balance(client):
     assert txn["statement_id"] == opening["id"]
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     updated = next(s for s in statements if s["id"] == opening["id"])
     assert updated["computed_total"] == "1300.00", (
         f"opening_balance descartado tras el reembolso: {updated['computed_total']}"
     )
 
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["statement_balance"] == "1300.00"
 
 
@@ -827,10 +824,10 @@ async def test_pend01_late_charge_adds_to_manual_opening_balance(client):
     (TDC-06) en vez de un reembolso — debe sumarse a los 1500, no reemplazarlos."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, opening_balance="1500.00")
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     opening = next(s for s in statements if s["computed_total"] == "1500.00")
 
@@ -838,7 +835,7 @@ async def test_pend01_late_charge_adds_to_manual_opening_balance(client):
     await charge(client, ctx, method_id, "2026-06-10", "300.00")
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     updated = next(s for s in statements if s["id"] == opening["id"])
     assert updated["computed_total"] == "1800.00", (
@@ -852,7 +849,7 @@ async def test_tdc16_refund_edit_reassigns(client):
     la ventana de un statement pendiente, se reasigna y ambos totales se recalculan."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
     closed = await close_cycles(client, ctx)
@@ -873,7 +870,7 @@ async def test_tdc16_refund_edit_reassigns(client):
             "amount": "200.00",
             "currency": "MXN",
             "category_id": ctx["categories"]["Nómina"]["id"],
-            "payment_method_id": method_id,
+            "account_id": method_id,
             "description": "Devolución",
         },
     )
@@ -881,7 +878,7 @@ async def test_tdc16_refund_edit_reassigns(client):
     assert res.json()["statement_id"] == statement_id
 
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     st = next(s for s in statements if s["id"] == statement_id)
     assert st["computed_total"] == "300.00"
@@ -901,7 +898,7 @@ async def test_tar08_create_with_color_and_image(client):
     assert card["color"] == "#1A2B3C"
     assert card["image"] == PNG_DATA_URL
 
-    res = await client.get("/api/v1/cards", headers=ctx["headers"])
+    res = await client.get("/api/v1/accounts", headers=ctx["headers"])
     listed = next(c for c in res.json() if c["id"] == card["id"])
     assert listed["color"] == "#1A2B3C"
     assert listed["image"] == PNG_DATA_URL
@@ -912,7 +909,7 @@ async def test_tar08_edit_and_clear_design(client):
     card = await create_card(client, ctx)
     assert card["color"] is None and card["image"] is None
 
-    url = f"/api/v1/cards/{card['id']}"
+    url = f"/api/v1/accounts/{card['id']}"
     res = await client.patch(
         url, headers=ctx["headers"], json={"color": "#ff0000", "image": PNG_DATA_URL}
     )
@@ -921,7 +918,7 @@ async def test_tar08_edit_and_clear_design(client):
     assert res.json()["image"] == PNG_DATA_URL
 
     # Unrelated edits keep the design (exclude_unset).
-    res = await client.patch(url, headers=ctx["headers"], json={"alias": "Otra"})
+    res = await client.patch(url, headers=ctx["headers"], json={"name": "Otra"})
     assert res.json()["image"] == PNG_DATA_URL
 
     # null clears it.
@@ -942,7 +939,7 @@ async def test_tar08_rejects_invalid_design(client):
     ]
     for extra in bad:
         res = await client.post(
-            "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, **extra)
+            "/api/v1/accounts", headers=ctx["headers"], json=credit_payload(ctx, **extra)
         )
         assert res.status_code == 422, (extra, res.text)
 
@@ -956,6 +953,6 @@ async def test_tar08_viewer_cannot_change_design(client):
 
     viewer = await add_member(client, owner["headers"], space_id, "viewer", "viewer@example.com")
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}", headers=viewer, json={"color": "#000000"}
+        f"/api/v1/accounts/{card['id']}", headers=viewer, json={"color": "#000000"}
     )
     assert res.status_code == 403

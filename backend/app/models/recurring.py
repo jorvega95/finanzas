@@ -62,8 +62,9 @@ class RecurringRule(Base, AuditMixin):
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("categories.id", ondelete="RESTRICT")
     )
-    payment_method_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("payment_methods.id", ondelete="RESTRICT")
+    # TAR-03: account the instances are charged to / received into.
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
 
     # Schedule (REC-01).

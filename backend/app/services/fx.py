@@ -1,7 +1,8 @@
 """Tipos de cambio. Implementa FX-01..FX-05.
 
 Único punto de conversión del sistema: nadie más convierte monedas.
-Tasa congelada por transacción (FX-03); mark-to-market solo inversiones (FX-04).
+Tasa congelada por transacción (FX-03); mark-to-market para inversiones y
+saldos/deudas de cuentas en el patrimonio (FX-04).
 """
 
 from datetime import date
@@ -52,6 +53,19 @@ async def get_rate(session: AsyncSession, base: str, quote: str, on_date: date) 
     if inverse is not None and Decimal(inverse) != 0:
         return (Decimal(1) / Decimal(inverse)).quantize(RATE_PRECISION, ROUND_HALF_EVEN)
     return None
+
+
+async def mark_to_market(
+    session: AsyncSession, amount: Decimal, currency: str, base: str, on_date: date
+) -> Decimal | None:
+    """FX-04: value `amount` (in `currency`) in `base` with the rate of the
+    valuation day. None when no rate is known (the caller reports it)."""
+    if currency == base:
+        return Decimal(amount)
+    rate = await get_rate(session, currency, base, on_date)
+    if rate is None:
+        return None
+    return (Decimal(amount) * rate).quantize(Decimal("0.01"), ROUND_HALF_EVEN)
 
 
 async def upsert_rate(

@@ -17,7 +17,7 @@ def rule_payload(ctx, **overrides):
         "currency": "MXN",
         "description": "Spotify",
         "category_id": ctx["categories"]["Entretenimiento"]["id"],
-        "payment_method_id": ctx["methods"]["Débito"]["id"],
+        "account_id": ctx["accounts"]["Débito"]["id"],
         "frequency": "monthly",
         "start_date": "2026-01-15",
         "month_day": 15,
@@ -166,7 +166,7 @@ async def test_rec_income_create_and_confirm(client):
     quincenal mexicana, ver test_rec06_semimonthly_* para esa."""
     ctx = await bootstrap_space(client)
     income_cat_id = ctx["categories"]["Nómina"]["id"]
-    method_id = ctx["methods"]["Débito"]["id"]
+    method_id = ctx["accounts"]["Débito"]["id"]
 
     res = await client.post(
         "/api/v1/recurring-rules",
@@ -177,7 +177,7 @@ async def test_rec_income_create_and_confirm(client):
             "currency": "MXN",
             "description": "Pago cada 14 días",
             "category_id": income_cat_id,
-            "payment_method_id": method_id,
+            "account_id": method_id,
             "frequency": "biweekly",
             "start_date": "2026-05-28",
         },
@@ -217,7 +217,7 @@ async def test_rec06_semimonthly_skips_first_half_when_start_after_15(client):
             type="income",
             description="Nómina quincenal",
             category_id=ctx["categories"]["Nómina"]["id"],
-            payment_method_id=ctx["methods"]["Débito"]["id"],
+            account_id=ctx["accounts"]["Débito"]["id"],
             frequency="semimonthly",
             start_date="2026-01-20",
             month_day=None,
@@ -249,7 +249,7 @@ async def test_rec06_semimonthly_leap_february(client):
             type="income",
             description="Nómina quincenal",
             category_id=ctx["categories"]["Nómina"]["id"],
-            payment_method_id=ctx["methods"]["Débito"]["id"],
+            account_id=ctx["accounts"]["Débito"]["id"],
             frequency="semimonthly",
             start_date="2028-01-01",
             month_day=None,

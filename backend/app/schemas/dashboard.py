@@ -45,7 +45,7 @@ class NatureDetailItem(BaseModel):
     description: str
     category_id: uuid.UUID | None
     category_name: str
-    payment_method_name: str | None
+    account_name: str | None
     amount: MoneyOut  # en base (FX-05)
     original_amount: MoneyOut | None  # solo si la moneda ≠ base
     currency: str

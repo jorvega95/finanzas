@@ -51,7 +51,7 @@ export interface NatureDetailItem {
   description: string;
   category_id: string | null;
   category_name: string;
-  payment_method_name: string | null;
+  account_name: string | null;
   amount: string;
   original_amount: string | null;
   currency: string;
@@ -101,7 +101,7 @@ export function useBudgets(month: string) {
 function useInvalidateBudgets() {
   const qc = useQueryClient();
   return () =>
-    ["budgets", "transactions", "cards"].forEach(
+    ["budgets", "transactions", "accounts"].forEach(
       (k) => void qc.invalidateQueries({ queryKey: [k] }),
     );
 }

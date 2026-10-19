@@ -10,7 +10,7 @@ export interface RecurringRuleOut {
   currency: string;
   description: string;
   category_id: string | null;
-  payment_method_id: string | null;
+  account_id: string;
   frequency: "weekly" | "biweekly" | "semimonthly" | "monthly" | "yearly";
   start_date: string;
   end_date: string | null;
@@ -26,7 +26,7 @@ export interface RecurringRuleBody {
   currency: string;
   description: string;
   category_id?: string | null;
-  payment_method_id?: string | null;
+  account_id?: string;
   frequency: string;
   start_date: string;
   month_day?: number | null;
@@ -39,7 +39,7 @@ export interface RecurringRuleUpdate {
   amount?: string;
   description?: string;
   category_id?: string | null;
-  payment_method_id?: string | null;
+  account_id?: string;
   end_date?: string | null;
   max_occurrences?: number | null;
   is_active?: boolean;

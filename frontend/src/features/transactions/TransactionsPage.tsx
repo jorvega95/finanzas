@@ -2,9 +2,11 @@
 // (REC-03) y lista con filtros (TXN-01..03). TXN-08/TXN-09: validaciones y avisos.
 // TXN-11: aviso de posible duplicado + confirmación visual del alta.
 // TXN-12: búsqueda por descripción y periodo por mes o rango libre.
+// TAR-03/10: se paga con una cuenta y en su moneda. TXN-13/14: transferencias
+// entre monedas (monto recibido) y con comisión.
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useCategories, usePaymentMethods, type PaymentMethodOut } from "../../api/catalogs";
-import { useCards, type CardOut } from "../../api/cards";
+import { useCategories } from "../../api/catalogs";
+import { hasBalance, useAccounts, type AccountBehavior, type AccountOut } from "../../api/accounts";
 import {
   fetchPossibleDuplicates,
   useConfirmTransaction,
@@ -16,7 +18,7 @@ import {
   type TransactionOut,
 } from "../../api/transactions";
 import { useSpace } from "../spaces/SpaceProvider";
-import { formatMoney, isPositiveAmount } from "../../lib/money";
+import { formatMoney, impliedRate, isPositiveAmount } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
 import Icon from "../../components/ui/Icon";
@@ -74,15 +76,9 @@ function useDebounced<T>(value: T, delayMs: number): T {
 
 function detectCutoffCollision(
   txnDate: string,
-  methodId: string,
-  cardsData: CardOut[],
-  methodsData: PaymentMethodOut[],
+  card: AccountOut | undefined,
 ): { defaultHint: "current" | "next" } | null {
-  if (!txnDate || !methodId) return null;
-  const method = methodsData.find((m) => m.id === methodId);
-  if (!method?.card_id) return null;
-  const card = cardsData.find((c) => c.id === method.card_id);
-  if (!card || card.behavior !== "credit" || !card.statement_day) return null;
+  if (!txnDate || !card || card.behavior !== "credit" || !card.statement_day) return null;
   const [year, month, day] = txnDate.split("-").map(Number);
   const cutoffDay = card.statement_day_is_last
     ? new Date(year, month, 0).getDate()
@@ -91,20 +87,119 @@ function detectCutoffCollision(
   return { defaultHint: card.cutoff_day_policy === "next_cycle" ? "next" : "current" };
 }
 
+// Selector de cuentas agrupado como en la página de Cuentas.
+const ACCOUNT_GROUPS: { label: string; behaviors: AccountBehavior[] }[] = [
+  { label: "Efectivo y cuentas", behaviors: ["cash", "debit", "prepaid"] },
+  { label: "Ahorro", behaviors: ["savings"] },
+  { label: "Tarjetas de crédito", behaviors: ["credit"] },
+];
+
+function AccountOptions({
+  accounts,
+  exclude,
+  baseCurrency,
+}: {
+  accounts: AccountOut[];
+  exclude?: string;
+  baseCurrency: string;
+}) {
+  return (
+    <>
+      {ACCOUNT_GROUPS.map((group) => {
+        const items = accounts.filter(
+          (a) => a.id !== exclude && a.behavior && group.behaviors.includes(a.behavior),
+        );
+        if (items.length === 0) return null;
+        return (
+          <optgroup key={group.label} label={group.label}>
+            {items.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {a.currency !== baseCurrency ? ` (${a.currency})` : ""}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </>
+  );
+}
+
+// TXN-13/14: monto recibido cuando las monedas difieren y comisión opcional.
+function TransferExtras({
+  source,
+  target,
+  amount,
+  amountTo,
+  setAmountTo,
+  fee,
+  setFee,
+}: {
+  source: AccountOut | undefined;
+  target: AccountOut | undefined;
+  amount: string;
+  amountTo: string;
+  setAmountTo: (v: string) => void;
+  fee: string;
+  setFee: (v: string) => void;
+}) {
+  const crossCurrency = !!source && !!target && source.currency !== target.currency;
+  const rate = crossCurrency ? impliedRate(amountTo, amount) : null;
+  return (
+    <>
+      {crossCurrency && (
+        <div>
+          <label className="label">Recibe ({target.currency})</label>
+          <input
+            className="input"
+            inputMode="decimal"
+            pattern="^\d+(\.\d{1,2})?$"
+            placeholder="0.00"
+            required
+            value={amountTo}
+            onChange={(e) => setAmountTo(e.target.value)}
+          />
+          {rate && (
+            <p className="mt-1 text-xs text-ink-muted">
+              Tipo de cambio: 1 {source.currency} = {rate} {target.currency}
+            </p>
+          )}
+        </div>
+      )}
+      <div>
+        <label className="label">Comisión{source ? ` (${source.currency})` : ""}</label>
+        <input
+          className="input"
+          inputMode="decimal"
+          pattern="^\d+(\.\d{1,2})?$"
+          placeholder="opcional"
+          value={fee}
+          onChange={(e) => setFee(e.target.value)}
+        />
+      </div>
+    </>
+  );
+}
+
 export default function TransactionsPage() {
   const { activeSpace } = useSpace();
   const categories = useCategories();
-  const methods = usePaymentMethods();
-  const cards = useCards();
+  const accounts = useAccounts();
+  const accountList = useMemo(() => accounts.data ?? [], [accounts.data]);
+  const accountById = useMemo(
+    () => new Map(accountList.map((a) => [a.id, a])),
+    [accountList],
+  );
 
   const [type, setType] = useState<TxnType>("expense");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(todayISO);
   const [categoryId, setCategoryId] = useState("");
-  const [methodId, setMethodId] = useState("");
-  const [methodToId, setMethodToId] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const [accountToId, setAccountToId] = useState("");
   const [description, setDescription] = useState("");
-  const [currency, setCurrency] = useState(activeSpace.base_currency);
+  const [amountTo, setAmountTo] = useState(""); // TXN-13
+  const [feeAmount, setFeeAmount] = useState(""); // TXN-14
   const [formError, setFormError] = useState<string | null>(null);
   const [cycleHint, setCycleHint] = useState<"current" | "next" | null>(null);
 
@@ -131,7 +226,7 @@ export default function TransactionsPage() {
   }, [created]);
   const [filterType, setFilterType] = useState("");
   const [filterCategoryId, setFilterCategoryId] = useState("");
-  const [filterMethodId, setFilterMethodId] = useState("");
+  const [filterAccountId, setFilterAccountId] = useState("");
 
   const create = useCreateTransaction();
   const update = useUpdateTransaction();
@@ -144,10 +239,11 @@ export default function TransactionsPage() {
   const [editAmount, setEditAmount] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editCategoryId, setEditCategoryId] = useState("");
-  const [editMethodId, setEditMethodId] = useState("");
-  const [editMethodToId, setEditMethodToId] = useState("");
+  const [editAccountId, setEditAccountId] = useState("");
+  const [editAccountToId, setEditAccountToId] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [editCurrency, setEditCurrency] = useState("");
+  const [editAmountTo, setEditAmountTo] = useState("");
+  const [editFeeAmount, setEditFeeAmount] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [editCycleHint, setEditCycleHint] = useState<"current" | "next" | null>(null);
 
@@ -157,10 +253,11 @@ export default function TransactionsPage() {
     setEditAmount(txn.amount);
     setEditDate(txn.date);
     setEditCategoryId(txn.category_id ?? "");
-    setEditMethodId(txn.payment_method_id ?? "");
-    setEditMethodToId(txn.payment_method_to_id ?? "");
+    setEditAccountId(txn.account_id);
+    setEditAccountToId(txn.account_to_id ?? "");
     setEditDescription(txn.description);
-    setEditCurrency(txn.currency);
+    setEditAmountTo(txn.amount_to ?? "");
+    setEditFeeAmount(txn.fee_amount ?? "");
     setEditError(null);
     setEditCycleHint(null);
   }
@@ -186,8 +283,10 @@ export default function TransactionsPage() {
         currency: editCurrency,
         description: editDescription,
         category_id: editType === "transfer" ? null : editCategoryId || null,
-        payment_method_id: editMethodId || null,
-        payment_method_to_id: editType === "transfer" ? editMethodToId || null : null,
+        account_id: editAccountId,
+        account_to_id: editType === "transfer" ? editAccountToId || null : null,
+        amount_to: editType === "transfer" && editCrossCurrency ? editAmountTo || null : null,
+        fee_amount: editType === "transfer" && editFeeAmount ? editFeeAmount : null,
         cycle_hint: editCollision ? (editCycleHint ?? editCollision.defaultHint) : undefined,
       });
       setEditingTxn(null);
@@ -223,14 +322,14 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     setListLimit(PAGE_SIZE);
-  }, [periodFilters, filterType, filterCategoryId, filterMethodId, debouncedSearch]);
+  }, [periodFilters, filterType, filterCategoryId, filterAccountId, debouncedSearch]);
 
   const list = useTransactions(
     {
       ...periodFilters,
       type: filterType || undefined,
       category_id: filterCategoryId || undefined,
-      payment_method_id: filterMethodId || undefined,
+      account_id: filterAccountId || undefined,
       q: debouncedSearch || undefined,
       limit: listLimit,
     },
@@ -259,46 +358,35 @@ export default function TransactionsPage() {
   );
   const byId = useMemo(() => {
     const cats = new Map((categories.data ?? []).map((c) => [c.id, c.name]));
-    const pms = new Map((methods.data ?? []).map((m) => [m.id, m.name]));
-    return { cats, pms };
-  }, [categories.data, methods.data]);
+    const accounts = new Map(accountList.map((a) => [a.id, a.name]));
+    return { cats, accounts };
+  }, [categories.data, accountList]);
 
-  const collision = useMemo(
-    () => detectCutoffCollision(date, methodId, cards.data ?? [], methods.data ?? []),
-    [date, methodId, cards.data, methods.data],
-  );
+  // TAR-10: la moneda la define la cuenta elegida.
+  const account = accountById.get(accountId);
+  const accountTo = accountById.get(accountToId);
+  const currency = account?.currency ?? activeSpace.base_currency;
+  const crossCurrency = type === "transfer" && !!account && !!accountTo && account.currency !== accountTo.currency;
+  const editAccount = accountById.get(editAccountId);
+  const editAccountTo = accountById.get(editAccountToId);
+  const editCurrency = editAccount?.currency ?? editingTxn?.currency ?? activeSpace.base_currency;
+  const editCrossCurrency =
+    editType === "transfer" && !!editAccount && !!editAccountTo && editAccount.currency !== editAccountTo.currency;
+
+  const collision = useMemo(() => detectCutoffCollision(date, account), [date, account]);
   const editCollision = useMemo(
-    () => detectCutoffCollision(editDate, editMethodId, cards.data ?? [], methods.data ?? []),
-    [editDate, editMethodId, cards.data, methods.data],
+    () => detectCutoffCollision(editDate, editAccount),
+    [editDate, editAccount],
   );
 
-  const transferFromBalance = useMemo(() => {
-    if (!methodId) return null;
-    const m = (methods.data ?? []).find((x) => x.id === methodId);
-    if (!m?.card_id) return null;
-    const card = (cards.data ?? []).find((c) => c.id === m.card_id);
-    if (!card || (card.behavior !== "debit" && card.behavior !== "prepaid")) return null;
-    return card.balance;
-  }, [methodId, methods.data, cards.data]);
+  // TXN-08: saldo disponible del origen (cuentas con saldo, TAR-05).
+  const transferFromBalance = account && hasBalance(account.behavior) ? account.balance : null;
+  const editTransferFromBalance =
+    editAccount && hasBalance(editAccount.behavior) ? editAccount.balance : null;
 
-  const editTransferFromBalance = useMemo(() => {
-    if (!editMethodId) return null;
-    const m = (methods.data ?? []).find((x) => x.id === editMethodId);
-    if (!m?.card_id) return null;
-    const card = (cards.data ?? []).find((c) => c.id === m.card_id);
-    if (!card || (card.behavior !== "debit" && card.behavior !== "prepaid")) return null;
-    return card.balance;
-  }, [editMethodId, methods.data, cards.data]);
-
-  const showIncomeWarning = useMemo(() => {
-    if (type !== "income" || !methodId) return false;
-    return (methods.data ?? []).find((m) => m.id === methodId)?.type === "credit_card";
-  }, [type, methodId, methods.data]);
-
-  const showEditIncomeWarning = useMemo(() => {
-    if (editType !== "income" || !editMethodId) return false;
-    return (methods.data ?? []).find((m) => m.id === editMethodId)?.type === "credit_card";
-  }, [editType, editMethodId, methods.data]);
+  // TDC-16: un ingreso a una tarjeta de crédito es un abono/devolución.
+  const showIncomeWarning = type === "income" && account?.behavior === "credit";
+  const showEditIncomeWarning = editType === "income" && editAccount?.behavior === "credit";
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -314,12 +402,14 @@ export default function TransactionsPage() {
       currency,
       description,
       category_id: type === "transfer" ? null : categoryId || null,
-      payment_method_id: methodId || null,
-      payment_method_to_id: type === "transfer" ? methodToId || null : null,
+      account_id: accountId,
+      account_to_id: type === "transfer" ? accountToId || null : null,
+      amount_to: crossCurrency ? amountTo || null : null,
+      fee_amount: type === "transfer" && feeAmount ? feeAmount : null,
       cycle_hint: collision ? (cycleHint ?? collision.defaultHint) : undefined,
     };
     // TXN-11: mismo tipo, fecha, monto, moneda, categoría y descripción
-    // (el método de pago se ignora) ⇒ pedir confirmación antes de registrar.
+    // (la cuenta se ignora) ⇒ pedir confirmación antes de registrar.
     setCheckingDuplicates(true);
     let matches: TransactionOut[] = [];
     try {
@@ -349,6 +439,8 @@ export default function TransactionsPage() {
       const txn = await create.mutateAsync(body);
       setAmount("");
       setDescription("");
+      setAmountTo("");
+      setFeeAmount("");
       setCycleHint(null);
       setPendingCreate(null);
       setCreated(txn);
@@ -367,11 +459,11 @@ export default function TransactionsPage() {
     );
   }
 
-  function txnMethods(t: TransactionOut): string {
-    const from = t.payment_method_id ? (byId.pms.get(t.payment_method_id) ?? "") : "";
+  function txnAccounts(t: TransactionOut): string {
+    const from = t.account_id ? (byId.accounts.get(t.account_id) ?? "") : "";
     const to =
-      t.type === "transfer" && t.payment_method_to_id
-        ? ` → ${byId.pms.get(t.payment_method_to_id) ?? ""}`
+      t.type === "transfer" && t.account_to_id
+        ? ` → ${byId.accounts.get(t.account_to_id) ?? ""}`
         : "";
     return `${from}${to}`;
   }
@@ -398,7 +490,9 @@ export default function TransactionsPage() {
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <div>
-            <label className="label" htmlFor="amount">Monto</label>
+            <label className="label" htmlFor="amount">
+              Monto{account ? ` (${currency})` : ""}
+            </label>
             <input
               id="amount"
               className="input"
@@ -439,47 +533,56 @@ export default function TransactionsPage() {
             </div>
           )}
           <div>
-            <label className="label" htmlFor="method">
-              {type === "transfer" ? "Desde" : "Método de pago"}
+            <label className="label" htmlFor="account">
+              {type === "transfer" ? "Desde" : "Cuenta"}
             </label>
             <select
-              id="method"
+              id="account"
               className="input"
               required
-              value={methodId}
-              onChange={(e) => { setMethodId(e.target.value); setCycleHint(null); }}
+              value={accountId}
+              onChange={(e) => { setAccountId(e.target.value); setCycleHint(null); }}
             >
               <option value="">Selecciona…</option>
-              {(methods.data ?? []).map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
+              <AccountOptions accounts={accountList} baseCurrency={activeSpace.base_currency} />
             </select>
-            {type === "transfer" && transferFromBalance !== null && (
+            {transferFromBalance !== null && account && (
               <p className="mt-1 text-xs text-ink-muted">
-                Disponible: {formatMoney(transferFromBalance, activeSpace.base_currency)}
+                Disponible: {formatMoney(transferFromBalance, account.currency)}
               </p>
             )}
           </div>
           {type === "transfer" && (
             <div>
-              <label className="label" htmlFor="methodTo">Hacia</label>
+              <label className="label" htmlFor="accountTo">Hacia</label>
               <select
-                id="methodTo"
+                id="accountTo"
                 className="input"
                 required
-                value={methodToId}
-                onChange={(e) => setMethodToId(e.target.value)}
+                value={accountToId}
+                onChange={(e) => setAccountToId(e.target.value)}
               >
                 <option value="">Selecciona…</option>
-                {(methods.data ?? [])
-                  .filter((m) => m.id !== methodId)
-                  .map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
+                <AccountOptions
+                  accounts={accountList}
+                  exclude={accountId}
+                  baseCurrency={activeSpace.base_currency}
+                />
               </select>
             </div>
           )}
-          <div className="col-span-2">
+          {type === "transfer" && (
+            <TransferExtras
+              source={account}
+              target={accountTo}
+              amount={amount}
+              amountTo={amountTo}
+              setAmountTo={setAmountTo}
+              fee={feeAmount}
+              setFee={setFeeAmount}
+            />
+          )}
+          <div className="col-span-2 md:col-span-3">
             <label className="label" htmlFor="description">Descripción</label>
             <input
               id="description"
@@ -488,18 +591,6 @@ export default function TransactionsPage() {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
-          </div>
-          <div>
-            <label className="label" htmlFor="currency">Moneda</label>
-            <select
-              id="currency"
-              className="input"
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-            >
-              <option value="MXN">MXN</option>
-              <option value="USD">USD</option>
-            </select>
           </div>
           <div className="flex items-end">
             <button
@@ -745,13 +836,11 @@ export default function TransactionsPage() {
             )}
             <select
               className="input w-auto"
-              value={filterMethodId}
-              onChange={(e) => setFilterMethodId(e.target.value)}
+              value={filterAccountId}
+              onChange={(e) => setFilterAccountId(e.target.value)}
             >
-              <option value="">Método de pago</option>
-              {(methods.data ?? []).map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
+              <option value="">Cuenta</option>
+              <AccountOptions accounts={accountList} baseCurrency={activeSpace.base_currency} />
             </select>
           </div>
         </div>
@@ -808,12 +897,13 @@ export default function TransactionsPage() {
                   <p className="text-xs text-ink-muted">
                     {formatDate(t.date)}
                     {t.category_id ? ` · ${byId.cats.get(t.category_id) ?? ""}` : ""}
-                    {t.payment_method_id
-                      ? ` · ${byId.pms.get(t.payment_method_id) ?? ""}`
+                    {t.account_id
+                      ? ` · ${byId.accounts.get(t.account_id) ?? ""}`
                       : ""}
-                    {t.type === "transfer" && t.payment_method_to_id
-                      ? ` → ${byId.pms.get(t.payment_method_to_id) ?? ""}`
+                    {t.type === "transfer" && t.account_to_id
+                      ? ` → ${byId.accounts.get(t.account_to_id) ?? ""}`
                       : ""}
+                    {t.fee_for_id ? " · comisión de transferencia" : ""}
                   </p>
                   </div>
                 </div>
@@ -829,7 +919,26 @@ export default function TransactionsPage() {
                   >
                     {t.type === "income" ? "+" : t.type === "expense" ? "−" : ""}
                     {formatMoney(t.amount, t.currency)}
+                    {/* TXN-13/14: lo recibido en otra moneda y la comisión aparte. */}
+                    {t.amount_to && t.account_to_id && (
+                      <span className="block text-right text-xs font-normal text-ink-muted">
+                        recibe{" "}
+                        {formatMoney(t.amount_to, accountById.get(t.account_to_id)?.currency ?? t.currency)}
+                      </span>
+                    )}
+                    {t.fee_amount && (
+                      <span className="block text-right text-xs font-normal text-ink-muted">
+                        + {formatMoney(t.fee_amount, t.currency)} comisión
+                      </span>
+                    )}
                   </span>
+                  {t.fee_for_id ? (
+                    // TXN-14: la comisión se edita o borra desde su transferencia.
+                    <span className="w-14 text-right text-[11px] text-ink-subtle" title="Se edita desde su transferencia">
+                      auto
+                    </span>
+                  ) : (
+                  <>
                   <button
                     aria-label="Editar transacción"
                     className="rounded p-1 text-ink-muted transition-colors hover:bg-muted hover:text-accent"
@@ -848,6 +957,8 @@ export default function TransactionsPage() {
                       <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd" />
                     </svg>
                   </button>
+                  </>
+                  )}
                 </div>
               </li>
             ))}
@@ -882,8 +993,7 @@ export default function TransactionsPage() {
               <p>
                 Ya {pendingCreate.matches.length === 1 ? "existe un movimiento" : `existen ${pendingCreate.matches.length} movimientos`}{" "}
                 con la misma descripción, tipo, categoría y monto el{" "}
-                <strong>{formatDate(pendingCreate.body.date)}</strong> (sin importar el método de
-                pago):
+                <strong>{formatDate(pendingCreate.body.date)}</strong> (sin importar la cuenta):
               </p>
             </div>
             <ul className="divide-y divide-line rounded-lg border border-line bg-muted text-sm">
@@ -892,7 +1002,7 @@ export default function TransactionsPage() {
                   <div className="min-w-0">
                     <p className="truncate font-medium">{txnTitle(m)}</p>
                     <p className="text-xs text-ink-muted">
-                      {TYPE_LABELS[m.type as TxnType]} · {txnMethods(m) || "Sin método"}
+                      {TYPE_LABELS[m.type as TxnType]} · {txnAccounts(m) || "Sin cuenta"}
                     </p>
                   </div>
                   <span className="tabular shrink-0 font-semibold">
@@ -902,10 +1012,10 @@ export default function TransactionsPage() {
               ))}
             </ul>
             <p className="text-sm">
-              Lo que vas a registrar se pagaría con{" "}
+              Lo que vas a registrar sería en{" "}
               <strong>
-                {(pendingCreate.body.payment_method_id &&
-                  byId.pms.get(pendingCreate.body.payment_method_id)) ||
+                {(pendingCreate.body.account_id &&
+                  byId.accounts.get(pendingCreate.body.account_id)) ||
                   "—"}
               </strong>
               . ¿Seguro que no es el mismo gasto y deseas continuar?
@@ -943,7 +1053,7 @@ export default function TransactionsPage() {
               <p className="truncate text-sm">{txnTitle(created)}</p>
               <p className="text-xs text-ink-muted">
                 {formatMoney(created.amount, created.currency)} · {formatDate(created.date)}
-                {txnMethods(created) ? ` · ${txnMethods(created)}` : ""}
+                {txnAccounts(created) ? ` · ${txnAccounts(created)}` : ""}
               </p>
             </div>
             <button
@@ -985,8 +1095,8 @@ export default function TransactionsPage() {
               {deletingTxn.category_id && (
                 <p className="mt-0.5 text-xs text-ink-muted">
                   {byId.cats.get(deletingTxn.category_id)}
-                  {deletingTxn.payment_method_id
-                    ? ` · ${byId.pms.get(deletingTxn.payment_method_id)}`
+                  {deletingTxn.account_id
+                    ? ` · ${byId.accounts.get(deletingTxn.account_id)}`
                     : ""}
                 </p>
               )}
@@ -1040,7 +1150,7 @@ export default function TransactionsPage() {
           {/* Fila 2 — Monto · Fecha · Categoría/Desde · Método/Hacia */}
           <div className="grid grid-cols-4 gap-3">
             <div>
-              <label className="label">Monto</label>
+              <label className="label">Monto ({editCurrency})</label>
               <input
                 className="input"
                 inputMode="decimal"
@@ -1067,17 +1177,15 @@ export default function TransactionsPage() {
                   <select
                     className="input"
                     required
-                    value={editMethodId}
-                    onChange={(e) => { setEditMethodId(e.target.value); setEditCycleHint(null); }}
+                    value={editAccountId}
+                    onChange={(e) => { setEditAccountId(e.target.value); setEditCycleHint(null); }}
                   >
                     <option value="">Selecciona…</option>
-                    {(methods.data ?? []).map((m) => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
+                    <AccountOptions accounts={accountList} baseCurrency={activeSpace.base_currency} />
                   </select>
-                  {editTransferFromBalance !== null && (
+                  {editTransferFromBalance !== null && editAccount && (
                     <p className="mt-1 text-xs text-ink-muted">
-                      Disponible: {formatMoney(editTransferFromBalance, activeSpace.base_currency)}
+                      Disponible: {formatMoney(editTransferFromBalance, editAccount.currency)}
                     </p>
                   )}
                 </div>
@@ -1086,17 +1194,26 @@ export default function TransactionsPage() {
                   <select
                     className="input"
                     required
-                    value={editMethodToId}
-                    onChange={(e) => setEditMethodToId(e.target.value)}
+                    value={editAccountToId}
+                    onChange={(e) => setEditAccountToId(e.target.value)}
                   >
                     <option value="">Selecciona…</option>
-                    {(methods.data ?? [])
-                      .filter((m) => m.id !== editMethodId)
-                      .map((m) => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                      ))}
+                    <AccountOptions
+                      accounts={accountList}
+                      exclude={editAccountId}
+                      baseCurrency={activeSpace.base_currency}
+                    />
                   </select>
                 </div>
+                <TransferExtras
+                  source={editAccount}
+                  target={editAccountTo}
+                  amount={editAmount}
+                  amountTo={editAmountTo}
+                  setAmountTo={setEditAmountTo}
+                  fee={editFeeAmount}
+                  setFee={setEditFeeAmount}
+                />
               </>
             ) : (
               <>
@@ -1115,17 +1232,15 @@ export default function TransactionsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="label">Método de pago</label>
+                  <label className="label">Cuenta</label>
                   <select
                     className="input"
                     required
-                    value={editMethodId}
-                    onChange={(e) => { setEditMethodId(e.target.value); setEditCycleHint(null); }}
+                    value={editAccountId}
+                    onChange={(e) => { setEditAccountId(e.target.value); setEditCycleHint(null); }}
                   >
                     <option value="">Selecciona…</option>
-                    {(methods.data ?? []).map((m) => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
+                    <AccountOptions accounts={accountList} baseCurrency={activeSpace.base_currency} />
                   </select>
                 </div>
               </>
@@ -1162,28 +1277,15 @@ export default function TransactionsPage() {
             </div>
           )}
 
-          {/* Fila 3 — Descripción · Moneda */}
-          <div className="grid grid-cols-4 gap-3">
-            <div className="col-span-3">
-              <label className="label">Descripción</label>
-              <input
-                className="input"
-                placeholder="¿En qué fue?"
-                value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="label">Moneda</label>
-              <select
-                className="input"
-                value={editCurrency}
-                onChange={(e) => setEditCurrency(e.target.value)}
-              >
-                <option value="MXN">MXN</option>
-                <option value="USD">USD</option>
-              </select>
-            </div>
+          {/* Fila 3 — Descripción (la moneda la define la cuenta, TAR-10) */}
+          <div>
+            <label className="label">Descripción</label>
+            <input
+              className="input"
+              placeholder="¿En qué fue?"
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+            />
           </div>
 
           {editError && <p className="text-sm text-red-600 dark:text-red-400">{editError}</p>}

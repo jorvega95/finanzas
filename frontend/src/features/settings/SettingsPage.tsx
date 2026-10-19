@@ -1,16 +1,13 @@
-// Ajustes: catálogos (CAT-01..05) y reglas recurrentes (REC-01..04).
+// Ajustes: catálogos (CAT-01..06) y reglas recurrentes (REC-01..04). Las
+// cuentas (antes "métodos de pago", CAT-07 derogada) viven en la página Cuentas.
 import { useState, type FormEvent } from "react";
+import { useAccounts } from "../../api/accounts";
 import {
   useCategories,
   useCreateCategory,
-  useCreatePaymentMethod,
   useDeleteCategory,
-  useDeletePaymentMethod,
-  usePaymentMethods,
   useUpdateCategory,
-  useUpdatePaymentMethod,
   type CategoryOut,
-  type PaymentMethodOut,
 } from "../../api/catalogs";
 import { ApiError } from "../../api/client";
 import Modal from "../../components/ui/Modal";
@@ -314,226 +311,6 @@ function CategoriesSection() {
   );
 }
 
-function PaymentMethodsSection() {
-  const methods = usePaymentMethods(true);
-  const createMethod = useCreatePaymentMethod();
-  const updateMethod = useUpdatePaymentMethod();
-  const deleteMethod = useDeletePaymentMethod();
-
-  const [name, setName] = useState("");
-  const [type, setType] = useState<"cash" | "debit" | "transfer" | "other">("debit");
-
-  const [editingMethod, setEditingMethod] = useState<PaymentMethodOut | null>(null);
-  const [editName, setEditName] = useState("");
-  const [deletingMethod, setDeletingMethod] = useState<PaymentMethodOut | null>(null);
-  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
-
-  const nonCardMethods = (methods.data ?? []).filter((m) => m.card_id === null);
-
-  function openEditModal(m: PaymentMethodOut) {
-    setEditingMethod(m);
-    setEditName(m.name);
-  }
-
-  function closeEditModal() {
-    setEditingMethod(null);
-  }
-
-  function handleSaveEdit(e: FormEvent) {
-    e.preventDefault();
-    if (!editingMethod) return;
-    updateMethod.mutate(
-      { id: editingMethod.id, ...(editName !== editingMethod.name && { name: editName }) },
-      { onSuccess: closeEditModal },
-    );
-  }
-
-  function handleDelete(m: PaymentMethodOut) {
-    setDeleteMessage(null);
-    deleteMethod.mutate(m.id, {
-      onSuccess: () => setDeletingMethod(null),
-      onError: (err) => {
-        if (err instanceof ApiError && err.status === 409) {
-          updateMethod.mutate(
-            { id: m.id, is_active: false },
-            {
-              onSuccess: () => {
-                setDeletingMethod(null);
-                setDeleteMessage("Tiene registros asociados — fue desactivado en su lugar.");
-              },
-            },
-          );
-        }
-      },
-    });
-  }
-
-  return (
-    <section className="card p-5">
-      <h2 className="mb-3 text-base font-semibold tracking-tight">Métodos de pago</h2>
-      <details className="mb-4 rounded-lg border border-line">
-        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-ink-muted select-none hover:text-ink">
-          ¿Para qué sirven?
-        </summary>
-        <div className="space-y-2 px-3 pb-3 pt-1 text-xs text-ink-muted">
-          <p>
-            Cada transacción debe registrar <em>con qué</em> se pagó. Las tarjetas que agregas en
-            la sección <strong className="text-ink">Tarjetas</strong> generan
-            su propio método de pago automáticamente — no necesitas hacer nada aquí para ellas.
-          </p>
-          <p>Esta sección es para los casos que no son tarjeta registrada:</p>
-          <ul className="ml-3 list-disc space-y-1">
-            <li>
-              <strong className="text-ink">Efectivo</strong> — el único caso
-              que casi todos los usuarios necesitan.
-            </li>
-            <li>
-              <strong className="text-ink">Transferencia / Débito</strong> —
-              útil si tienes cuentas bancarias que prefieres no registrar como tarjeta completa
-              (sin seguimiento de saldo ni ciclos).
-            </li>
-          </ul>
-          <p>
-            Si todas tus cuentas están registradas como tarjetas, esta sección solo te sirve para
-            el efectivo. Los métodos "Débito" y "Transferencia" que aparecen por defecto puedes
-            desactivarlos si no los usas.
-          </p>
-        </div>
-      </details>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          createMethod.mutate({ name, type }, { onSuccess: () => setName("") });
-        }}
-        className="mb-4 flex flex-wrap gap-2"
-      >
-        <input
-          className="input w-48"
-          placeholder="Nuevo método"
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <select
-          className="input w-36"
-          value={type}
-          onChange={(e) => setType(e.target.value as typeof type)}
-        >
-          <option value="cash">Efectivo</option>
-          <option value="debit">Débito</option>
-          <option value="transfer">Transferencia</option>
-          <option value="other">Otro</option>
-        </select>
-        <button className="btn-primary" disabled={createMethod.isPending}>
-          Agregar
-        </button>
-      </form>
-      <ErrorText error={createMethod.error ?? deleteMethod.error} />
-      {deleteMessage && (
-        <p className="mb-2 text-sm text-amber-600 dark:text-amber-400">{deleteMessage}</p>
-      )}
-      <ul className="space-y-1">
-        {nonCardMethods.map((m) => (
-          <li
-            key={m.id}
-            className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-muted"
-          >
-            <span className={m.is_active ? "" : "line-through opacity-50"}>{m.name}</span>
-            <span className="flex items-center gap-1">
-              <button
-                aria-label="Editar método de pago"
-                className="rounded p-1 text-ink-muted transition-colors hover:bg-muted hover:text-accent"
-                onClick={() => openEditModal(m)}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                  <path d="M13.586 3.586a2 2 0 1 1 2.828 2.828l-.793.793-2.828-2.828.793-.793ZM11.379 5.793 3 14.172V17h2.828l8.38-8.379-2.83-2.828Z" />
-                </svg>
-              </button>
-              {!m.is_active && (
-                <button
-                  className="text-xs text-accent hover:underline"
-                  onClick={() => updateMethod.mutate({ id: m.id, is_active: true })}
-                >
-                  Reactivar
-                </button>
-              )}
-              <button
-                aria-label="Eliminar método de pago"
-                className="rounded p-1 text-ink-muted transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-40 dark:hover:text-red-400"
-                onClick={() => setDeletingMethod(m)}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                  <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
-                </svg>
-              </button>
-            </span>
-          </li>
-        ))}
-      </ul>
-      <Modal open={editingMethod !== null} onClose={closeEditModal} title="Editar método de pago">
-        <form onSubmit={handleSaveEdit} className="space-y-4">
-          <div>
-            <label className="label">Nombre</label>
-            <input
-              className="input"
-              value={editName}
-              required
-              onChange={(e) => setEditName(e.target.value)}
-            />
-          </div>
-          {editName !== editingMethod?.name && editName.trim() !== "" && (
-            <p className="rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
-              Todas las transacciones asignadas a este método reflejarán el nuevo nombre.
-            </p>
-          )}
-          <ErrorText error={updateMethod.error} />
-          <div className="flex justify-end gap-2 pt-1">
-            <button type="button" className="btn-secondary" onClick={closeEditModal}>
-              Cancelar
-            </button>
-            <button type="submit" className="btn-primary" disabled={updateMethod.isPending}>
-              Guardar
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Modal de confirmación de eliminación */}
-      <Modal
-        open={deletingMethod !== null}
-        onClose={() => setDeletingMethod(null)}
-        title="Eliminar método de pago"
-      >
-        {deletingMethod && (
-          <div className="space-y-4">
-            <p className="text-sm">
-              ¿Eliminar <strong>{deletingMethod.name}</strong>? Si tiene transacciones
-              asociadas, se desactivará en su lugar.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => setDeletingMethod(null)}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="btn-danger"
-                disabled={deleteMethod.isPending || updateMethod.isPending}
-                onClick={() => handleDelete(deletingMethod)}
-              >
-                Eliminar
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
-    </section>
-  );
-}
-
 interface RuleListProps {
   rules: RecurringRuleOut[];
   onEdit: (rule: RecurringRuleOut) => void;
@@ -594,7 +371,7 @@ function RecurringSection() {
   const { activeSpace } = useSpace();
   const rules = useRecurringRules(true);
   const categories = useCategories();
-  const methods = usePaymentMethods();
+  const accounts = useAccounts();
   const createRule = useCreateRecurringRule();
   const updateRule = useUpdateRecurringRule();
   const deleteRule = useDeleteRecurringRule();
@@ -605,7 +382,7 @@ function RecurringSection() {
   const [expFreq, setExpFreq] = useState("monthly");
   const [expStart, setExpStart] = useState("");
   const [expCatId, setExpCatId] = useState("");
-  const [expMethodId, setExpMethodId] = useState("");
+  const [expAccountId, setExpAccountId] = useState("");
 
   // Create — ingreso
   const [incDesc, setIncDesc] = useState("");
@@ -613,14 +390,14 @@ function RecurringSection() {
   const [incFreq, setIncFreq] = useState("monthly");
   const [incStart, setIncStart] = useState("");
   const [incCatId, setIncCatId] = useState("");
-  const [incMethodId, setIncMethodId] = useState("");
+  const [incAccountId, setIncAccountId] = useState("");
 
   // Modal de edición
   const [editingRule, setEditingRule] = useState<RecurringRuleOut | null>(null);
   const [editAmount, setEditAmount] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editCategoryId, setEditCategoryId] = useState("");
-  const [editMethodId, setEditMethodId] = useState("");
+  const [editAccountId, setEditAccountId] = useState("");
   const [editEndDate, setEditEndDate] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -631,7 +408,10 @@ function RecurringSection() {
   const incomeRules = (rules.data ?? []).filter((r) => r.type === "income");
   const expenseCats = (categories.data ?? []).filter((c) => c.kind === "expense");
   const incomeCats = (categories.data ?? []).filter((c) => c.kind === "income");
-  const allMethods = methods.data ?? [];
+  const allAccounts = accounts.data ?? [];
+  // TAR-10: la regla va en la moneda de su cuenta.
+  const currencyOf = (accountId: string) =>
+    allAccounts.find((a) => a.id === accountId)?.currency ?? activeSpace.base_currency;
   const editCategories = editingRule
     ? (categories.data ?? []).filter((c) => c.kind === editingRule.type)
     : [];
@@ -643,11 +423,11 @@ function RecurringSection() {
         type: "expense",
         description: expDesc,
         amount: expAmount,
-        currency: activeSpace.base_currency,
+        currency: currencyOf(expAccountId),
         frequency: expFreq,
         start_date: expStart,
         category_id: expCatId || null,
-        payment_method_id: expMethodId || null,
+        account_id: expAccountId,
       },
       { onSuccess: () => { setExpDesc(""); setExpAmount(""); } },
     );
@@ -660,11 +440,11 @@ function RecurringSection() {
         type: "income",
         description: incDesc,
         amount: incAmount,
-        currency: activeSpace.base_currency,
+        currency: currencyOf(incAccountId),
         frequency: incFreq,
         start_date: incStart,
         category_id: incCatId || null,
-        payment_method_id: incMethodId || null,
+        account_id: incAccountId,
       },
       { onSuccess: () => { setIncDesc(""); setIncAmount(""); } },
     );
@@ -675,7 +455,7 @@ function RecurringSection() {
     setEditAmount(rule.amount);
     setEditDescription(rule.description);
     setEditCategoryId(rule.category_id ?? "");
-    setEditMethodId(rule.payment_method_id ?? "");
+    setEditAccountId(rule.account_id);
     setEditEndDate(rule.end_date ?? "");
     setEditError(null);
   }
@@ -699,7 +479,7 @@ function RecurringSection() {
         amount: editAmount,
         description: editDescription,
         category_id: editCategoryId || null,
-        payment_method_id: editMethodId || null,
+        account_id: editAccountId || undefined,
         end_date: editEndDate || null,
       },
       { onSuccess: () => setEditingRule(null) },
@@ -766,11 +546,16 @@ function RecurringSection() {
           <select
             className="input col-span-2"
             required
-            value={expMethodId}
-            onChange={(e) => setExpMethodId(e.target.value)}
+            value={expAccountId}
+            onChange={(e) => setExpAccountId(e.target.value)}
           >
-            <option value="">Método de pago…</option>
-            {allMethods.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            <option value="">Cuenta…</option>
+            {allAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {a.currency !== activeSpace.base_currency ? ` (${a.currency})` : ""}
+              </option>
+            ))}
           </select>
         </form>
         <ErrorText error={createRule.error} />
@@ -831,11 +616,16 @@ function RecurringSection() {
           <select
             className="input col-span-2"
             required
-            value={incMethodId}
-            onChange={(e) => setIncMethodId(e.target.value)}
+            value={incAccountId}
+            onChange={(e) => setIncAccountId(e.target.value)}
           >
-            <option value="">Método de pago…</option>
-            {allMethods.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            <option value="">Cuenta…</option>
+            {allAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {a.currency !== activeSpace.base_currency ? ` (${a.currency})` : ""}
+              </option>
+            ))}
           </select>
         </form>
         <ErrorText error={createRule.error} />
@@ -902,14 +692,18 @@ function RecurringSection() {
               </select>
             </div>
             <div>
-              <label className="label">Método de pago</label>
+              <label className="label">Cuenta</label>
               <select
                 className="input"
-                value={editMethodId}
-                onChange={(e) => setEditMethodId(e.target.value)}
+                required
+                value={editAccountId}
+                onChange={(e) => setEditAccountId(e.target.value)}
               >
-                <option value="">Sin método</option>
-                {allMethods.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                {allAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -981,7 +775,6 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-4xl space-y-6">
       <MembersSection />
       <CategoriesSection />
-      <PaymentMethodsSection />
       <RecurringSection />
       <ImportSection />
     </div>

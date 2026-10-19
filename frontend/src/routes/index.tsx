@@ -1,7 +1,7 @@
 // Rutas por feature (src/features/*).
 import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
-import CardsPage from "../features/cards/CardsPage";
+import AccountsPage from "../features/accounts/AccountsPage";
 import DashboardPage from "../features/dashboard/DashboardPage";
 import ForecastPage from "../features/forecast/ForecastPage";
 import InvestmentsPage from "../features/investments/InvestmentsPage";
@@ -30,7 +30,8 @@ export const router = createBrowserRouter([
           { path: "/", element: <DashboardPage /> },
           { path: "/pronostico", element: <ForecastPage /> },
           { path: "/transacciones", element: <TransactionsPage /> },
-          { path: "/tarjetas", element: <CardsPage /> },
+          { path: "/cuentas", element: <AccountsPage /> },
+          { path: "/tarjetas", element: <Navigate to="/cuentas" replace /> },
           { path: "/msi", element: <MsiPage /> },
           { path: "/inversiones", element: <InvestmentsPage /> },
           { path: "/ajustes", element: <SettingsPage /> },

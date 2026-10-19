@@ -1,5 +1,6 @@
-// Catálogos (CAT-01..07).
+// Catálogos (CAT-01..08).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { AccountBehavior } from "./accounts";
 import { api } from "./client";
 
 export interface CategoryOut {
@@ -13,20 +14,10 @@ export interface CategoryOut {
   is_active: boolean;
 }
 
-export interface PaymentMethodOut {
+export interface AccountTypeOut {
   id: string;
   name: string;
-  type: "cash" | "debit" | "credit_card" | "prepaid" | "transfer" | "other";
-  card_id: string | null;
-  is_active: boolean;
-}
-
-export type CardBehavior = "credit" | "debit" | "prepaid";
-
-export interface CardTypeOut {
-  id: string;
-  name: string;
-  behavior: CardBehavior;
+  behavior: AccountBehavior;
   icon: string | null;
   color: string | null;
   is_system: boolean;
@@ -43,29 +34,19 @@ export function useCategories(includeInactive = false) {
   });
 }
 
-export function usePaymentMethods(includeInactive = false) {
+export function useAccountTypes(includeInactive = false) {
   return useQuery({
-    queryKey: ["payment-methods", includeInactive],
+    queryKey: ["account-types", includeInactive],
     queryFn: () =>
-      api<PaymentMethodOut[]>(
-        `/api/v1/catalogs/payment-methods?include_inactive=${includeInactive}`,
-      ),
+      api<AccountTypeOut[]>(`/api/v1/catalogs/account-types?include_inactive=${includeInactive}`),
   });
 }
 
-export function useCardTypes(includeInactive = false) {
-  return useQuery({
-    queryKey: ["card-types", includeInactive],
-    queryFn: () =>
-      api<CardTypeOut[]>(`/api/v1/catalogs/card-types?include_inactive=${includeInactive}`),
-  });
-}
-
-export function useCreateCardType() {
-  const invalidate = useInvalidate(["card-types"]);
+export function useCreateAccountType() {
+  const invalidate = useInvalidate(["account-types"]);
   return useMutation({
-    mutationFn: (body: { name: string; behavior: CardBehavior }) =>
-      api<CardTypeOut>("/api/v1/catalogs/card-types", {
+    mutationFn: (body: { name: string; behavior: AccountBehavior }) =>
+      api<AccountTypeOut>("/api/v1/catalogs/account-types", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -120,39 +101,6 @@ export function useDeleteCategory() {
   return useMutation({
     mutationFn: (id: string) =>
       api<void>(`/api/v1/catalogs/categories/${id}`, { method: "DELETE" }),
-    onSuccess: invalidate,
-  });
-}
-
-export function useCreatePaymentMethod() {
-  const invalidate = useInvalidate(["payment-methods"]);
-  return useMutation({
-    mutationFn: (body: { name: string; type: PaymentMethodOut["type"] }) =>
-      api<PaymentMethodOut>("/api/v1/catalogs/payment-methods", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: invalidate,
-  });
-}
-
-export function useUpdatePaymentMethod() {
-  const invalidate = useInvalidate(["payment-methods"]);
-  return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; name?: string; is_active?: boolean }) =>
-      api<PaymentMethodOut>(`/api/v1/catalogs/payment-methods/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: invalidate,
-  });
-}
-
-export function useDeletePaymentMethod() {
-  const invalidate = useInvalidate(["payment-methods"]);
-  return useMutation({
-    mutationFn: (id: string) =>
-      api<void>(`/api/v1/catalogs/payment-methods/${id}`, { method: "DELETE" }),
     onSuccess: invalidate,
   });
 }

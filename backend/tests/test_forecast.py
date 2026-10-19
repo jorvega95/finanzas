@@ -11,10 +11,10 @@ from decimal import Decimal
 from freezegun import freeze_time
 from sqlalchemy import func, select
 
-from app.models.cards import CardStatement
+from app.models.accounts import Statement
 from app.models.fx import ExchangeRate
 from tests.conftest import bootstrap_space
-from tests.test_cards import charge, close_cycles, create_card, refund
+from tests.test_accounts import charge, close_cycles, create_card, refund
 
 
 async def forecast(client, ctx, horizon_months=6, cash_adjustment="0"):
@@ -27,7 +27,8 @@ async def forecast(client, ctx, horizon_months=6, cash_adjustment="0"):
     return res.json()
 
 
-async def add_income(client, ctx, amount, date_str, currency="MXN", method="Débito"):
+async def add_income(client, ctx, amount, date_str, currency="MXN", method=None):
+    method = method or ("Dólares" if currency == "USD" else "Débito")  # TAR-10
     res = await client.post(
         "/api/v1/transactions",
         headers=ctx["headers"],
@@ -37,7 +38,7 @@ async def add_income(client, ctx, amount, date_str, currency="MXN", method="Déb
             "amount": amount,
             "currency": currency,
             "category_id": ctx["categories"]["Nómina"]["id"],
-            "payment_method_id": ctx["methods"][method]["id"],
+            "account_id": ctx["accounts"][method]["id"],
         },
     )
     assert res.status_code == 201, res.text
@@ -54,7 +55,7 @@ async def add_payroll_rule(client, ctx, amount, day=15, start="2026-01-15"):
             "currency": "MXN",
             "description": "Nómina",
             "category_id": ctx["categories"]["Nómina"]["id"],
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
             "frequency": "monthly",
             "start_date": start,
             "month_day": day,
@@ -73,7 +74,7 @@ async def test_pro05_overdraft_user_scenario(client):
     card = await create_card(client, ctx, statement_day=15, payment_due_days=2)
     await add_payroll_rule(client, ctx, "5000.00")
     # Cargo el 20-jun ⇒ ciclo que cierra 15-jul, due 17-jul.
-    await charge(client, ctx, card["payment_method_id"], "2026-06-20", "8000.00")
+    await charge(client, ctx, card["id"], "2026-06-20", "8000.00")
 
     body = await forecast(client, ctx, cash_adjustment="0")
 
@@ -91,7 +92,7 @@ async def test_pro05_sufficient_no_overdraft(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, statement_day=15, payment_due_days=2)
     await add_payroll_rule(client, ctx, "5000.00")
-    await charge(client, ctx, card["payment_method_id"], "2026-06-20", "8000.00")
+    await charge(client, ctx, card["id"], "2026-06-20", "8000.00")
 
     # 5,000 caja inicial + 5,000 nómina (15-jul) = 10,000 ≥ 8,000.
     body = await forecast(client, ctx, cash_adjustment="5000.00")
@@ -109,7 +110,7 @@ async def test_pro03_msi_future_installments_push_debt(client):
     Compra 6,000/6 ⇒ 6 cuotas de 1,000 repartidas en cortes futuros."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, statement_day=15, payment_due_days=2)
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "6000.00", "Laptop")
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "6000.00", "Laptop")
     res = await client.post(
         "/api/v1/installment-plans",
         headers=ctx["headers"],
@@ -144,7 +145,7 @@ async def test_pro03_non_credit_recurring_is_immediate(client):
             "currency": "MXN",
             "description": "Spotify",
             "category_id": ctx["categories"]["Entretenimiento"]["id"],
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
             "frequency": "monthly",
             "start_date": "2026-01-25",
             "month_day": 25,
@@ -184,26 +185,26 @@ async def test_pro03_paid_statement_not_recycled_into_next_projection(client):
     abierto actual debe alimentar el próximo pago)."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, statement_day=15, payment_due_days=2)
-    method_id = card["payment_method_id"]
-    debito = ctx["methods"]["Débito"]["id"]
+    method_id = card["id"]
+    debito = ctx["accounts"]["Débito"]["id"]
 
     # Cargo en el ciclo [16-abr, 15-may], cerrado y pagado por completo.
     await charge(client, ctx, method_id, "2026-05-10", "500.00")
     closed = await close_cycles(client, ctx)
     statement_id = closed[0]["id"]
     res = await client.post(
-        f"/api/v1/cards/{card['id']}/payments",
+        f"/api/v1/accounts/{card['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "500.00",
-            "from_payment_method_id": debito,
+            "from_account_id": debito,
             "date": "2026-05-20",
             "statement_id": statement_id,
         },
     )
     assert res.status_code == 201, res.text
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     assert next(s for s in statements if s["id"] == statement_id)["status"] == "paid"
 
@@ -225,11 +226,11 @@ async def test_pro01_readonly_no_statement_materialization(client, db_session):
     """PRO-01: el pronóstico no materializa statements (read-only)."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, statement_day=15, payment_due_days=2)
-    await charge(client, ctx, card["payment_method_id"], "2026-06-20", "8000.00")
+    await charge(client, ctx, card["id"], "2026-06-20", "8000.00")
 
-    before = await db_session.scalar(select(func.count()).select_from(CardStatement))
+    before = await db_session.scalar(select(func.count()).select_from(Statement))
     await forecast(client, ctx, horizon_months=12)
-    after = await db_session.scalar(select(func.count()).select_from(CardStatement))
+    after = await db_session.scalar(select(func.count()).select_from(Statement))
     assert before == after
 
 
@@ -240,7 +241,7 @@ async def test_pend02_future_refund_on_statement_not_double_counted(client):
     (PRO-04) — ya está reflejado en el `card_due` de ese statement (PRO-03)."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
     closed = await close_cycles(client, ctx)

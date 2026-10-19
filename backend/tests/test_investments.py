@@ -8,7 +8,7 @@ from freezegun import freeze_time
 from app.models.fx import ExchangeRate
 from app.services import prices
 from tests.conftest import bootstrap_space
-from tests.test_cards import charge, close_cycles, create_card
+from tests.test_accounts import charge, close_cycles, create_card
 
 
 class FakeProvider:
@@ -223,8 +223,8 @@ async def test_pat01_net_worth_assets_minus_card_debt(client, db_session, monkey
 
     # Pasivos: statement cerrado 500 + ciclo en curso 200 = 700.
     card = await create_card(client, ctx)
-    await charge(client, ctx, card["payment_method_id"], "2026-06-10", "500.00")
-    await charge(client, ctx, card["payment_method_id"], "2026-06-18", "200.00")
+    await charge(client, ctx, card["id"], "2026-06-10", "500.00")
+    await charge(client, ctx, card["id"], "2026-06-18", "200.00")
     await close_cycles(client, ctx)
 
     res = await client.post("/api/v1/investments/net-worth/snapshot", headers=ctx["headers"])

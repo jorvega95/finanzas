@@ -9,7 +9,7 @@ from fastapi import status as http_status
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.cards import Card, CardStatement
+from app.models.accounts import Account, Statement
 from app.models.reminders import Reminder, ReminderChannel, ReminderKind, ReminderStatus
 from app.models.spaces import Space
 
@@ -22,12 +22,12 @@ HISTORY_LIMIT = 100
 
 async def schedule_card_reminders(
     session: AsyncSession,
-    card: Card,
-    statement: CardStatement,
+    account: Account,
+    statement: Statement,
     today: date | None = None,
 ) -> None:
     """REM-01: al cerrar un statement se programan recordatorios a
-    due_date − N para cada N de card.reminder_days, por canal (REM-04).
+    due_date − N para cada N de account.reminder_days, por canal (REM-04).
     Único por (statement, offset, canal) — REM-02.
 
     REM-01: solo se crean recordatorios con fire_at >= today. Si today es None
@@ -35,12 +35,12 @@ async def schedule_card_reminders(
     amount_due = statement.computed_total - statement.paid_amount
     if amount_due <= 0:
         return
-    # REM-03: alias + monto + fecha límite; nunca last4.
-    # CWE-117: el alias es texto libre y el mensaje termina en los logs; se
+    # REM-03: nombre + monto + fecha límite; nunca last4.
+    # CWE-117: el nombre es texto libre y el mensaje termina en los logs; se
     # colapsan los saltos de línea para que no se puedan forjar líneas de log.
-    alias = " ".join(card.alias.split())
-    message = f"Pago de {alias}: ${amount_due} antes del {statement.due_date.isoformat()}"
-    for offset in card.reminder_days:
+    name = " ".join(account.name.split())
+    message = f"Pago de {name}: ${amount_due} antes del {statement.due_date.isoformat()}"
+    for offset in account.reminder_days:
         fire_at = statement.due_date - timedelta(days=int(offset))
         # REM-01: skip past fire dates to avoid immediate spurious notifications
         # when closing historical statements (backfill, opening balance, etc.).
@@ -70,7 +70,7 @@ async def schedule_card_reminders(
     await session.flush()
 
 
-async def cancel_card_reminders(session: AsyncSession, statement: CardStatement) -> None:
+async def cancel_card_reminders(session: AsyncSession, statement: Statement) -> None:
     """REM-01b: al pagar un statement se cancelan sus recordatorios pending Y sent,
     para que desaparezcan del inbox en cuanto se registra el pago."""
     reminders = (

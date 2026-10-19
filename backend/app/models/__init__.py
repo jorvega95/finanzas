@@ -1,16 +1,20 @@
 """Import every model here so Alembic autogenerate sees the full metadata."""
 
 from app.db.base import Base
+from app.models.accounts import (
+    Account,
+    AccountLayout,
+    CutoffDayPolicy,
+    Statement,
+    StatementStatus,
+)
 from app.models.budgets import Budget
-from app.models.cards import Card, CardLayout, CardStatement, CutoffDayPolicy, StatementStatus
 from app.models.catalogs import (
-    CardBehavior,
-    CardType,
+    AccountBehavior,
+    AccountType,
     Category,
     CategoryKind,
     ExpenseNature,
-    PaymentMethod,
-    PaymentMethodType,
 )
 from app.models.fx import ExchangeRate
 from app.models.imports import ImportBatch, ImportStatus
@@ -32,15 +36,14 @@ from app.models.spaces import Profile, Space, SpaceInvite, SpaceMember, SpaceRol
 from app.models.transactions import Transaction, TransactionType
 
 __all__ = [
+    "Account",
+    "AccountBehavior",
     "AccountKind",
+    "AccountLayout",
+    "AccountType",
     "AssetPrice",
     "Base",
     "Budget",
-    "Card",
-    "CardBehavior",
-    "CardLayout",
-    "CardStatement",
-    "CardType",
     "Holding",
     "ImportBatch",
     "ImportStatus",
@@ -58,8 +61,6 @@ __all__ = [
     "Installment",
     "InstallmentPlan",
     "InstallmentStatus",
-    "PaymentMethod",
-    "PaymentMethodType",
     "PlanStatus",
     "Profile",
     "RecurringFrequency",
@@ -74,6 +75,7 @@ __all__ = [
     "SpaceMember",
     "SpaceRole",
     "SpaceType",
+    "Statement",
     "StatementStatus",
     "Transaction",
     "TransactionType",

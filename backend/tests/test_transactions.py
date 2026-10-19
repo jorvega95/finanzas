@@ -17,7 +17,7 @@ def expense_payload(ctx, **overrides):
         "amount": "150.50",
         "currency": "MXN",
         "category_id": ctx["categories"]["Comida"]["id"],
-        "payment_method_id": ctx["methods"]["Efectivo"]["id"],
+        "account_id": ctx["accounts"]["Efectivo"]["id"],
         "description": "Tacos",
     }
     base.update(overrides)
@@ -59,8 +59,8 @@ async def test_txn01_create_expense_and_required_fields(client):
 
 async def test_txn02_transfer_requires_distinct_methods_no_category(client):
     ctx = await bootstrap_space(client)
-    efectivo = ctx["methods"]["Efectivo"]["id"]
-    debito = ctx["methods"]["Débito"]["id"]
+    efectivo = ctx["accounts"]["Efectivo"]["id"]
+    debito = ctx["accounts"]["Débito"]["id"]
 
     res = await client.post(
         "/api/v1/transactions",
@@ -70,8 +70,8 @@ async def test_txn02_transfer_requires_distinct_methods_no_category(client):
             "date": "2026-06-01",
             "amount": "1000.00",
             "currency": "MXN",
-            "payment_method_id": debito,
-            "payment_method_to_id": efectivo,
+            "account_id": debito,
+            "account_to_id": efectivo,
         },
     )
     assert res.status_code == 201
@@ -85,8 +85,8 @@ async def test_txn02_transfer_requires_distinct_methods_no_category(client):
             "date": "2026-06-01",
             "amount": "100.00",
             "currency": "MXN",
-            "payment_method_id": debito,
-            "payment_method_to_id": debito,
+            "account_id": debito,
+            "account_to_id": debito,
         },
     )
     assert res.status_code == 422
@@ -100,8 +100,8 @@ async def test_txn02_transfer_requires_distinct_methods_no_category(client):
             "date": "2026-06-01",
             "amount": "100.00",
             "currency": "MXN",
-            "payment_method_id": debito,
-            "payment_method_to_id": efectivo,
+            "account_id": debito,
+            "account_to_id": efectivo,
             "category_id": ctx["categories"]["Comida"]["id"],
         },
     )
@@ -146,11 +146,14 @@ async def test_fx03_rate_frozen_at_transaction_date(client, db_session):
         ]
     )
     await db_session.commit()
+    usd = ctx["accounts"]["Dólares"]["id"]  # TAR-10: USD lives in a USD account
 
     res = await client.post(
         "/api/v1/transactions",
         headers=ctx["headers"],
-        json=expense_payload(ctx, currency="USD", date="2026-01-15", amount="100.00"),
+        json=expense_payload(
+            ctx, currency="USD", date="2026-01-15", amount="100.00", account_id=usd
+        ),
     )
     assert res.status_code == 201
     txn = res.json()
@@ -159,7 +162,12 @@ async def test_fx03_rate_frozen_at_transaction_date(client, db_session):
 
     # Editing description must NOT touch the frozen rate (case 6).
     update = expense_payload(
-        ctx, currency="USD", date="2026-01-15", amount="100.00", description="Editada"
+        ctx,
+        currency="USD",
+        date="2026-01-15",
+        amount="100.00",
+        description="Editada",
+        account_id=usd,
     )
     res = await client.put(f"/api/v1/transactions/{txn['id']}", headers=ctx["headers"], json=update)
     assert res.status_code == 200
@@ -182,7 +190,7 @@ async def test_fx03_no_rate_available_rejects(client):
     res = await client.post(
         "/api/v1/transactions",
         headers=ctx["headers"],
-        json=expense_payload(ctx, currency="USD"),
+        json=expense_payload(ctx, currency="USD", account_id=ctx["accounts"]["Dólares"]["id"]),
     )
     assert res.status_code == 422
 
@@ -275,7 +283,7 @@ async def test_list_filters_and_pagination(client):
             "amount": "5000.00",
             "currency": "MXN",
             "category_id": ctx["categories"]["Nómina"]["id"],
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
             "description": "Quincena",
         },
     )
@@ -335,7 +343,7 @@ async def test_txn11_duplicates_ignore_payment_method(client):
     res = await client.post(
         "/api/v1/transactions",
         headers=ctx["headers"],
-        json=expense_payload(ctx, payment_method_id=ctx["methods"]["Débito"]["id"]),
+        json=expense_payload(ctx, account_id=ctx["accounts"]["Débito"]["id"]),
     )
     assert res.status_code == 201
 
@@ -347,8 +355,8 @@ async def test_txn11_duplicates_transfer_and_space_isolation(client):
         "date": "2026-06-01",
         "amount": "1000.00",
         "currency": "MXN",
-        "payment_method_id": ctx["methods"]["Débito"]["id"],
-        "payment_method_to_id": ctx["methods"]["Efectivo"]["id"],
+        "account_id": ctx["accounts"]["Débito"]["id"],
+        "account_to_id": ctx["accounts"]["Efectivo"]["id"],
     }
     res = await client.post("/api/v1/transactions", headers=ctx["headers"], json=transfer)
     assert res.status_code == 201

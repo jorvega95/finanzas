@@ -1,4 +1,4 @@
-"""Transactions. Implements TXN-01..TXN-06, FX-03, REC-02/03, GLO-01/02/04."""
+"""Transactions. Implements TXN-01..TXN-06, TXN-13/14, FX-03, REC-02/03, GLO-01/02/04."""
 
 import datetime as dt
 import enum
@@ -35,6 +35,8 @@ class Transaction(Base, AuditMixin):
     __table_args__ = (
         # GLO-01: money is NUMERIC(14,2), always positive (sign comes from type).
         CheckConstraint("amount > 0", name="ck_txn_amount_positive"),
+        # TXN-13: received amount of a cross-currency transfer, positive if set.
+        CheckConstraint("amount_to IS NULL OR amount_to > 0", name="ck_txn_amount_to_positive"),
         # REC-02: re-running the recurring job can never duplicate an instance
         # (NULLs don't collide, so manual transactions are unaffected).
         UniqueConstraint("recurring_rule_id", "scheduled_date", name="uq_txn_recurrence"),
@@ -67,16 +69,22 @@ class Transaction(Base, AuditMixin):
     expense_nature_override: Mapped[ExpenseNature | None] = mapped_column(
         Enum(ExpenseNature, name="expense_nature", native_enum=False, length=15)
     )
-    # TXN-02: for transfers this is the source; payment_method_to_id the target.
-    payment_method_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("payment_methods.id", ondelete="RESTRICT")
+    # TAR-03: the account paid from / received into. TXN-02: for transfers this
+    # is the source and account_to_id the target.
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    payment_method_to_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("payment_methods.id", ondelete="RESTRICT")
+    account_to_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("accounts.id", ondelete="RESTRICT"), index=True
+    )
+    # TXN-13: what enters the target account, in its currency, when it differs
+    # from the source currency. NULL for same-currency transfers.
+    amount_to: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # TXN-14: an expense row that is the fee of this transfer points to it.
+    fee_for_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("transactions.id", ondelete="CASCADE"), index=True
     )
 
-    # TAR-03: card behind the payment method, any type (TXN-06 for credit).
-    card_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     # TDC-05: billing cycle this charge (or payment, TDC-10) belongs to.
     # Only credit charges get a statement; debit/prepaid never do (TAR-04).
     statement_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)

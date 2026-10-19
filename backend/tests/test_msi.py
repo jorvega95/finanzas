@@ -5,7 +5,7 @@ from decimal import Decimal
 from freezegun import freeze_time
 
 from tests.conftest import bootstrap_space
-from tests.test_cards import charge, close_cycles, create_card
+from tests.test_accounts import charge, close_cycles, create_card
 
 
 async def make_plan(client, ctx, txn_id, months, expected=201):
@@ -22,7 +22,7 @@ async def make_plan(client, ctx, txn_id, months, expected=201):
 async def test_msi01_04_plan_creation_and_schedule(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "1000.00", "TV")
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "1000.00", "TV")
 
     await make_plan(client, ctx, txn["id"], 3)
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
@@ -55,7 +55,7 @@ async def test_msi01_04_plan_creation_and_schedule(client):
             "amount": "300.00",
             "currency": "MXN",
             "category_id": ctx["categories"]["Comida"]["id"],
-            "payment_method_id": ctx["methods"]["Efectivo"]["id"],
+            "account_id": ctx["accounts"]["Efectivo"]["id"],
         },
     )
     await make_plan(client, ctx, cash_txn.json()["id"], 3, expected=422)  # sin TDC
@@ -68,7 +68,7 @@ async def test_msi03_parent_excluded_statement_charges_installments(client):
     ⇒ el statement del mes refleja 1,000, no 12,000, y ningún total suma 13,000."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "12000.00", "Laptop")
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "12000.00", "Laptop")
     await make_plan(client, ctx, txn["id"], 12)
 
     closed = await close_cycles(client, ctx)
@@ -77,7 +77,7 @@ async def test_msi03_parent_excluded_statement_charges_installments(client):
     assert st["computed_total"] == "1000.00"
 
     # TDC-09: cuota 2 charged en ciclo abierto (15-jul); cuotas 3-12 pending.
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["statement_balance"] == "1000.00"
     assert detail["debt"]["current_cycle_spend"] == "1000.00"
     assert detail["debt"]["committed_msi"] == "10000.00"
@@ -88,8 +88,8 @@ async def test_msi03_parent_excluded_statement_charges_installments(client):
 async def test_msi05_lifecycle_pending_charged_paid(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    debito = ctx["methods"]["Débito"]["id"]
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "900.00")
+    debito = ctx["accounts"]["Débito"]["id"]
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "900.00")
     await make_plan(client, ctx, txn["id"], 3)
 
     closed = await close_cycles(client, ctx)
@@ -103,11 +103,11 @@ async def test_msi05_lifecycle_pending_charged_paid(client):
 
     # Pagar el statement de junio (cuota 1=300) no afecta cuota 2 (en statement de julio).
     await client.post(
-        f"/api/v1/cards/{card['id']}/payments",
+        f"/api/v1/accounts/{card['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "300.00",
-            "from_payment_method_id": debito,
+            "from_account_id": debito,
             "date": "2026-06-21",
             "statement_id": statement_id,
         },
@@ -124,8 +124,8 @@ async def test_msi11_completed_plan_hidden_from_list(client):
     de la lista por default (reaparece con include_completed=true)."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    debito = ctx["methods"]["Débito"]["id"]
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "600.00")
+    debito = ctx["accounts"]["Débito"]["id"]
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "600.00")
     await make_plan(client, ctx, txn["id"], 2)
 
     closed = await close_cycles(client, ctx)  # cuota 1 (15-jun) -> charged
@@ -136,11 +136,11 @@ async def test_msi11_completed_plan_hidden_from_list(client):
     assert plans[0]["plan"]["status"] == "active"
 
     await client.post(
-        f"/api/v1/cards/{card['id']}/payments",
+        f"/api/v1/accounts/{card['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "300.00",
-            "from_payment_method_id": debito,
+            "from_account_id": debito,
             "date": "2026-06-21",
             "statement_id": statement_id,
         },
@@ -154,11 +154,11 @@ async def test_msi11_completed_plan_hidden_from_list(client):
         closed2 = await close_cycles(client, ctx)  # cuota 2 (15-jul) -> charged
         statement2_id = closed2[0]["id"]
         await client.post(
-            f"/api/v1/cards/{card['id']}/payments",
+            f"/api/v1/accounts/{card['id']}/payments",
             headers=ctx["headers"],
             json={
                 "amount": "300.00",
-                "from_payment_method_id": debito,
+                "from_account_id": debito,
                 "date": "2026-07-21",
                 "statement_id": statement2_id,
             },
@@ -179,7 +179,7 @@ async def test_msi11_completed_plan_hidden_from_list(client):
 async def test_msi06_projection_month_by_card(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "600.00")
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "600.00")
     await make_plan(client, ctx, txn["id"], 3)
 
     rows = (await client.get("/api/v1/installment-plans/projection", headers=ctx["headers"])).json()
@@ -188,14 +188,14 @@ async def test_msi06_projection_month_by_card(client):
     assert [(r["month"], r["amount"]) for r in rows] == [
         ("2026-08", "200.00"),
     ]
-    assert all(r["card_alias"] == "BBVA Azul" for r in rows)
+    assert all(r["account_name"] == "BBVA Azul" for r in rows)
 
 
 @freeze_time("2026-06-20 18:00:00")
 async def test_msi07_settle_early(client):
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx)
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "1200.00")
+    txn = await charge(client, ctx, card["id"], "2026-06-10", "1200.00")
     plan = await make_plan(client, ctx, txn["id"], 12)
     await close_cycles(client, ctx)  # cuota 1 paid (ciclo pasado), cuota 2 charged (ciclo actual)
 
@@ -213,7 +213,7 @@ async def test_msi07_settle_early(client):
     assert statuses.count("paid") == 1
 
     # Cargo único por las 10 cuotas (1000) + cuota 2 charged (100) = 1100 en ciclo abierto.
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["committed_msi"] == "0.00"
     assert detail["debt"]["current_cycle_spend"] == "1100.00"
 
@@ -224,14 +224,14 @@ async def test_msi08_delete_purchase_rules(client):
     card = await create_card(client, ctx)
 
     # Plan sin cuotas cargadas: borrar la compra borra el plan.
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-06-16", "600.00")
+    txn = await charge(client, ctx, card["id"], "2026-06-16", "600.00")
     await make_plan(client, ctx, txn["id"], 3)
     res = await client.delete(f"/api/v1/transactions/{txn['id']}", headers=ctx["headers"])
     assert res.status_code == 204
     assert (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json() == []
 
     # Plan con cuota cargada: borrar se bloquea (MSI-08).
-    txn2 = await charge(client, ctx, card["payment_method_id"], "2026-06-10", "600.00")
+    txn2 = await charge(client, ctx, card["id"], "2026-06-10", "600.00")
     await make_plan(client, ctx, txn2["id"], 3)
     await close_cycles(client, ctx)
     res = await client.delete(f"/api/v1/transactions/{txn2['id']}", headers=ctx["headers"])
@@ -248,7 +248,7 @@ async def test_msi01_old_transaction_past_installments_are_paid(client):
     # charge_dates = [2026-03-15, 2026-04-15, 2026-05-15]
     # current_cutoff = cutoff_on_or_after(2026-06-20, day=15) = 2026-07-15
     # Todas las cuotas < current_cutoff → todas paid → plan completed.
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-03-05", "900.00", "Refri")
+    txn = await charge(client, ctx, card["id"], "2026-03-05", "900.00", "Refri")
     await make_plan(client, ctx, txn["id"], 3)
 
     # MSI-11: un plan completed no aparece en la lista por default.
@@ -285,7 +285,7 @@ async def test_msi01_old_transaction_mixed_statuses(client):
     # cuota 2 (04-15) < 05-15 → paid
     # cuota 3 (05-15) == 05-15 → charged (ciclo actual)
     # cuota 4 (06-15) > 05-15 → pending
-    txn = await charge(client, ctx, card["payment_method_id"], "2026-03-05", "1200.00", "Tele")
+    txn = await charge(client, ctx, card["id"], "2026-03-05", "1200.00", "Tele")
     await make_plan(client, ctx, txn["id"], 4)
 
     plans = (await client.get("/api/v1/installment-plans", headers=ctx["headers"])).json()
@@ -319,7 +319,7 @@ async def test_msi10_register_current_installment(client):
             "description": "Smart TV",
             "monthly_amount": "2692.00",
             "currency": "MXN",
-            "credit_card_id": card["id"],
+            "account_id": card["id"],
             "current_number": 6,
             "total_months": 12,
             "category_id": ctx["categories"]["Otros"]["id"],
@@ -355,7 +355,7 @@ async def test_msi10_register_current_installment(client):
     assert summary["projected_payment_date"] > summary["projected_payoff"]
 
     # Cuota 7 charged debe aparecer en current_cycle_spend, no en committed_msi.
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["current_cycle_spend"] == "2692.00"
     assert detail["debt"]["committed_msi"] == "13460.00"  # 5 × 2692
 
@@ -376,7 +376,7 @@ async def test_msi10_pending_current_installment(client):
             "description": "Refrigerador",
             "monthly_amount": "2505.00",
             "currency": "MXN",
-            "credit_card_id": card["id"],
+            "account_id": card["id"],
             "current_number": 2,
             "total_months": 6,
             "category_id": ctx["categories"]["Otros"]["id"],
@@ -399,7 +399,7 @@ async def test_msi10_pending_current_installment(client):
     assert dates[2] == "2026-08-15"  # cuota 3 (pending)
 
     # Cuota 2 charged debe aparecer en current_cycle_spend.
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["current_cycle_spend"] == "2505.00"
     assert detail["debt"]["committed_msi"] == "10020.00"  # 4 × 2505
 
@@ -421,7 +421,7 @@ async def test_msi10_projected_payment_date(client):
             "description": "Lavadora",
             "monthly_amount": "747.00",
             "currency": "MXN",
-            "credit_card_id": card["id"],
+            "account_id": card["id"],
             "current_number": 3,
             "total_months": 3,
             "category_id": ctx["categories"]["Otros"]["id"],
@@ -454,7 +454,7 @@ async def test_msi10_validations(client):
         "description": "Test",
         "monthly_amount": "500.00",
         "currency": "MXN",
-        "credit_card_id": card["id"],
+        "account_id": card["id"],
         "current_number": 3,
         "total_months": 6,
         "category_id": ctx["categories"]["Otros"]["id"],
@@ -508,7 +508,7 @@ async def test_msi10_anchor_off_cutoff_day(client):
             "description": "Aire acondicionado",
             "monthly_amount": "1000.00",
             "currency": "MXN",
-            "credit_card_id": card["id"],
+            "account_id": card["id"],
             "current_number": 2,
             "total_months": 4,
             "category_id": ctx["categories"]["Otros"]["id"],
@@ -542,7 +542,7 @@ async def test_msi10_anchor_off_cutoff_day(client):
             "description": "Lavadora",
             "monthly_amount": "800.00",
             "currency": "MXN",
-            "credit_card_id": card["id"],
+            "account_id": card["id"],
             "current_number": 2,
             "total_months": 4,
             "category_id": ctx["categories"]["Otros"]["id"],
@@ -587,12 +587,12 @@ async def test_msi09_currency_mismatch_rejected(client, db_session):
             "amount": "100.00",
             "currency": "USD",
             "category_id": ctx["categories"]["Comida"]["id"],
-            "payment_method_id": card["payment_method_id"],
+            "account_id": card["id"],
             "description": "Compra USD",
         },
     )
-    assert res.status_code == 201
-    await make_plan(client, ctx, res.json()["id"], 3, expected=422)  # MSI-09
+    # MSI-09 ⊂ TAR-10: a USD charge on a MXN card is rejected up front.
+    assert res.status_code == 422
 
 
 @freeze_time("2026-06-20 18:00:00")
@@ -612,7 +612,7 @@ async def test_msi10_n_equals_m_charged_completes_plan(client):
             "description": "Último MSI",
             "monthly_amount": "500.00",
             "currency": "MXN",
-            "credit_card_id": card["id"],
+            "account_id": card["id"],
             "current_number": 2,
             "total_months": 2,
             "category_id": ctx["categories"]["Otros"]["id"],
@@ -637,7 +637,7 @@ async def test_msi10_n_equals_m_charged_completes_plan(client):
     assert summary["remaining_amount"] == "0.00"
 
     # Plan completado → no debe afectar ningún total de deuda.
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["current_cycle_spend"] == "0.00"
     assert detail["debt"]["committed_msi"] == "0.00"
 
@@ -656,18 +656,22 @@ async def test_msi10_close_cycles_idempotent_after_backfill(client):
             "description": "Bocina",
             "monthly_amount": "600.00",
             "currency": "MXN",
-            "credit_card_id": card["id"],
+            "account_id": card["id"],
             "current_number": 2,
             "total_months": 4,
             "category_id": ctx["categories"]["Otros"]["id"],
             "current_is_charged": False,
         },
     )
-    detail_before = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail_before = (
+        await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])
+    ).json()
     cycle_before = detail_before["debt"]["current_cycle_spend"]
 
     # Cerrar ciclos no debe cambiar el ciclo en curso (cuota 2 ya está charged).
     await close_cycles(client, ctx)
 
-    detail_after = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail_after = (
+        await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])
+    ).json()
     assert detail_after["debt"]["current_cycle_spend"] == cycle_before

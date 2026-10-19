@@ -176,7 +176,7 @@ async def test_esp07_removed_member_transactions_persist(client, db_session):
     # El editor temporal registra un gasto en el espacio compartido.
     temp_headers = {**temp_auth, "X-Space-Id": shared["id"]}
     cats = (await client.get("/api/v1/catalogs/categories", headers=temp_headers)).json()
-    pms = (await client.get("/api/v1/catalogs/payment-methods", headers=temp_headers)).json()
+    pms = (await client.get("/api/v1/accounts", headers=temp_headers)).json()
     res = await client.post(
         "/api/v1/transactions",
         headers=temp_headers,
@@ -186,7 +186,7 @@ async def test_esp07_removed_member_transactions_persist(client, db_session):
             "amount": "100.00",
             "currency": "MXN",
             "category_id": cats[0]["id"],
-            "payment_method_id": pms[0]["id"],
+            "account_id": pms[0]["id"],
         },
     )
     assert res.status_code == 201

@@ -13,19 +13,19 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dates import today_in_tz
-from app.models.cards import Card, CardStatement, StatementStatus
-from app.models.catalogs import CardBehavior, CardType, PaymentMethod
+from app.models.accounts import Account, Statement, StatementStatus
+from app.models.catalogs import AccountBehavior, AccountType
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus
 from app.models.recurring import RecurringRule
 from app.models.spaces import Space
 from app.models.transactions import Transaction, TransactionType
 from app.services import billing_cycles as cycles
 from app.services import fx
-from app.services.cards import cycle_ready, spec_for
+from app.services.accounts import account_balance, cycle_ready, spec_for
 from app.services.recurring import occurrences
 
 ZERO = Decimal("0.00")
@@ -80,15 +80,15 @@ class _RateCache:
         return Decimal(amount) * self._cache[currency]
 
 
-async def _credit_cards(session: AsyncSession, space_id: uuid.UUID) -> list[Card]:
+async def _credit_cards(session: AsyncSession, space_id: uuid.UUID) -> list[Account]:
     """TAR-01: tarjetas de behavior credit (incluye inactivas: TDC-12 siguen
     facturando hasta liquidar)."""
     return list(
         (
             await session.execute(
-                select(Card)
-                .join(CardType, Card.card_type_id == CardType.id)
-                .where(Card.space_id == space_id, CardType.behavior == CardBehavior.credit)
+                select(Account)
+                .join(AccountType, Account.account_type_id == AccountType.id)
+                .where(Account.space_id == space_id, AccountType.behavior == AccountBehavior.credit)
             )
         )
         .scalars()
@@ -96,40 +96,35 @@ async def _credit_cards(session: AsyncSession, space_id: uuid.UUID) -> list[Card
     )
 
 
-async def _credit_method_ids(
-    session: AsyncSession, space_id: uuid.UUID
-) -> dict[uuid.UUID, uuid.UUID]:
-    """Métodos de pago vinculados a tarjetas de crédito → {method_id: card_id}."""
-    rows = (
-        await session.execute(
-            select(PaymentMethod.id, Card.id)
-            .join(Card, PaymentMethod.card_id == Card.id)
-            .join(CardType, Card.card_type_id == CardType.id)
-            .where(
-                PaymentMethod.space_id == space_id,
-                CardType.behavior == CardBehavior.credit,
-            )
-        )
-    ).all()
-    return {row[0]: row[1] for row in rows}
+async def _credit_account_ids(session: AsyncSession, space_id: uuid.UUID) -> set[uuid.UUID]:
+    """Ids de las cuentas de crédito del espacio (TAR-01)."""
+    rows = await session.execute(
+        select(Account.id)
+        .join(AccountType, Account.account_type_id == AccountType.id)
+        .where(Account.space_id == space_id, AccountType.behavior == AccountBehavior.credit)
+    )
+    return set(rows.scalars().all())
+
+
+# PRO-02: cuentas líquidas; el ahorro y las inversiones no entran a la caja.
+LIQUID_BEHAVIORS = (AccountBehavior.debit, AccountBehavior.prepaid, AccountBehavior.cash)
 
 
 async def _as_of_balance(
     session: AsyncSession, rates: _RateCache, space: Space, today: dt.date
 ) -> Decimal:
-    """PRO-02: caja líquida a hoy = Σ saldos débito/prepago (TAR-05) hasta hoy.
-
-    Réplica de cards.card_balance pero acotada a date <= hoy (el saldo actual,
-    no el all-time que incluye cargos futuros). Convertida a base (PRO-06)."""
-    cards = (
+    """PRO-02: caja líquida a hoy = Σ saldos (TAR-05) de cuentas líquidas
+    activas, acotados a date <= hoy (el saldo actual, no el all-time que
+    incluye movimientos futuros). Convertida a base (PRO-06)."""
+    accounts = (
         (
             await session.execute(
-                select(Card)
-                .join(CardType, Card.card_type_id == CardType.id)
+                select(Account)
+                .join(AccountType, Account.account_type_id == AccountType.id)
                 .where(
-                    Card.space_id == space.id,
-                    Card.is_active.is_(True),
-                    CardType.behavior.in_([CardBehavior.debit, CardBehavior.prepaid]),
+                    Account.space_id == space.id,
+                    Account.is_active.is_(True),
+                    AccountType.behavior.in_(LIQUID_BEHAVIORS),
                 )
             )
         )
@@ -137,47 +132,17 @@ async def _as_of_balance(
         .all()
     )
     total = ZERO
-    for card in cards:
-        if card.payment_method_id is None:
-            continue
-        method_id = card.payment_method_id
-
-        async def summed(*predicates: ColumnElement[bool]) -> Decimal:
-            value = await session.scalar(
-                select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                    Transaction.space_id == space.id,
-                    Transaction.date <= today,
-                    *predicates,
-                )
-            )
-            return Decimal(value or 0)
-
-        income = await summed(
-            Transaction.type == TransactionType.income,
-            Transaction.payment_method_id == method_id,
-        )
-        transfer_in = await summed(
-            Transaction.type == TransactionType.transfer,
-            Transaction.payment_method_to_id == method_id,
-        )
-        expense = await summed(
-            Transaction.type == TransactionType.expense,
-            Transaction.payment_method_id == method_id,
-            Transaction.installment_plan_id.is_(None),
-        )
-        transfer_out = await summed(
-            Transaction.type == TransactionType.transfer,
-            Transaction.payment_method_id == method_id,
-        )
-        initial = Decimal(card.initial_balance if card.initial_balance is not None else 0)
-        balance = initial + income + transfer_in - expense - transfer_out
-        total += await rates.to_base(balance, card.currency)
+    for account in accounts:
+        balance = await account_balance(session, account, as_of=today)
+        total += await rates.to_base(balance, account.currency)
     return total
 
 
-async def _projected_cutoffs(card: Card, today: dt.date, horizon_end: dt.date) -> list[dt.date]:
+async def _projected_cutoffs(
+    account: Account, today: dt.date, horizon_end: dt.date
+) -> list[dt.date]:
     """Cortes cuyo due_date cae dentro del horizonte (a partir del ciclo abierto)."""
-    spec = spec_for(card)
+    spec = spec_for(account)
     cutoffs: list[dt.date] = []
     cutoff = cycles.cutoff_on_or_after(today, spec)
     while cycles.due_date_for(cutoff, spec) <= horizon_end:
@@ -197,14 +162,14 @@ def _bucket(item_cutoff: dt.date, projected: list[dt.date]) -> dt.date | None:
 async def _card_due_events(
     session: AsyncSession,
     rates: _RateCache,
-    card: Card,
+    account: Account,
     today: dt.date,
     horizon_end: dt.date,
 ) -> list[_Event]:
     """PRO-03: pagos de TDC. Statements cerrados reales + ciclos proyectados
     (cargos + cuotas MSI pending + domiciliados de crédito), fechados al due_date."""
     events: list[_Event] = []
-    spec = spec_for(card)
+    spec = spec_for(account)
 
     # Statements ya cerrados (closed/partially_paid/paid): su computed_total ya es
     # definitivo, así que sus transacciones/cuotas NUNCA deben re-proyectarse en un
@@ -213,9 +178,9 @@ async def _card_due_events(
     settled = (
         (
             await session.execute(
-                select(CardStatement).where(
-                    CardStatement.credit_card_id == card.id,
-                    CardStatement.status != StatementStatus.open,
+                select(Statement).where(
+                    Statement.account_id == account.id,
+                    Statement.status != StatementStatus.open,
                 )
             )
         )
@@ -232,13 +197,13 @@ async def _card_due_events(
                     date=max(s.due_date, today),
                     kind="card_due",
                     direction="out",
-                    description=f"Pago {card.alias}",
-                    amount=to_money(await rates.to_base(outstanding, card.currency)),
-                    currency=card.currency,
+                    description=f"Pago {account.name}",
+                    amount=to_money(await rates.to_base(outstanding, account.currency)),
+                    currency=account.currency,
                 )
             )
 
-    projected = await _projected_cutoffs(card, today, horizon_end)
+    projected = await _projected_cutoffs(account, today, horizon_end)
     if not projected:
         return events
 
@@ -250,7 +215,7 @@ async def _card_due_events(
         (
             await session.execute(
                 select(Transaction).where(
-                    Transaction.card_id == card.id,
+                    Transaction.account_id == account.id,
                     Transaction.installment_plan_id.is_(None),
                     Transaction.type.in_([TransactionType.expense, TransactionType.income]),
                 )
@@ -267,7 +232,7 @@ async def _card_due_events(
         if target is None:
             continue
         signed = txn.amount if txn.type == TransactionType.expense else -txn.amount
-        by_cutoff[target] += await rates.to_base(signed, card.currency)
+        by_cutoff[target] += await rates.to_base(signed, account.currency)
 
     # Cuotas MSI por cobrar (MSI-04): pending + charged aún en statement abierto
     # (las charged en un statement cerrado ya van en su computed_total real).
@@ -277,7 +242,7 @@ async def _card_due_events(
                 select(Installment)
                 .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
                 .where(
-                    InstallmentPlan.credit_card_id == card.id,
+                    InstallmentPlan.account_id == account.id,
                     Installment.status.in_([InstallmentStatus.pending, InstallmentStatus.charged]),
                 )
             )
@@ -291,12 +256,12 @@ async def _card_due_events(
         target = _bucket(inst.estimated_charge_date, projected)
         if target is None:
             continue
-        by_cutoff[target] += await rates.to_base(inst.amount, card.currency)
+        by_cutoff[target] += await rates.to_base(inst.amount, account.currency)
 
     # Domiciliados recurrentes de crédito sobre esta tarjeta (REC, PRO-03).
-    rules = await _active_expense_rules(session, card.space_id)
-    for rule, rule_card_id in rules:
-        if rule_card_id != card.id:
+    rules = await _active_expense_rules(session, account.space_id)
+    for rule, rule_credit_id in rules:
+        if rule_credit_id != account.id:
             continue
         for occ in occurrences(rule, horizon_end):
             if occ <= today:
@@ -312,9 +277,9 @@ async def _card_due_events(
         s.period_end: s
         for s in (
             await session.execute(
-                select(CardStatement).where(
-                    CardStatement.credit_card_id == card.id,
-                    CardStatement.status == StatementStatus.open,
+                select(Statement).where(
+                    Statement.account_id == account.id,
+                    Statement.status == StatementStatus.open,
                 )
             )
         )
@@ -325,7 +290,7 @@ async def _card_due_events(
         amount = by_cutoff[cutoff]
         existing = open_statements.get(cutoff)
         if existing is not None:
-            amount -= await rates.to_base(existing.paid_amount, card.currency)
+            amount -= await rates.to_base(existing.paid_amount, account.currency)
         amount = to_money(amount)
         if amount > ZERO:
             events.append(
@@ -333,9 +298,9 @@ async def _card_due_events(
                     date=cycles.due_date_for(cutoff, spec),
                     kind="card_due",
                     direction="out",
-                    description=f"Pago {card.alias}",
+                    description=f"Pago {account.name}",
                     amount=amount,
-                    currency=card.currency,
+                    currency=account.currency,
                 )
             )
     return events
@@ -344,7 +309,7 @@ async def _card_due_events(
 async def _active_expense_rules(
     session: AsyncSession, space_id: uuid.UUID
 ) -> list[tuple[RecurringRule, uuid.UUID | None]]:
-    """Reglas de gasto activas con el card_id (de crédito) de su método, si lo hay."""
+    """Reglas de gasto activas con el account_id de su cuenta si es de crédito."""
     rules = (
         (
             await session.execute(
@@ -358,11 +323,8 @@ async def _active_expense_rules(
         .scalars()
         .all()
     )
-    credit_methods = await _credit_method_ids(session, space_id)
-    return [
-        (rule, credit_methods.get(rule.payment_method_id) if rule.payment_method_id else None)
-        for rule in rules
-    ]
+    credit_ids = await _credit_account_ids(session, space_id)
+    return [(rule, rule.account_id if rule.account_id in credit_ids else None) for rule in rules]
 
 
 async def _income_events(
@@ -445,8 +407,8 @@ async def _non_credit_expense_events(
     """PRO-03/TAR-04: salidas inmediatas (efectivo/débito/prepago): domiciliados
     no-crédito + gastos futuros manuales sin statement."""
     events: list[_Event] = []
-    for rule, rule_card_id in await _active_expense_rules(session, space_id):
-        if rule_card_id is not None:
+    for rule, rule_credit_id in await _active_expense_rules(session, space_id):
+        if rule_credit_id is not None:
             continue  # crédito: va al statement proyectado, no es flujo inmediato
         for occ in occurrences(rule, horizon_end):
             if occ <= today:
@@ -511,10 +473,10 @@ async def forecast(
     events: list[_Event] = []
     events += await _income_events(session, rates, space.id, today, horizon_end)
     events += await _non_credit_expense_events(session, rates, space.id, today, horizon_end)
-    for card in await _credit_cards(session, space.id):
-        if not cycle_ready(card):
+    for account in await _credit_cards(session, space.id):
+        if not cycle_ready(account):
             continue  # TDC-15: sin día de corte no se proyectan ciclos
-        events += await _card_due_events(session, rates, card, today, horizon_end)
+        events += await _card_due_events(session, rates, account, today, horizon_end)
 
     # PRO-05: recorre la línea de tiempo. Empates: entradas antes que salidas.
     events.sort(key=lambda e: (e.date, 0 if e.direction == "in" else 1))

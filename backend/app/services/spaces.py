@@ -38,7 +38,7 @@ async def provision_profile(
     session.add(space)
     await session.flush()
     session.add(SpaceMember(space_id=space.id, user_id=user_id, role=SpaceRole.owner))
-    seed_catalogs(session, space.id, user_id)
+    seed_catalogs(session, space.id, user_id, space.base_currency)
 
     profile.default_space_id = space.id
     await session.flush()
@@ -98,7 +98,7 @@ async def create_shared_space(
     session.add(space)
     await session.flush()
     session.add(SpaceMember(space_id=space.id, user_id=creator.id, role=SpaceRole.owner))
-    seed_catalogs(session, space.id, creator.id)
+    seed_catalogs(session, space.id, creator.id, space.base_currency)
     await session.commit()
     await session.refresh(space)
     return space

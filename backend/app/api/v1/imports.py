@@ -57,7 +57,7 @@ class ConfirmRequest(BaseModel):
     source: str = Field(default="csv", max_length=60)
     mapping: MappingConfig
     rows: list[PreviewRow]
-    payment_method_id: uuid.UUID
+    account_id: uuid.UUID
     category_id: uuid.UUID | None = None
 
 
@@ -100,7 +100,7 @@ async def confirm(
         source=payload.source,
         mapping=payload.mapping.model_dump(),
         rows=[row.model_dump() for row in payload.rows],
-        payment_method_id=payload.payment_method_id,
+        account_id=payload.account_id,
         category_id=payload.category_id,
     )
     return BatchOut.model_validate(batch)

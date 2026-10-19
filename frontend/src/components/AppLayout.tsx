@@ -12,7 +12,7 @@ const NAV: { to: string; label: string; icon: IconName }[] = [
   { to: "/", label: "Dashboard", icon: "dashboard" },
   { to: "/pronostico", label: "Pronóstico", icon: "forecast" },
   { to: "/transacciones", label: "Transacciones", icon: "transactions" },
-  { to: "/tarjetas", label: "Tarjetas", icon: "card" },
+  { to: "/cuentas", label: "Cuentas", icon: "wallet" },
   { to: "/msi", label: "MSI", icon: "calendar" },
   { to: "/inversiones", label: "Inversiones", icon: "investments" },
   { to: "/ajustes", label: "Ajustes", icon: "settings" },

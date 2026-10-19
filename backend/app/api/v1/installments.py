@@ -6,9 +6,9 @@ from fastapi import APIRouter, status
 from sqlalchemy import select
 
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
-from app.models.cards import Card
+from app.models.accounts import Account
 from app.models.transactions import Transaction
-from app.schemas.cards import (
+from app.schemas.accounts import (
     InstallmentOut,
     PlanCreate,
     PlanCurrentInstallmentCreate,
@@ -17,8 +17,8 @@ from app.schemas.cards import (
     ProjectionRow,
 )
 from app.services import msi as svc
+from app.services.accounts import spec_for
 from app.services.billing_cycles import due_date_for
-from app.services.cards import spec_for
 
 router = APIRouter(prefix="/installment-plans", tags=["installments"])
 
@@ -46,18 +46,18 @@ async def list_plans(
     for item in summaries:
         plan = item["plan"]
         txn = await db.get(Transaction, plan.transaction_id)
-        card = await db.get(Card, plan.credit_card_id)
+        account = await db.get(Account, plan.account_id)
         payoff = item["projected_payoff"]
         # MSI-06: projected_payment_date = due_date del statement del último corte (TDC-04).
-        if card is not None:
-            projected_payment_date = due_date_for(payoff, spec_for(card))
+        if account is not None:
+            projected_payment_date = due_date_for(payoff, spec_for(account))
         else:
             projected_payment_date = payoff
         out.append(
             PlanSummaryOut(
                 plan=PlanOut.model_validate(plan),
                 description=txn.description if txn else "",
-                card_alias=card.alias if card else "",
+                account_name=account.name if account else "",
                 paid_count=item["paid_count"],
                 charged_count=item["charged_count"],
                 pending_count=item["pending_count"],
@@ -86,7 +86,7 @@ async def create_plan_from_current_installment(
         description=payload.description,
         monthly_amount=payload.monthly_amount,
         currency=payload.currency,
-        card_id=payload.credit_card_id,
+        account_id=payload.account_id,
         category_id=payload.category_id,
         current_number=payload.current_number,
         total_months=payload.total_months,
@@ -100,14 +100,16 @@ async def projection(db: DbSession, space_and_member: ActiveSpace) -> list[Proje
     """MSI-06 global: comprometido por mes futuro × tarjeta."""
     space, _ = space_and_member
     rows = await svc.monthly_projection(db, space.id)
-    aliases = {
-        c.id: c.alias
-        for c in (await db.execute(select(Card).where(Card.space_id == space.id))).scalars().all()
+    names = {
+        c.id: c.name
+        for c in (await db.execute(select(Account).where(Account.space_id == space.id)))
+        .scalars()
+        .all()
     }
     return [
         ProjectionRow(
-            credit_card_id=row["credit_card_id"],
-            card_alias=aliases.get(row["credit_card_id"], ""),
+            account_id=row["account_id"],
+            account_name=names.get(row["account_id"], ""),
             month=row["month"],
             amount=row["amount"],
         )

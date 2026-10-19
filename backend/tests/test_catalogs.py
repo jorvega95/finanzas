@@ -85,11 +85,14 @@ async def test_cat01_unique_name_accent_and_case_insensitive(client):
     )
     assert res.status_code == 201
 
-    # Payment methods: unique per space.
+    # Accounts: unique name per space (CAT-01, TAR).
     res = await client.post(
-        "/api/v1/catalogs/payment-methods",
+        "/api/v1/accounts",
         headers=ctx["headers"],
-        json={"name": "efectívo", "type": "cash"},
+        json={
+            "name": "efectívo",
+            "account_type_id": ctx["account_type_by_behavior"]["cash"]["id"],
+        },
     )
     assert res.status_code == 409
 
@@ -131,7 +134,7 @@ async def test_cat04_deactivation_hides_from_forms_but_keeps_it(client):
 
 
 async def test_cat05_cannot_deactivate_last_active(client):
-    """CAT-05: ni la última categoría activa de un kind ni el último método."""
+    """CAT-05: ni la última categoría activa de un kind ni la última cuenta."""
     ctx = await bootstrap_space(client)
     income = list(ctx["income_categories"].values())
     assert len(income) == 4
@@ -149,16 +152,16 @@ async def test_cat05_cannot_deactivate_last_active(client):
     )
     assert res.status_code == 422
 
-    methods = list(ctx["methods"].values())
-    for m in methods[:-1]:
+    accounts = list(ctx["accounts"].values())
+    for account in accounts[:-1]:
         res = await client.patch(
-            f"/api/v1/catalogs/payment-methods/{m['id']}",
+            f"/api/v1/accounts/{account['id']}",
             headers=ctx["headers"],
             json={"is_active": False},
         )
         assert res.status_code == 200
     res = await client.patch(
-        f"/api/v1/catalogs/payment-methods/{methods[-1]['id']}",
+        f"/api/v1/accounts/{accounts[-1]['id']}",
         headers=ctx["headers"],
         json={"is_active": False},
     )
@@ -188,20 +191,10 @@ async def test_cat06_subcategories_max_two_levels_and_inheritance(client):
     assert res.status_code == 422  # third level rejected
 
 
-async def test_cat07_credit_card_method_requires_card(client):
-    ctx = await bootstrap_space(client)
-    res = await client.post(
-        "/api/v1/catalogs/payment-methods",
-        headers=ctx["headers"],
-        json={"name": "Mi tarjeta", "type": "credit_card"},
-    )
-    assert res.status_code == 422
-
-
 async def test_glo03_delete_only_without_references(client):
     ctx = await bootstrap_space(client)
     cat = ctx["categories"]["Salud"]
-    pm = ctx["methods"]["Efectivo"]
+    pm = ctx["accounts"]["Efectivo"]
 
     res = await client.post(
         "/api/v1/transactions",
@@ -212,7 +205,7 @@ async def test_glo03_delete_only_without_references(client):
             "amount": "150.00",
             "currency": "MXN",
             "category_id": cat["id"],
-            "payment_method_id": pm["id"],
+            "account_id": pm["id"],
             "description": "Farmacia",
         },
     )
@@ -221,9 +214,7 @@ async def test_glo03_delete_only_without_references(client):
     # With references: physical delete blocked (GLO-03).
     res = await client.delete(f"/api/v1/catalogs/categories/{cat['id']}", headers=ctx["headers"])
     assert res.status_code == 409
-    res = await client.delete(
-        f"/api/v1/catalogs/payment-methods/{pm['id']}", headers=ctx["headers"]
-    )
+    res = await client.delete(f"/api/v1/accounts/{pm['id']}", headers=ctx["headers"])
     assert res.status_code == 409
 
     # Without references: physical delete allowed.
@@ -234,13 +225,13 @@ async def test_glo03_delete_only_without_references(client):
     assert res.status_code == 204
 
 
-async def test_payment_method_update_name(client):
-    """PATCH actualiza el nombre de un método de pago."""
+async def test_account_update_name(client):
+    """PATCH actualiza el nombre de una cuenta."""
     ctx = await bootstrap_space(client)
-    method_id = ctx["methods"]["Efectivo"]["id"]
+    account_id = ctx["accounts"]["Efectivo"]["id"]
 
     res = await client.patch(
-        f"/api/v1/catalogs/payment-methods/{method_id}",
+        f"/api/v1/accounts/{account_id}",
         headers=ctx["headers"],
         json={"name": "Efectivo MXN"},
     )
@@ -248,63 +239,34 @@ async def test_payment_method_update_name(client):
     assert res.json()["name"] == "Efectivo MXN"
 
 
-async def test_payment_method_delete_no_refs(client):
-    """GLO-03: un método sin transacciones se elimina físicamente."""
+async def test_account_delete_no_refs(client):
+    """GLO-03: una cuenta sin movimientos se elimina físicamente."""
     ctx = await bootstrap_space(client)
     res = await client.post(
-        "/api/v1/catalogs/payment-methods",
+        "/api/v1/accounts",
         headers=ctx["headers"],
-        json={"name": "Vales de despensa", "type": "prepaid"},
+        json={
+            "name": "Vales extra",
+            "account_type_id": ctx["account_type_by_behavior"]["prepaid"]["id"],
+        },
     )
     assert res.status_code == 201
-    method_id = res.json()["id"]
+    account_id = res.json()["id"]
 
-    res = await client.delete(
-        f"/api/v1/catalogs/payment-methods/{method_id}",
-        headers=ctx["headers"],
-    )
+    res = await client.delete(f"/api/v1/accounts/{account_id}", headers=ctx["headers"])
     assert res.status_code == 204
 
     # Ya no aparece ni con include_inactive
-    methods = (
-        await client.get(
-            "/api/v1/catalogs/payment-methods?include_inactive=true",
-            headers=ctx["headers"],
-        )
+    accounts = (
+        await client.get("/api/v1/accounts?include_inactive=true", headers=ctx["headers"])
     ).json()
-    assert not any(m["id"] == method_id for m in methods)
+    assert not any(a["id"] == account_id for a in accounts)
 
 
-async def test_payment_method_delete_with_refs_returns_409(client):
-    """GLO-03: DELETE devuelve 409 cuando el método tiene transacciones."""
+async def test_account_deactivate_after_409(client):
+    """Flujo GLO-03: 409 en DELETE → cliente desactiva; la cuenta queda inactiva."""
     ctx = await bootstrap_space(client)
-    pm = ctx["methods"]["Débito"]
-    cat_id = ctx["categories"]["Comida"]["id"]
-
-    await client.post(
-        "/api/v1/transactions",
-        headers=ctx["headers"],
-        json={
-            "type": "expense",
-            "date": "2026-06-01",
-            "amount": "200.00",
-            "currency": "MXN",
-            "category_id": cat_id,
-            "payment_method_id": pm["id"],
-        },
-    )
-
-    res = await client.delete(
-        f"/api/v1/catalogs/payment-methods/{pm['id']}",
-        headers=ctx["headers"],
-    )
-    assert res.status_code == 409
-
-
-async def test_payment_method_deactivate_after_409(client):
-    """Flujo GLO-03: 409 en DELETE → cliente desactiva; el método queda inactivo."""
-    ctx = await bootstrap_space(client)
-    pm = ctx["methods"]["Transferencia"]
+    account = ctx["accounts"]["Débito"]
     cat_id = ctx["categories"]["Servicios"]["id"]
 
     await client.post(
@@ -316,39 +278,45 @@ async def test_payment_method_deactivate_after_409(client):
             "amount": "150.00",
             "currency": "MXN",
             "category_id": cat_id,
-            "payment_method_id": pm["id"],
+            "account_id": account["id"],
         },
     )
 
     # DELETE rechazado
-    res = await client.delete(
-        f"/api/v1/catalogs/payment-methods/{pm['id']}",
-        headers=ctx["headers"],
-    )
+    res = await client.delete(f"/api/v1/accounts/{account['id']}", headers=ctx["headers"])
     assert res.status_code == 409
 
     # El cliente desactiva en lugar de eliminar
     res = await client.patch(
-        f"/api/v1/catalogs/payment-methods/{pm['id']}",
+        f"/api/v1/accounts/{account['id']}",
         headers=ctx["headers"],
         json={"is_active": False},
     )
     assert res.status_code == 200
     assert res.json()["is_active"] is False
 
-    # Aparece inactivo con include_inactive; no aparece sin él
+    # Aparece inactiva con include_inactive; no aparece sin él
     with_inactive = (
-        await client.get(
-            "/api/v1/catalogs/payment-methods?include_inactive=true",
-            headers=ctx["headers"],
-        )
+        await client.get("/api/v1/accounts?include_inactive=true", headers=ctx["headers"])
     ).json()
-    assert any(m["id"] == pm["id"] and not m["is_active"] for m in with_inactive)
+    assert any(a["id"] == account["id"] and not a["is_active"] for a in with_inactive)
+    without_inactive = (await client.get("/api/v1/accounts", headers=ctx["headers"])).json()
+    assert not any(a["id"] == account["id"] for a in without_inactive)
 
-    without_inactive = (
-        await client.get("/api/v1/catalogs/payment-methods", headers=ctx["headers"])
-    ).json()
-    assert not any(m["id"] == pm["id"] for m in without_inactive)
+    # CAT-04: una cuenta inactiva no acepta movimientos nuevos.
+    res = await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "expense",
+            "date": "2026-06-02",
+            "amount": "10.00",
+            "currency": "MXN",
+            "category_id": cat_id,
+            "account_id": account["id"],
+        },
+    )
+    assert res.status_code == 422
 
 
 async def test_esp03_viewer_cannot_mutate_catalogs(client, db_session):

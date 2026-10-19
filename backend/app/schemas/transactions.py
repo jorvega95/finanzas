@@ -1,4 +1,4 @@
-"""Pydantic schemas for transactions (TXN-01..TXN-06, GLO-01).
+"""Pydantic schemas for transactions (TXN-01..TXN-14, GLO-01).
 
 GLO-01: amounts travel as strings in JSON (Decimal-safe, never float).
 """
@@ -45,14 +45,18 @@ class TransactionBase(BaseModel):
     description: str = Field(default="", max_length=200)
     notes: str | None = None
     category_id: uuid.UUID | None = None
-    payment_method_id: uuid.UUID | None = None
-    payment_method_to_id: uuid.UUID | None = None
+    account_id: uuid.UUID  # TAR-03
+    account_to_id: uuid.UUID | None = None  # TXN-02: transfer target
+    # TXN-13: what enters the target when its currency differs from the source.
+    amount_to: Money | None = None
+    # TXN-14: fee charged to the source account (stored as a child expense).
+    fee_amount: Money | None = None
     expense_nature_override: ExpenseNature | None = None
     # FX-03: optional manual override of the frozen rate.
     fx_rate_override: FxRate | None = None
     # TDC-05a: overrides cutoff_day_policy when date == cutoff; not persisted.
     cycle_hint: Literal["current", "next"] | None = None
-    # TXN-09: explicit statement to pay when payment_method_to is a credit card.
+    # TXN-09: explicit statement to pay when account_to is a credit account.
     target_statement_id: uuid.UUID | None = None
 
 
@@ -76,9 +80,11 @@ class TransactionOut(BaseModel):
     description: str
     notes: str | None
     category_id: uuid.UUID | None
-    payment_method_id: uuid.UUID | None
-    payment_method_to_id: uuid.UUID | None
-    card_id: uuid.UUID | None
+    account_id: uuid.UUID
+    account_to_id: uuid.UUID | None
+    amount_to: Money | None  # TXN-13
+    fee_amount: Money | None = None  # TXN-14: fee of this transfer (set by the router)
+    fee_for_id: uuid.UUID | None  # TXN-14: set on the fee row itself
     statement_id: uuid.UUID | None  # TXN-09: set when transfer is a TDC payment
     expense_nature_override: ExpenseNature | None
     recurring_rule_id: uuid.UUID | None

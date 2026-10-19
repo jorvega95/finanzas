@@ -1,7 +1,7 @@
 // Wizard de importación CSV (IMP-01..06) y export (IMP-07).
 import { useRef, useState } from "react";
 import { getActiveSpaceId } from "../../api/activeSpace";
-import { usePaymentMethods } from "../../api/catalogs";
+import { useAccounts } from "../../api/accounts";
 import {
   useConfirmImport,
   useImportBatches,
@@ -39,7 +39,7 @@ async function download(path: string, fileName: string) {
 
 export default function ImportSection() {
   const fileInput = useRef<HTMLInputElement>(null);
-  const methods = usePaymentMethods();
+  const accounts = useAccounts();
   const previewImport = usePreviewImport();
   const confirmImport = useConfirmImport();
   const batches = useImportBatches();
@@ -58,7 +58,7 @@ export default function ImportSection() {
     negative_is_expense: true,
     currency: "MXN",
   });
-  const [methodId, setMethodId] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
 
   function handleFile(file: File) {
@@ -157,16 +157,18 @@ export default function ImportSection() {
             </select>
           </div>
           <div>
-            <label className="label">Método de pago destino</label>
+            <label className="label">Cuenta destino</label>
             <select
               className="input"
               required
-              value={methodId}
-              onChange={(e) => setMethodId(e.target.value)}
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
             >
               <option value="">Selecciona…</option>
-              {(methods.data ?? []).map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+              {(accounts.data ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.currency})
+                </option>
               ))}
             </select>
           </div>
@@ -245,7 +247,7 @@ export default function ImportSection() {
           <div className="mt-3 flex items-center gap-3">
             <button
               className="btn-primary"
-              disabled={!methodId || selectedCount === 0 || confirmImport.isPending}
+              disabled={!accountId || selectedCount === 0 || confirmImport.isPending}
               onClick={() =>
                 confirmImport.mutate(
                   {
@@ -253,7 +255,7 @@ export default function ImportSection() {
                     source: "csv",
                     mapping,
                     rows: preview.rows,
-                    payment_method_id: methodId,
+                    account_id: accountId,
                   },
                   { onSuccess: () => setPreview(null) },
                 )

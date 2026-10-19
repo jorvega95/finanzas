@@ -1,4 +1,4 @@
-"""Card types and non-credit cards: CAT-08, TAR-01..05, PAT-01/02.
+"""Account types and balance accounts: CAT-08, TAR-01..05, PAT-01/02.
 
 Mandatory cases 9 (debit balance + nómina + insufficient funds) and 10
 (net worth includes non-credit card balances).
@@ -9,31 +9,31 @@ import uuid
 from freezegun import freeze_time
 
 from tests.conftest import auth_headers, bootstrap_space
-from tests.test_cards import charge, close_cycles, create_card
+from tests.test_accounts import charge, close_cycles, create_card
 
 # --- helpers -----------------------------------------------------------------
 
 
-async def make_card(client, ctx, card_type_id, **overrides):
+async def make_card(client, ctx, account_type_id, **overrides):
     body = {
-        "card_type_id": card_type_id,
-        "alias": overrides.pop("alias", "Nómina BBVA"),
+        "account_type_id": account_type_id,
+        "name": overrides.pop("name", "Nómina BBVA"),
         "bank": "BBVA",
         "network": "Visa",
         "last4": overrides.pop("last4", "9999"),
         **overrides,
     }
-    res = await client.post("/api/v1/cards", headers=ctx["headers"], json=body)
+    res = await client.post("/api/v1/accounts", headers=ctx["headers"], json=body)
     assert res.status_code == 201, res.text
     cid = res.json()["id"]
-    return (await client.get(f"/api/v1/cards/{cid}", headers=ctx["headers"])).json()
+    return (await client.get(f"/api/v1/accounts/{cid}", headers=ctx["headers"])).json()
 
 
 async def make_debit(client, ctx, initial_balance="1000.00", **overrides):
     return await make_card(
         client,
         ctx,
-        ctx["card_type_by_behavior"]["debit"]["id"],
+        ctx["account_type_by_behavior"]["debit"]["id"],
         initial_balance=initial_balance,
         **overrides,
     )
@@ -49,7 +49,7 @@ async def spend(client, ctx, method_id, amount, date="2026-06-10", expected=201,
             "amount": amount,
             "currency": "MXN",
             "category_id": ctx["categories"][category]["id"],
-            "payment_method_id": method_id,
+            "account_id": method_id,
         },
     )
     assert res.status_code == expected, res.text
@@ -66,34 +66,55 @@ async def earn(client, ctx, method_id, amount, date="2026-06-12", category="Nóm
             "amount": amount,
             "currency": "MXN",
             "category_id": ctx["categories"][category]["id"],
-            "payment_method_id": method_id,
+            "account_id": method_id,
         },
     )
     assert res.status_code == 201, res.text
     return res.json()
 
 
-# --- CAT-08: card types catalog ----------------------------------------------
+# --- CAT-08: account types catalog -------------------------------------------
 
 
-async def test_cat08_seed_card_types(client):
+async def test_cat08_seed_account_types(client):
     ctx = await bootstrap_space(client)
-    types = ctx["card_types"]
-    assert set(types) == {"Crédito", "Débito", "Vales de despensa", "Tarjeta de regalo"}
+    types = ctx["account_types"]
+    assert set(types) == {
+        "Crédito",
+        "Débito",
+        "Billetera digital",
+        "Vales de despensa",
+        "Tarjeta de regalo",
+        "Efectivo",
+        "Ahorro",
+    }
     assert sorted(ct["behavior"] for ct in types.values()) == [
+        "cash",
         "credit",
+        "debit",
         "debit",
         "prepaid",
         "prepaid",
+        "savings",
     ]
     assert all(ct["is_system"] for ct in types.values())
+
+
+async def test_cat02_seeds_cash_account(client):
+    """CAT-02/TAR-09: every space starts with a cash account at 0 that may go negative."""
+    ctx = await bootstrap_space(client)
+    cash = ctx["accounts"]["Efectivo"]
+    assert cash["behavior"] == "cash"
+    assert cash["balance"] == "0.00"
+    assert cash["allow_overdraft"] is True
+    assert cash["bank"] is None and cash["last4"] is None
 
 
 async def test_cat08_card_type_crud_and_reference_guards(client):
     ctx = await bootstrap_space(client)
     # Create a custom prepaid type.
     res = await client.post(
-        "/api/v1/catalogs/card-types",
+        "/api/v1/catalogs/account-types",
         headers=ctx["headers"],
         json={"name": "Vales Sodexo", "behavior": "prepaid"},
     )
@@ -104,7 +125,7 @@ async def test_cat08_card_type_crud_and_reference_guards(client):
 
     # CAT-08: unique name per space (accent/case-insensitive).
     res = await client.post(
-        "/api/v1/catalogs/card-types",
+        "/api/v1/catalogs/account-types",
         headers=ctx["headers"],
         json={"name": "vales sodexo", "behavior": "prepaid"},
     )
@@ -113,13 +134,13 @@ async def test_cat08_card_type_crud_and_reference_guards(client):
     # A type with cards cannot be deactivated nor deleted (GLO-03).
     await make_card(client, ctx, new_type["id"], initial_balance="500.00", last4="1111")
     res = await client.patch(
-        f"/api/v1/catalogs/card-types/{new_type['id']}",
+        f"/api/v1/catalogs/account-types/{new_type['id']}",
         headers=ctx["headers"],
         json={"is_active": False},
     )
     assert res.status_code == 409
     res = await client.delete(
-        f"/api/v1/catalogs/card-types/{new_type['id']}", headers=ctx["headers"]
+        f"/api/v1/catalogs/account-types/{new_type['id']}", headers=ctx["headers"]
     )
     assert res.status_code == 409
 
@@ -139,10 +160,10 @@ async def test_esp03_viewer_cannot_mutate_card_types(client, db_session):
     viewer_headers = {**viewer_auth, "X-Space-Id": ctx["space_id"]}
 
     assert (
-        await client.get("/api/v1/catalogs/card-types", headers=viewer_headers)
+        await client.get("/api/v1/catalogs/account-types", headers=viewer_headers)
     ).status_code == 200
     res = await client.post(
-        "/api/v1/catalogs/card-types",
+        "/api/v1/catalogs/account-types",
         headers=viewer_headers,
         json={"name": "Otra", "behavior": "debit"},
     )
@@ -154,16 +175,16 @@ async def test_esp03_viewer_cannot_mutate_card_types(client, db_session):
 
 async def test_tar02_credit_fields_only_for_credit(client):
     ctx = await bootstrap_space(client)
-    debit = ctx["card_type_by_behavior"]["debit"]["id"]
-    credit = ctx["card_type_by_behavior"]["credit"]["id"]
+    debit = ctx["account_type_by_behavior"]["debit"]["id"]
+    credit = ctx["account_type_by_behavior"]["credit"]["id"]
 
     # A debit card must not carry credit fields.
     res = await client.post(
-        "/api/v1/cards",
+        "/api/v1/accounts",
         headers=ctx["headers"],
         json={
-            "card_type_id": debit,
-            "alias": "X",
+            "account_type_id": debit,
+            "name": "X",
             "bank": "B",
             "network": "Visa",
             "last4": "0001",
@@ -175,11 +196,11 @@ async def test_tar02_credit_fields_only_for_credit(client):
     # TDC-15: a credit card MAY be saved partially (no cut day yet) and
     # completed later; behavior is still credit, with no balance.
     res = await client.post(
-        "/api/v1/cards",
+        "/api/v1/accounts",
         headers=ctx["headers"],
         json={
-            "card_type_id": credit,
-            "alias": "Y",
+            "account_type_id": credit,
+            "name": "Y",
             "bank": "B",
             "network": "Visa",
             "last4": "0002",
@@ -187,26 +208,50 @@ async def test_tar02_credit_fields_only_for_credit(client):
         },
     )
     assert res.status_code == 201, res.text
-    partial = (await client.get(f"/api/v1/cards/{res.json()['id']}", headers=ctx["headers"])).json()
+    partial = (
+        await client.get(f"/api/v1/accounts/{res.json()['id']}", headers=ctx["headers"])
+    ).json()
     assert partial["behavior"] == "credit"
     assert partial["statement_day"] is None
     assert partial["balance"] is None
 
     # TAR-05: opening balance may be zero (empty form) or omitted entirely.
-    zero = await make_card(client, ctx, debit, alias="Cero", initial_balance="0", last4="0003")
+    zero = await make_card(client, ctx, debit, name="Cero", initial_balance="0", last4="0003")
     assert zero["balance"] == "0.00"
-    omitted = await make_card(client, ctx, debit, alias="Vacía", last4="0004")
+    omitted = await make_card(client, ctx, debit, name="Vacía", last4="0004")
     assert omitted["balance"] == "0.00"
 
-    # Valid debit card: no credit fields, has a balance, linked debit method.
+    # Valid debit card: no credit fields, has a balance.
     card = await make_debit(client, ctx)
     assert card["behavior"] == "debit"
     assert card["statement_day"] is None
     assert card["debt"] is None
     assert card["balance"] == "1000.00"
-    methods = (await client.get("/api/v1/catalogs/payment-methods", headers=ctx["headers"])).json()
-    linked = [m for m in methods if m["card_id"] == card["id"]]
-    assert len(linked) == 1 and linked[0]["type"] == "debit"
+
+    # TAR-02: plastic details are optional (a digital wallet has none), but a
+    # last4 that is sent must be 4 digits.
+    wallet_type = ctx["account_types"]["Billetera digital"]["id"]
+    res = await client.post(
+        "/api/v1/accounts",
+        headers=ctx["headers"],
+        json={"account_type_id": wallet_type, "name": "XTRM", "currency": "USD"},
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["bank"] is None and res.json()["network"] is None
+    res = await client.post(
+        "/api/v1/accounts",
+        headers=ctx["headers"],
+        json={"account_type_id": wallet_type, "name": "Otra", "last4": "12"},
+    )
+    assert res.status_code == 422
+
+    # CAT-01: account names are unique per space (accent/case-insensitive).
+    res = await client.post(
+        "/api/v1/accounts",
+        headers=ctx["headers"],
+        json={"account_type_id": wallet_type, "name": "xtrm"},
+    )
+    assert res.status_code == 409
 
 
 # --- TAR-04/05: balance, no statement, immediate cash flow -------------------
@@ -217,20 +262,20 @@ async def test_tar04_05_debit_balance_no_statement_immediate(client):
     """Caso 9: gasto descuenta saldo y no toca statements; nómina lo sube."""
     ctx = await bootstrap_space(client)
     card = await make_debit(client, ctx, initial_balance="1000.00")
-    method = card["payment_method_id"]
+    method = card["id"]
 
     await spend(client, ctx, method, "300.00")
     await earn(client, ctx, method, "500.00")
 
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["balance"] == "1200.00"  # 1000 − 300 + 500
 
     # TAR-04: a debit card never materializes statements.
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     assert statements == []
-    assert (await client.post("/api/v1/cards/close-cycles", headers=ctx["headers"])).json() == []
+    assert (await client.post("/api/v1/accounts/close-cycles", headers=ctx["headers"])).json() == []
 
     # DSH-02/04: debit spend counts as accrued expense on its date.
     body = (
@@ -243,16 +288,16 @@ async def test_tar04_05_debit_balance_no_statement_immediate(client):
 async def test_tar05_insufficient_funds_and_overdraft(client):
     ctx = await bootstrap_space(client)
     card = await make_debit(client, ctx, initial_balance="100.00")
-    method = card["payment_method_id"]
+    method = card["id"]
 
     await spend(client, ctx, method, "100.00")  # exact balance: allowed
     await spend(client, ctx, method, "0.01", expected=422)  # overdraws: rejected
 
     od = await make_debit(
-        client, ctx, initial_balance="100.00", allow_overdraft=True, alias="OD", last4="8888"
+        client, ctx, initial_balance="100.00", allow_overdraft=True, name="OD", last4="8888"
     )
-    await spend(client, ctx, od["payment_method_id"], "150.00")  # overdraft allowed
-    detail = (await client.get(f"/api/v1/cards/{od['id']}", headers=ctx["headers"])).json()
+    await spend(client, ctx, od["id"], "150.00")  # overdraft allowed
+    detail = (await client.get(f"/api/v1/accounts/{od['id']}", headers=ctx["headers"])).json()
     assert detail["balance"] == "-50.00"
 
 
@@ -260,7 +305,7 @@ async def test_tar05_insufficient_funds_and_overdraft(client):
 async def test_msi_rejected_on_non_credit_card(client):
     ctx = await bootstrap_space(client)
     card = await make_debit(client, ctx, initial_balance="5000.00")
-    txn = await spend(client, ctx, card["payment_method_id"], "1200.00")
+    txn = await spend(client, ctx, card["id"], "1200.00")
     res = await client.post(
         "/api/v1/installment-plans",
         headers=ctx["headers"],
@@ -280,16 +325,16 @@ async def test_tar05_edit_initial_balance(client):
 
     # Debit: initial=1000, spend=200, earn=300 → balance=1100.
     card = await make_debit(client, ctx, initial_balance="1000.00")
-    method = card["payment_method_id"]
+    method = card["id"]
     await spend(client, ctx, method, "200.00")
     await earn(client, ctx, method, "300.00")
 
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["balance"] == "1100.00"  # 1000 − 200 + 300
 
     # Edit initial_balance to 2000 → balance = 2000 − 200 + 300 = 2100.
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}",
+        f"/api/v1/accounts/{card['id']}",
         headers=ctx["headers"],
         json={"initial_balance": "2000.00"},
     )
@@ -299,7 +344,7 @@ async def test_tar05_edit_initial_balance(client):
 
     # Edit initial_balance to 0 → balance = 0 − 200 + 300 = 100.
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}",
+        f"/api/v1/accounts/{card['id']}",
         headers=ctx["headers"],
         json={"initial_balance": "0"},
     )
@@ -308,17 +353,17 @@ async def test_tar05_edit_initial_balance(client):
     assert res.json()["initial_balance"] == "0.00"
 
     # Prepaid (tarjeta de regalo / vales) also supports initial_balance edits.
-    prepaid_type_id = ctx["card_type_by_behavior"]["prepaid"]["id"]
+    prepaid_type_id = ctx["account_type_by_behavior"]["prepaid"]["id"]
     prepaid = await make_card(
         client,
         ctx,
         prepaid_type_id,
-        alias="Vales Comida",
+        name="Vales Comida",
         initial_balance="500.00",
         last4="7777",
     )
     res = await client.patch(
-        f"/api/v1/cards/{prepaid['id']}",
+        f"/api/v1/accounts/{prepaid['id']}",
         headers=ctx["headers"],
         json={"initial_balance": "800.00"},
     )
@@ -326,11 +371,11 @@ async def test_tar05_edit_initial_balance(client):
     assert res.json()["balance"] == "800.00"
 
     # Credit card must reject initial_balance (TAR-02 / service guard).
-    from tests.test_cards import create_card as create_credit
+    from tests.test_accounts import create_card as create_credit
 
     credit = await create_credit(client, ctx)
     res = await client.patch(
-        f"/api/v1/cards/{credit['id']}",
+        f"/api/v1/accounts/{credit['id']}",
         headers=ctx["headers"],
         json={"initial_balance": "500.00"},
     )
@@ -347,11 +392,11 @@ async def test_pat01_net_worth_includes_card_balances(client):
 
     # Debit balance: 1000 − 200 = 800 (asset).
     debit = await make_debit(client, ctx, initial_balance="1000.00")
-    await spend(client, ctx, debit["payment_method_id"], "200.00")
+    await spend(client, ctx, debit["id"], "200.00")
 
     # Credit debt: a 500 charge that closes (liability).
     credit = await create_card(client, ctx)
-    await charge(client, ctx, credit["payment_method_id"], "2026-06-10", "500.00")
+    await charge(client, ctx, credit["id"], "2026-06-10", "500.00")
     await close_cycles(client, ctx)
 
     body = (

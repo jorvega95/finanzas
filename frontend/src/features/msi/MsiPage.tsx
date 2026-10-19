@@ -2,7 +2,6 @@
 // conversión de compras a MSI (MSI-01), registro por cuota en curso (MSI-10) y liquidación anticipada (MSI-07).
 import { useMemo, useState } from "react";
 import { useTransactions } from "../../api/transactions";
-import { usePaymentMethods } from "../../api/catalogs";
 import {
   useCreateMsiPlan,
   useCreateMsiBackfill,
@@ -10,7 +9,7 @@ import {
   useMsiProjection,
   useSettleMsiPlan,
 } from "../../api/msi";
-import { useCards } from "../../api/cards";
+import { useAccounts } from "../../api/accounts";
 import { useCategories } from "../../api/catalogs";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
@@ -23,22 +22,20 @@ const STATUS_LABELS: Record<string, string> = {
 
 function ConvertSection() {
   const txns = useTransactions({ type: "expense", limit: 100 });
-  const methods = usePaymentMethods();
+  const accounts = useAccounts();
   const create = useCreateMsiPlan();
   const [txnId, setTxnId] = useState("");
   const [months, setMonths] = useState("12");
 
   // MSI-01: solo compras con tarjeta de crédito son convertibles (TAR-02).
-  const creditMethodIds = useMemo(
+  const creditAccountIds = useMemo(
     () =>
       new Set(
-        (methods.data ?? []).filter((m) => m.type === "credit_card").map((m) => m.id),
+        (accounts.data ?? []).filter((a) => a.behavior === "credit").map((a) => a.id),
       ),
-    [methods.data],
+    [accounts.data],
   );
-  const candidates = (txns.data?.items ?? []).filter(
-    (t) => t.payment_method_id !== null && creditMethodIds.has(t.payment_method_id),
-  );
+  const candidates = (txns.data?.items ?? []).filter((t) => creditAccountIds.has(t.account_id));
 
   return (
     <section className="card p-5">
@@ -89,7 +86,7 @@ function ConvertSection() {
 }
 
 function BackfillSection() {
-  const cards = useCards();
+  const accounts = useAccounts();
   const categories = useCategories();
   const create = useCreateMsiBackfill();
 
@@ -97,14 +94,14 @@ function BackfillSection() {
     description: "",
     monthly_amount: "",
     currency: "MXN",
-    credit_card_id: "",
+    account_id: "",
     current_number: "1",
     total_months: "12",
     category_id: "",
     current_is_charged: true,
   });
 
-  const activeCards = (cards.data ?? []).filter((c) => c.is_active);
+  const activeCards = (accounts.data ?? []).filter((c) => c.is_active && c.behavior === "credit");
   const expenseCategories = (categories.data ?? []).filter(
     (c) => c.kind === "expense" && c.is_active,
   );
@@ -112,7 +109,7 @@ function BackfillSection() {
   function set(key: string, value: string | boolean) {
     setForm((prev) => {
       const next = { ...prev, [key]: value };
-      if (key === "credit_card_id" && typeof value === "string") {
+      if (key === "account_id" && typeof value === "string") {
         const card = activeCards.find((c) => c.id === value);
         if (card) next.currency = card.currency;
       }
@@ -127,7 +124,7 @@ function BackfillSection() {
         description: form.description,
         monthly_amount: form.monthly_amount,
         currency: form.currency,
-        credit_card_id: form.credit_card_id,
+        account_id: form.account_id,
         current_number: Number(form.current_number),
         total_months: Number(form.total_months),
         category_id: form.category_id,
@@ -139,7 +136,7 @@ function BackfillSection() {
             description: "",
             monthly_amount: "",
             currency: "MXN",
-            credit_card_id: "",
+            account_id: "",
             current_number: "1",
             total_months: "12",
             category_id: "",
@@ -174,13 +171,13 @@ function BackfillSection() {
           <select
             className="input"
             required
-            value={form.credit_card_id}
-            onChange={(e) => set("credit_card_id", e.target.value)}
+            value={form.account_id}
+            onChange={(e) => set("account_id", e.target.value)}
           >
             <option value="">Selecciona tarjeta…</option>
             {activeCards.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.alias} ({c.currency})
+                {c.name} ({c.currency})
               </option>
             ))}
           </select>
@@ -285,7 +282,7 @@ export default function MsiPage() {
 
   const projectionByMonth = useMemo(() => {
     const months = [...new Set((projection.data ?? []).map((r) => r.month))].sort();
-    const cards = [...new Set((projection.data ?? []).map((r) => r.card_alias))];
+    const cards = [...new Set((projection.data ?? []).map((r) => r.account_name))];
     return { months, cards };
   }, [projection.data]);
 
@@ -310,7 +307,7 @@ export default function MsiPage() {
                 <div>
                   <h3 className="font-semibold">{summary.description || "Compra MSI"}</h3>
                   <p className="text-xs text-ink-muted">
-                    {summary.card_alias} · {formatMoney(summary.plan.total_amount)} a{" "}
+                    {summary.account_name} · {formatMoney(summary.plan.total_amount)} a{" "}
                     {summary.plan.months} meses · {STATUS_LABELS[summary.plan.status]}
                   </p>
                 </div>
@@ -380,7 +377,7 @@ export default function MsiPage() {
                     <td className="py-1.5 pr-4 font-medium">{alias}</td>
                     {projectionByMonth.months.map((month) => {
                       const row = (projection.data ?? []).find(
-                        (r) => r.card_alias === alias && r.month === month,
+                        (r) => r.account_name === alias && r.month === month,
                       );
                       return (
                         <td key={month} className="py-1.5 pr-4">

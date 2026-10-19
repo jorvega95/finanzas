@@ -53,7 +53,7 @@ export function usePreviewImport() {
 function useInvalidateImports() {
   const qc = useQueryClient();
   return () =>
-    ["imports", "transactions", "cards", "statements", "budgets", "forecast"].forEach(
+    ["imports", "transactions", "accounts", "statements", "budgets", "forecast"].forEach(
       (k) => void qc.invalidateQueries({ queryKey: [k] }),
     );
 }
@@ -66,7 +66,7 @@ export function useConfirmImport() {
       source: string;
       mapping: MappingConfig;
       rows: PreviewRow[];
-      payment_method_id: string;
+      account_id: string;
     }) =>
       api<BatchOut>("/api/v1/imports/confirm", {
         method: "POST",

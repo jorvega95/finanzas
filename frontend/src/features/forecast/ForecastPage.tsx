@@ -85,11 +85,11 @@ export default function ForecastPage() {
         </div>
       </div>
 
-      {/* PRO-02: caja inicial = saldos débito/prepago + ajuste manual */}
+      {/* PRO-02: caja inicial = saldos de efectivo/débito/prepago + ajuste manual */}
       <section className="card flex flex-wrap items-end gap-4 p-5">
         <div>
           <label className="mb-1 block text-xs text-ink-muted">
-            Ajuste de caja inicial (efectivo/banco no registrado)
+            Ajuste de caja inicial (dinero no registrado en Cuentas)
           </label>
           <div className="flex gap-2">
             <input

@@ -7,8 +7,8 @@ from tests.conftest import bootstrap_space
 
 def credit_payload(ctx, statement_day=3, cutoff_day_policy="include", last4="5500", **overrides):
     return {
-        "card_type_id": ctx["card_type_by_behavior"]["credit"]["id"],
-        "alias": "Test Ciclo",
+        "account_type_id": ctx["account_type_by_behavior"]["credit"]["id"],
+        "name": "Test Ciclo",
         "bank": "Test",
         "network": "Visa",
         "last4": last4,
@@ -21,7 +21,7 @@ def credit_payload(ctx, statement_day=3, cutoff_day_policy="include", last4="550
 
 async def create_card(client, ctx, **overrides):
     res = await client.post(
-        "/api/v1/cards", headers=ctx["headers"], json=credit_payload(ctx, **overrides)
+        "/api/v1/accounts", headers=ctx["headers"], json=credit_payload(ctx, **overrides)
     )
     assert res.status_code == 201, res.text
     return res.json()
@@ -34,7 +34,7 @@ async def charge(client, ctx, method_id, date, amount, cycle_hint=None):
         "amount": amount,
         "currency": "MXN",
         "category_id": ctx["categories"]["Comida"]["id"],
-        "payment_method_id": method_id,
+        "account_id": method_id,
     }
     if cycle_hint is not None:
         body["cycle_hint"] = cycle_hint
@@ -44,7 +44,7 @@ async def charge(client, ctx, method_id, date, amount, cycle_hint=None):
 
 
 async def close_cycles(client, ctx):
-    res = await client.post("/api/v1/cards/close-cycles", headers=ctx["headers"])
+    res = await client.post("/api/v1/accounts/close-cycles", headers=ctx["headers"])
     assert res.status_code == 200, res.text
     return res.json()
 
@@ -55,7 +55,7 @@ async def test_tdc05a_hint_next_overrides_include_policy(client):
     overriding the card's include policy."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, statement_day=3, cutoff_day_policy="include")
-    method = card["payment_method_id"]
+    method = card["id"]
 
     # No hint + include: Jun 3 charge → cycle ending Jun 3.
     await charge(client, ctx, method, "2026-06-03", "100.00")
@@ -66,7 +66,7 @@ async def test_tdc05a_hint_next_overrides_include_policy(client):
     jun3_st = next(s for s in closed if s["period_end"] == "2026-06-03")
     assert jun3_st["computed_total"] == "100.00"
 
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["current_cycle_spend"] == "200.00"
 
 
@@ -78,7 +78,7 @@ async def test_tdc05a_hint_current_overrides_next_cycle_policy(client):
     card = await create_card(
         client, ctx, statement_day=3, cutoff_day_policy="next_cycle", last4="5501"
     )
-    method = card["payment_method_id"]
+    method = card["id"]
 
     # No hint + next_cycle: Jun 3 charge → cycle ending Jul 3 (open).
     await charge(client, ctx, method, "2026-06-03", "100.00")
@@ -89,7 +89,7 @@ async def test_tdc05a_hint_current_overrides_next_cycle_policy(client):
     jun3_st = next(s for s in closed if s["period_end"] == "2026-06-03")
     assert jun3_st["computed_total"] == "200.00"
 
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["current_cycle_spend"] == "100.00"
 
 
@@ -100,7 +100,7 @@ async def test_tdc05a_hint_ignored_on_non_cutoff_day(client):
     card = await create_card(
         client, ctx, statement_day=3, cutoff_day_policy="include", last4="5502"
     )
-    method = card["payment_method_id"]
+    method = card["id"]
 
     # Jun 5 is not the cutoff day (next cutoff = Jul 3). hint has no effect.
     await charge(client, ctx, method, "2026-06-05", "150.00", cycle_hint="current")
@@ -110,7 +110,7 @@ async def test_tdc05a_hint_ignored_on_non_cutoff_day(client):
     assert not any(s["period_end"] == "2026-06-03" for s in closed)
 
     # Charge is in the open Jul 3 cycle.
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["current_cycle_spend"] == "150.00"
 
 
@@ -122,7 +122,7 @@ async def test_tdc05a_edit_with_cycle_hint_moves_charge(client):
     card = await create_card(
         client, ctx, statement_day=3, cutoff_day_policy="include", last4="5503"
     )
-    method = card["payment_method_id"]
+    method = card["id"]
 
     # Create on Jun 3 without hint → Jun 3 cycle (include).
     txn = await charge(client, ctx, method, "2026-06-03", "300.00")
@@ -140,7 +140,7 @@ async def test_tdc05a_edit_with_cycle_hint_moves_charge(client):
             "amount": "300.00",
             "currency": "MXN",
             "category_id": ctx["categories"]["Comida"]["id"],
-            "payment_method_id": method,
+            "account_id": method,
             "cycle_hint": "next",
         },
     )
@@ -148,11 +148,11 @@ async def test_tdc05a_edit_with_cycle_hint_moves_charge(client):
 
     # Jun 3 statement total recomputed to 0 (charge removed).
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     updated_jun3 = next(s for s in statements if s["period_end"] == "2026-06-03")
     assert updated_jun3["computed_total"] == "0.00"
 
     # Charge is now in the open Jul 3 cycle.
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["current_cycle_spend"] == "300.00"

@@ -179,7 +179,7 @@ async def confirm_import(
     source: str,
     mapping: dict[str, Any],
     rows: list[dict[str, Any]],
-    payment_method_id: uuid.UUID,
+    account_id: uuid.UUID,
     category_id: uuid.UUID | None = None,
 ) -> tuple[ImportBatch, int]:
     """IMP-01 paso final: inserta SOLO las filas seleccionadas en un batch.
@@ -240,7 +240,7 @@ async def confirm_import(
                 currency=row["currency"],
                 description=row["description"],
                 category_id=row_category,
-                payment_method_id=payment_method_id,
+                account_id=account_id,
             ),
             needs_review=needs_review,
         )
@@ -292,7 +292,7 @@ EXPORT_COLUMNS = [
     "currency",
     "description",
     "category",
-    "payment_method",
+    "account",
     "notes",
 ]
 
@@ -314,7 +314,7 @@ def _csv_safe(value: str) -> str:
 
 async def export_transactions_csv(session: AsyncSession, space: Space) -> str:
     """IMP-07: CSV con el mismo esquema conceptual que el import."""
-    from app.models.catalogs import PaymentMethod
+    from app.models.accounts import Account
 
     rows = (
         (
@@ -335,10 +335,10 @@ async def export_transactions_csv(session: AsyncSession, space: Space) -> str:
             .all()
         )
     }
-    methods = {
+    accounts = {
         m.id: m.name
         for m in (
-            (await session.execute(select(PaymentMethod).where(PaymentMethod.space_id == space.id)))
+            (await session.execute(select(Account).where(Account.space_id == space.id)))
             .scalars()
             .all()
         )
@@ -355,7 +355,7 @@ async def export_transactions_csv(session: AsyncSession, space: Space) -> str:
                 txn.currency,
                 _csv_safe(txn.description),
                 _csv_safe(categories.get(txn.category_id, "")) if txn.category_id else "",
-                _csv_safe(methods.get(txn.payment_method_id, "")) if txn.payment_method_id else "",
+                _csv_safe(accounts.get(txn.account_id, "")),
                 _csv_safe(txn.notes or ""),
             ]
         )
@@ -364,8 +364,8 @@ async def export_transactions_csv(session: AsyncSession, space: Space) -> str:
 
 async def export_full_json(session: AsyncSession, space: Space) -> str:
     """IMP-07: export JSON completo (mitigación de ESP-06)."""
-    from app.models.cards import Card, CardStatement
-    from app.models.catalogs import CardType, PaymentMethod
+    from app.models.accounts import Account, Statement
+    from app.models.catalogs import AccountType
     from app.models.msi import InstallmentPlan
 
     def serialize(obj: Any) -> dict[str, Any]:
@@ -383,11 +383,10 @@ async def export_full_json(session: AsyncSession, space: Space) -> str:
     payload: dict[str, Any] = {"space": serialize(space)}
     for key, model in (
         ("categories", Category),
-        ("card_types", CardType),
-        ("payment_methods", PaymentMethod),
+        ("account_types", AccountType),
         ("transactions", Transaction),
-        ("cards", Card),
-        ("card_statements", CardStatement),
+        ("accounts", Account),
+        ("statements", Statement),
         ("installment_plans", InstallmentPlan),
     ):
         items = (

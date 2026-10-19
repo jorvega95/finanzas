@@ -17,7 +17,7 @@ class RecurringRuleBase(BaseModel):
     currency: str = Field(pattern="^[A-Z]{3}$")
     description: str = Field(min_length=1, max_length=200)
     category_id: uuid.UUID | None = None
-    payment_method_id: uuid.UUID | None = None
+    account_id: uuid.UUID  # TAR-03
     frequency: RecurringFrequency
     start_date: date
     end_date: date | None = None
@@ -37,7 +37,7 @@ class RecurringRuleUpdate(BaseModel):
     amount_is_estimate: bool | None = None
     description: str | None = Field(default=None, min_length=1, max_length=200)
     category_id: uuid.UUID | None = None
-    payment_method_id: uuid.UUID | None = None
+    account_id: uuid.UUID | None = None
     end_date: date | None = None
     max_occurrences: int | None = Field(default=None, ge=1)
     month_day: int | None = Field(default=None, ge=1, le=31)
@@ -55,7 +55,7 @@ class RecurringRuleOut(BaseModel):
     currency: str
     description: str
     category_id: uuid.UUID | None
-    payment_method_id: uuid.UUID | None
+    account_id: uuid.UUID
     frequency: RecurringFrequency
     start_date: date
     end_date: date | None

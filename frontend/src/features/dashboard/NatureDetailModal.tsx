@@ -102,7 +102,7 @@ export default function NatureDetailModal({ month, nature, currency, onClose }: 
                     </span>
                     <span className="block truncate text-xs text-ink-muted">
                       {item.category_name}
-                      {item.payment_method_name && ` · ${item.payment_method_name}`}
+                      {item.account_name && ` · ${item.account_name}`}
                     </span>
                   </span>
                   <span className="shrink-0 text-right">

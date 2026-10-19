@@ -104,8 +104,33 @@ async def bootstrap_space(client, user_id: uuid.UUID | None = None) -> dict:
     headers = {**base_headers, "X-Space-Id": space_id}
 
     categories = (await client.get("/api/v1/catalogs/categories", headers=headers)).json()
-    methods = (await client.get("/api/v1/catalogs/payment-methods", headers=headers)).json()
-    card_types = (await client.get("/api/v1/catalogs/card-types", headers=headers)).json()
+    account_types = (await client.get("/api/v1/catalogs/account-types", headers=headers)).json()
+    by_behavior = {t["behavior"]: t for t in account_types}
+    # CAT-02 seeds only "Efectivo"; tests also get frictionless "Débito" (MXN)
+    # and "Dólares" (USD) accounts (allow_overdraft) as everyday accounts.
+    res = await client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={
+            "account_type_id": by_behavior["debit"]["id"],
+            "name": "Débito",
+            "allow_overdraft": True,
+        },
+    )
+    assert res.status_code == 201, res.text
+    # TAR-10: USD movements need a USD account ("Dólares", a digital wallet).
+    res = await client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={
+            "account_type_id": by_behavior["debit"]["id"],
+            "name": "Dólares",
+            "currency": "USD",
+            "allow_overdraft": True,
+        },
+    )
+    assert res.status_code == 201, res.text
+    accounts = (await client.get("/api/v1/accounts", headers=headers)).json()
     return {
         "user_id": user_id,
         "space_id": space_id,
@@ -118,8 +143,8 @@ async def bootstrap_space(client, user_id: uuid.UUID | None = None) -> dict:
         },
         "income_categories": {c["name"]: c for c in categories if c["kind"] == "income"},
         "expense_categories": {c["name"]: c for c in categories if c["kind"] == "expense"},
-        "methods": {m["name"]: m for m in methods},
-        # CAT-08: seeded card types keyed by behavior for convenience.
-        "card_types": {ct["name"]: ct for ct in card_types},
-        "card_type_by_behavior": {ct["behavior"]: ct for ct in card_types},
+        "accounts": {a["name"]: a for a in accounts},
+        # CAT-08: seeded account types by name and by behavior for convenience.
+        "account_types": {t["name"]: t for t in account_types},
+        "account_type_by_behavior": by_behavior,
     }

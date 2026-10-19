@@ -13,11 +13,11 @@ from tests.conftest import bootstrap_space
 
 async def make_debit(client, ctx, initial_balance="1000.00", allow_overdraft=False, **overrides):
     res = await client.post(
-        "/api/v1/cards",
+        "/api/v1/accounts",
         headers=ctx["headers"],
         json={
-            "card_type_id": ctx["card_type_by_behavior"]["debit"]["id"],
-            "alias": overrides.pop("alias", "Débito BBVA"),
+            "account_type_id": ctx["account_type_by_behavior"]["debit"]["id"],
+            "name": overrides.pop("name", "Débito BBVA"),
             "bank": "BBVA",
             "network": "Visa",
             "last4": overrides.pop("last4", "4321"),
@@ -32,11 +32,11 @@ async def make_debit(client, ctx, initial_balance="1000.00", allow_overdraft=Fal
 
 async def make_credit(client, ctx, **overrides):
     res = await client.post(
-        "/api/v1/cards",
+        "/api/v1/accounts",
         headers=ctx["headers"],
         json={
-            "card_type_id": ctx["card_type_by_behavior"]["credit"]["id"],
-            "alias": overrides.pop("alias", "Crédito Banamex"),
+            "account_type_id": ctx["account_type_by_behavior"]["credit"]["id"],
+            "name": overrides.pop("name", "Crédito Banamex"),
             "bank": "Banamex",
             "network": "Mastercard",
             "last4": overrides.pop("last4", "9999"),
@@ -58,8 +58,8 @@ async def transfer(client, ctx, from_method_id, to_method_id, amount, date="2026
             "date": date,
             "amount": amount,
             "currency": "MXN",
-            "payment_method_id": from_method_id,
-            "payment_method_to_id": to_method_id,
+            "account_id": from_method_id,
+            "account_to_id": to_method_id,
             **extra,
         },
     )
@@ -75,7 +75,7 @@ async def charge_credit(client, ctx, method_id, amount, date="2026-06-10"):
             "amount": amount,
             "currency": "MXN",
             "category_id": ctx["categories"]["Comida"]["id"],
-            "payment_method_id": method_id,
+            "account_id": method_id,
         },
     )
     assert res.status_code == 201, res.text
@@ -83,19 +83,19 @@ async def charge_credit(client, ctx, method_id, amount, date="2026-06-10"):
 
 
 async def close_cycles(client, ctx):
-    res = await client.post("/api/v1/cards/close-cycles", headers=ctx["headers"])
+    res = await client.post("/api/v1/accounts/close-cycles", headers=ctx["headers"])
     assert res.status_code == 200, res.text
     return res.json()
 
 
 async def get_statements(client, ctx, card_id):
-    res = await client.get(f"/api/v1/cards/{card_id}/statements", headers=ctx["headers"])
+    res = await client.get(f"/api/v1/accounts/{card_id}/statements", headers=ctx["headers"])
     assert res.status_code == 200, res.text
     return res.json()
 
 
 async def get_card(client, ctx, card_id):
-    res = await client.get(f"/api/v1/cards/{card_id}", headers=ctx["headers"])
+    res = await client.get(f"/api/v1/accounts/{card_id}", headers=ctx["headers"])
     assert res.status_code == 200, res.text
     return res.json()
 
@@ -110,8 +110,8 @@ async def test_txn08_transfer_blocked_when_insufficient_funds(client):
     """TXN-08: transfer desde débito con monto > saldo disponible → 422."""
     ctx = await bootstrap_space(client)
     debit = await make_debit(client, ctx, initial_balance="500.00")
-    cash = ctx["methods"]["Efectivo"]["id"]
-    debit_method = debit["payment_method_id"]
+    cash = ctx["accounts"]["Efectivo"]["id"]
+    debit_method = debit["id"]
 
     # saldo=500, transferir 300 → saldo queda 200: ok.
     res = await transfer(client, ctx, debit_method, cash, "300.00")
@@ -127,9 +127,9 @@ async def test_txn08_transfer_allowed_with_overdraft(client):
     """TXN-08: allow_overdraft=True permite transferir más del saldo."""
     ctx = await bootstrap_space(client)
     debit = await make_debit(client, ctx, initial_balance="100.00", allow_overdraft=True)
-    cash = ctx["methods"]["Efectivo"]["id"]
+    cash = ctx["accounts"]["Efectivo"]["id"]
 
-    res = await transfer(client, ctx, debit["payment_method_id"], cash, "500.00")
+    res = await transfer(client, ctx, debit["id"], cash, "500.00")
     assert res.status_code == 201
 
     detail = await get_card(client, ctx, debit["id"])
@@ -141,10 +141,10 @@ async def test_txn08_transfer_from_non_card_method_no_balance_check(client):
     """TXN-08: origen sin tarjeta vinculada (Efectivo) no requiere validación de saldo."""
     ctx = await bootstrap_space(client)
     debit = await make_debit(client, ctx, initial_balance="100.00")
-    cash = ctx["methods"]["Efectivo"]["id"]
+    cash = ctx["accounts"]["Efectivo"]["id"]
 
     # Transferir desde Efectivo (sin card_id) → permitido sin importar el monto.
-    res = await transfer(client, ctx, cash, debit["payment_method_id"], "999999.00")
+    res = await transfer(client, ctx, cash, debit["id"], "999999.00")
     assert res.status_code == 201
 
 
@@ -153,11 +153,11 @@ async def test_txn08_prepaid_transfer_balance_check(client):
     """TXN-08: aplica igualmente a tarjetas prepaid."""
     ctx = await bootstrap_space(client)
     prepaid = await client.post(
-        "/api/v1/cards",
+        "/api/v1/accounts",
         headers=ctx["headers"],
         json={
-            "card_type_id": ctx["card_type_by_behavior"]["prepaid"]["id"],
-            "alias": "Vales",
+            "account_type_id": ctx["account_type_by_behavior"]["prepaid"]["id"],
+            "name": "Vales",
             "bank": "Sodexo",
             "network": "Mastercard",
             "last4": "5555",
@@ -166,12 +166,12 @@ async def test_txn08_prepaid_transfer_balance_check(client):
     )
     assert prepaid.status_code == 201
     prepaid = prepaid.json()
-    cash = ctx["methods"]["Efectivo"]["id"]
+    cash = ctx["accounts"]["Efectivo"]["id"]
 
-    res = await transfer(client, ctx, prepaid["payment_method_id"], cash, "201.00")
+    res = await transfer(client, ctx, prepaid["id"], cash, "201.00")
     assert res.status_code == 422
 
-    res = await transfer(client, ctx, prepaid["payment_method_id"], cash, "200.00")
+    res = await transfer(client, ctx, prepaid["id"], cash, "200.00")
     assert res.status_code == 201
 
 
@@ -188,7 +188,7 @@ async def test_txn09_transfer_to_credit_applies_as_payment(client):
     credit = await make_credit(client, ctx)
 
     # Cargo 1000 en la TDC (ciclo cierra el 15, hoy es 20 → ya cerró).
-    await charge_credit(client, ctx, credit["payment_method_id"], "1000.00", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "1000.00", "2026-06-10")
     await close_cycles(client, ctx)
 
     statements_before = await get_statements(client, ctx, credit["id"])
@@ -200,8 +200,8 @@ async def test_txn09_transfer_to_credit_applies_as_payment(client):
     res = await transfer(
         client,
         ctx,
-        debit["payment_method_id"],
-        credit["payment_method_id"],
+        debit["id"],
+        credit["id"],
         "600.00",
         date="2026-06-20",
     )
@@ -220,14 +220,14 @@ async def test_txn09_full_payment_marks_statement_paid(client):
     debit = await make_debit(client, ctx, initial_balance="5000.00")
     credit = await make_credit(client, ctx)
 
-    await charge_credit(client, ctx, credit["payment_method_id"], "800.00", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "800.00", "2026-06-10")
     await close_cycles(client, ctx)
 
     res = await transfer(
         client,
         ctx,
-        debit["payment_method_id"],
-        credit["payment_method_id"],
+        debit["id"],
+        credit["id"],
         "800.00",
         date="2026-06-20",
     )
@@ -250,8 +250,8 @@ async def test_txn09_auto_selects_oldest_unpaid_statement(client):
     credit = await make_credit(client, ctx, statement_day=15, last4="1111")
 
     # Cargo en ciclo A [16/04–15/05] y cargo en ciclo B [16/05–15/06].
-    await charge_credit(client, ctx, credit["payment_method_id"], "300.00", "2026-04-20")
-    await charge_credit(client, ctx, credit["payment_method_id"], "500.00", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "300.00", "2026-04-20")
+    await charge_credit(client, ctx, credit["id"], "500.00", "2026-06-10")
     await close_cycles(client, ctx)
 
     statements = await get_statements(client, ctx, credit["id"])
@@ -267,8 +267,8 @@ async def test_txn09_auto_selects_oldest_unpaid_statement(client):
     res = await transfer(
         client,
         ctx,
-        debit["payment_method_id"],
-        credit["payment_method_id"],
+        debit["id"],
+        credit["id"],
         "100.00",
         date="2026-06-20",
     )
@@ -287,8 +287,8 @@ async def test_txn09_target_statement_id_overrides_auto_select(client):
     credit = await make_credit(client, ctx, statement_day=15, last4="2222")
 
     # Dos ciclos cerrados: A (cierra 15/05) y B (cierra 15/06).
-    await charge_credit(client, ctx, credit["payment_method_id"], "300.00", "2026-04-20")
-    await charge_credit(client, ctx, credit["payment_method_id"], "700.00", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "300.00", "2026-04-20")
+    await charge_credit(client, ctx, credit["id"], "700.00", "2026-06-10")
     await close_cycles(client, ctx)
 
     statements = await get_statements(client, ctx, credit["id"])
@@ -303,8 +303,8 @@ async def test_txn09_target_statement_id_overrides_auto_select(client):
     res = await transfer(
         client,
         ctx,
-        debit["payment_method_id"],
-        credit["payment_method_id"],
+        debit["id"],
+        credit["id"],
         "200.00",
         date="2026-06-20",
         target_statement_id=newest_closed["id"],
@@ -327,11 +327,11 @@ async def test_txn09_target_statement_id_overrides_auto_select(client):
 
 async def _pay_card(client, ctx, card_id, from_method_id, amount, statement_id=None):
     res = await client.post(
-        f"/api/v1/cards/{card_id}/payments",
+        f"/api/v1/accounts/{card_id}/payments",
         headers=ctx["headers"],
         json={
             "amount": amount,
-            "from_payment_method_id": from_method_id,
+            "from_account_id": from_method_id,
             "date": "2026-06-20",
             "statement_id": statement_id,
         },
@@ -341,7 +341,7 @@ async def _pay_card(client, ctx, card_id, from_method_id, amount, statement_id=N
 
 
 async def _edit_amount(client, ctx, txn, amount):
-    keys = ("type", "date", "currency", "description", "payment_method_id", "payment_method_to_id")
+    keys = ("type", "date", "currency", "description", "account_id", "account_to_id")
     body = {k: txn[k] for k in keys}
     body["amount"] = amount
     res = await client.put(f"/api/v1/transactions/{txn['id']}", headers=ctx["headers"], json=body)
@@ -360,13 +360,13 @@ async def test_txn09_edit_payment_amount_up_keeps_other_payments(client):
     ctx = await bootstrap_space(client)
     debit = await make_debit(client, ctx, initial_balance="9000.00")
     credit = await make_credit(client, ctx)
-    await charge_credit(client, ctx, credit["payment_method_id"], "5064.63", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "5064.63", "2026-06-10")
     await close_cycles(client, ctx)
     statements = await get_statements(client, ctx, credit["id"])
     closed = next(s for s in statements if s["status"] == "closed")
 
-    await _pay_card(client, ctx, credit["id"], debit["payment_method_id"], "1000.00")
-    typo = await _pay_card(client, ctx, credit["id"], debit["payment_method_id"], "464.63")
+    await _pay_card(client, ctx, credit["id"], debit["id"], "1000.00")
+    typo = await _pay_card(client, ctx, credit["id"], debit["id"], "464.63")
     assert (await get_card(client, ctx, credit["id"]))["next_payment"]["amount"] == "3600.00"
 
     await _edit_amount(client, ctx, typo, "4064.63")
@@ -383,12 +383,12 @@ async def test_txn09_edit_payment_amount_down_reduces_paid_amount(client):
     ctx = await bootstrap_space(client)
     debit = await make_debit(client, ctx, initial_balance="9000.00")
     credit = await make_credit(client, ctx)
-    await charge_credit(client, ctx, credit["payment_method_id"], "4064.63", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "4064.63", "2026-06-10")
     await close_cycles(client, ctx)
     statements = await get_statements(client, ctx, credit["id"])
     closed = next(s for s in statements if s["status"] == "closed")
 
-    txn = await _pay_card(client, ctx, credit["id"], debit["payment_method_id"], "4064.63")
+    txn = await _pay_card(client, ctx, credit["id"], debit["id"], "4064.63")
     await _edit_amount(client, ctx, txn, "464.63")
 
     after = await _statement(client, ctx, credit["id"], closed["id"])
@@ -403,8 +403,8 @@ async def test_txn09_edit_payment_keeps_its_statement(client):
     ctx = await bootstrap_space(client)
     debit = await make_debit(client, ctx, initial_balance="9000.00")
     credit = await make_credit(client, ctx, last4="3333")
-    await charge_credit(client, ctx, credit["payment_method_id"], "300.00", "2026-04-20")
-    await charge_credit(client, ctx, credit["payment_method_id"], "700.00", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "300.00", "2026-04-20")
+    await charge_credit(client, ctx, credit["id"], "700.00", "2026-06-10")
     await close_cycles(client, ctx)
     closed = sorted(
         [s for s in await get_statements(client, ctx, credit["id"]) if s["status"] == "closed"],
@@ -412,9 +412,7 @@ async def test_txn09_edit_payment_keeps_its_statement(client):
     )
     oldest, newest = closed[0], closed[-1]
 
-    txn = await _pay_card(
-        client, ctx, credit["id"], debit["payment_method_id"], "70.00", newest["id"]
-    )
+    txn = await _pay_card(client, ctx, credit["id"], debit["id"], "70.00", newest["id"])
     edited = await _edit_amount(client, ctx, txn, "700.00")
 
     assert edited["statement_id"] == newest["id"]
@@ -429,12 +427,12 @@ async def test_txn09_delete_payment_reverts_paid_amount(client):
     ctx = await bootstrap_space(client)
     debit = await make_debit(client, ctx, initial_balance="9000.00")
     credit = await make_credit(client, ctx)
-    await charge_credit(client, ctx, credit["payment_method_id"], "800.00", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "800.00", "2026-06-10")
     await close_cycles(client, ctx)
     statements = await get_statements(client, ctx, credit["id"])
     closed = next(s for s in statements if s["status"] == "closed")
 
-    txn = await _pay_card(client, ctx, credit["id"], debit["payment_method_id"], "800.00")
+    txn = await _pay_card(client, ctx, credit["id"], debit["id"], "800.00")
     assert (await _statement(client, ctx, credit["id"], closed["id"]))["status"] == "paid"
 
     res = await client.delete(f"/api/v1/transactions/{txn['id']}", headers=ctx["headers"])
@@ -450,11 +448,9 @@ async def test_txn09_transfer_to_debit_is_plain_transfer(client):
     """TXN-09: transferencia a tarjeta de débito no toca statements."""
     ctx = await bootstrap_space(client)
     debit_a = await make_debit(client, ctx, initial_balance="2000.00", last4="1001")
-    debit_b = await make_debit(client, ctx, initial_balance="0.00", last4="1002", alias="B")
+    debit_b = await make_debit(client, ctx, initial_balance="0.00", last4="1002", name="B")
 
-    res = await transfer(
-        client, ctx, debit_a["payment_method_id"], debit_b["payment_method_id"], "500.00"
-    )
+    res = await transfer(client, ctx, debit_a["id"], debit_b["id"], "500.00")
     assert res.status_code == 201
 
     txn = res.json()
@@ -487,7 +483,7 @@ async def test_tar06_debit_signed_balance_is_positive(client):
             "amount": "200.00",
             "currency": "MXN",
             "category_id": ctx["categories"]["Comida"]["id"],
-            "payment_method_id": debit["payment_method_id"],
+            "account_id": debit["id"],
         },
     )
 
@@ -503,9 +499,9 @@ async def test_tar06_credit_signed_balance_is_negative(client):
     credit = await make_credit(client, ctx)
 
     # Cargo en ciclo cerrado (a) y cargo en ciclo abierto (b).
-    await charge_credit(client, ctx, credit["payment_method_id"], "500.00", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "500.00", "2026-06-10")
     await close_cycles(client, ctx)  # el cargo de 500 queda en ciclo cerrado
-    await charge_credit(client, ctx, credit["payment_method_id"], "300.00", "2026-06-18")
+    await charge_credit(client, ctx, credit["id"], "300.00", "2026-06-18")
 
     detail = await get_card(client, ctx, credit["id"])
     # signed_balance debe ser negativo y su valor absoluto == deuda total.
@@ -521,11 +517,11 @@ async def test_tar06_credit_without_statement_day_returns_null(client):
     """TAR-06: TDC sin statement_day configurado → signed_balance = null."""
     ctx = await bootstrap_space(client)
     res = await client.post(
-        "/api/v1/cards",
+        "/api/v1/accounts",
         headers=ctx["headers"],
         json={
-            "card_type_id": ctx["card_type_by_behavior"]["credit"]["id"],
-            "alias": "TDC Incompleta",
+            "account_type_id": ctx["account_type_by_behavior"]["credit"]["id"],
+            "name": "TDC Incompleta",
             "bank": "HSBC",
             "network": "Visa",
             "last4": "0000",
@@ -559,23 +555,21 @@ async def test_txn10_filter_by_method_matches_transfer_destination(client):
     """TXN-10: filtrar por el método destino devuelve la transferencia."""
     ctx = await bootstrap_space(client)
     debito = await make_debit(client, ctx, initial_balance="5000.00")
-    efectivo = ctx["methods"]["Efectivo"]["id"]
+    efectivo = ctx["accounts"]["Efectivo"]["id"]
 
-    res = await transfer(client, ctx, debito["payment_method_id"], efectivo, "400.00")
+    res = await transfer(client, ctx, debito["id"], efectivo, "400.00")
     assert res.status_code == 201, res.text
     txn_id = res.json()["id"]
 
     # Origen: la encuentra (comportamiento previo).
     res = await client.get(
-        f"/api/v1/transactions?payment_method_id={debito['payment_method_id']}",
+        f"/api/v1/transactions?account_id={debito['id']}",
         headers=ctx["headers"],
     )
     assert [t["id"] for t in res.json()["items"]] == [txn_id]
 
     # Destino: también debe encontrarla (TXN-10).
-    res = await client.get(
-        f"/api/v1/transactions?payment_method_id={efectivo}", headers=ctx["headers"]
-    )
+    res = await client.get(f"/api/v1/transactions?account_id={efectivo}", headers=ctx["headers"])
     assert [t["id"] for t in res.json()["items"]] == [txn_id]
 
 
@@ -586,15 +580,15 @@ async def test_txn10_card_payment_visible_when_filtering_by_card_method(client):
     credit = await make_credit(client, ctx)
     debito = await make_debit(client, ctx, initial_balance="5000.00")
 
-    await charge_credit(client, ctx, credit["payment_method_id"], "500.00", "2026-06-10")
+    await charge_credit(client, ctx, credit["id"], "500.00", "2026-06-10")
     await close_cycles(client, ctx)
 
     res = await client.post(
-        f"/api/v1/cards/{credit['id']}/payments",
+        f"/api/v1/accounts/{credit['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "500.00",
-            "from_payment_method_id": debito["payment_method_id"],
+            "from_account_id": debito["id"],
             "date": "2026-06-20",
         },
     )
@@ -602,7 +596,7 @@ async def test_txn10_card_payment_visible_when_filtering_by_card_method(client):
     payment_id = res.json()["id"]
 
     res = await client.get(
-        f"/api/v1/transactions?payment_method_id={credit['payment_method_id']}",
+        f"/api/v1/transactions?account_id={credit['id']}",
         headers=ctx["headers"],
     )
     items = res.json()["items"]

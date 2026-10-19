@@ -1,15 +1,45 @@
-// TAR-08: representación visual de una tarjeta (proporción ISO/IEC 7810 ID-1,
-// 85.6 × 53.98 mm) con el color o la imagen del frente que eligió el usuario.
+// TAR-08: representación visual de una cuenta (proporción ISO/IEC 7810 ID-1,
+// 85.6 × 53.98 mm) con el color o la imagen que eligió el usuario. Las tarjetas
+// se pintan como plástico; efectivo, ahorro y billeteras como un tile con ícono.
 // Solo se sobrepone `last4` — jamás PAN, CVV ni vencimiento (TDC-01).
+import type { AccountBehavior } from "../../api/accounts";
+import Icon, { type IconName } from "../../components/ui/Icon";
 
 export const CARD_RATIO = 85.6 / 53.98;
 export const DEFAULT_CARD_COLOR = "#1f1f1f";
 
-interface CardVisualProps {
-  alias: string;
-  bank: string;
-  network: string;
-  last4: string;
+// Color base por defecto para cuentas que no son plástico.
+const TILE_DEFAULTS: Record<AccountBehavior, { color: string; icon: IconName; label: string }> = {
+  cash: { color: "#1f6b47", icon: "banknote", label: "Efectivo" },
+  savings: { color: "#0f4c75", icon: "piggy", label: "Ahorro" },
+  debit: { color: "#33316b", icon: "wallet", label: "Billetera" },
+  prepaid: { color: "#7a4b00", icon: "wallet", label: "Prepago" },
+  credit: { color: DEFAULT_CARD_COLOR, icon: "card", label: "Crédito" },
+};
+
+/** TAR-02: se pinta como tarjeta si es crédito o trae datos de plástico. */
+export function looksLikeCard(
+  behavior: AccountBehavior | null | undefined,
+  last4: string | null | undefined,
+): boolean {
+  return behavior === "credit" || !!last4;
+}
+
+export function defaultColorFor(
+  behavior: AccountBehavior | null | undefined,
+  last4: string | null | undefined,
+): string {
+  if (!behavior || looksLikeCard(behavior, last4)) return DEFAULT_CARD_COLOR;
+  return TILE_DEFAULTS[behavior].color;
+}
+
+interface AccountVisualProps {
+  name: string;
+  bank?: string | null;
+  network?: string | null;
+  last4?: string | null;
+  currency?: string;
+  behavior?: AccountBehavior | null;
   color?: string | null;
   image?: string | null;
   inactive?: boolean;
@@ -89,17 +119,32 @@ function Chip() {
   );
 }
 
-export default function CardVisual({
-  alias,
+export default function AccountVisual({
+  name,
   bank,
   network,
   last4,
+  currency = "MXN",
+  behavior,
   color,
   image,
   inactive = false,
   className = "",
-}: CardVisualProps) {
-  const base = color && parseHex(color) ? color : DEFAULT_CARD_COLOR;
+}: AccountVisualProps) {
+  const base = color && parseHex(color) ? color : defaultColorFor(behavior, last4);
+  if (!looksLikeCard(behavior, last4)) {
+    return (
+      <AccountTile
+        name={name}
+        currency={currency}
+        behavior={behavior ?? "debit"}
+        base={base}
+        image={image}
+        inactive={inactive}
+        className={className}
+      />
+    );
+  }
   // Con imagen el texto va claro sobre un velo oscuro; con color, según luminancia.
   const light = !image && isLightColor(base);
   const text = light ? "text-black/85" : "text-white";
@@ -130,7 +175,7 @@ export default function CardVisual({
             {bank || "Banco"}
           </span>
           <span className={`truncate text-right text-[clamp(0.6rem,3.4cqw,0.85rem)] font-medium ${sub}`}>
-            {alias}
+            {name}
           </span>
         </div>
 
@@ -147,10 +192,84 @@ export default function CardVisual({
           <span className={`font-mono text-[clamp(0.75rem,5.2cqw,1.3rem)] tracking-[0.18em] ${text}`}>
             •••• {last4 || "0000"}
           </span>
-          <NetworkMark network={network} light={light} />
+          {network && <NetworkMark network={network} light={light} />}
         </div>
       </div>
 
+      {inactive && (
+        <span className="absolute right-[6.5%] top-1/2 -translate-y-1/2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white">
+          Inactiva
+        </span>
+      )}
+    </div>
+  );
+}
+
+function background(base: string): string {
+  return `radial-gradient(120% 90% at 0% 0%, ${shade(base, 0.18)} 0%, transparent 55%), linear-gradient(135deg, ${base} 0%, ${shade(base, -0.35)} 100%)`;
+}
+
+/** Cuenta sin plástico (efectivo, ahorro, billetera): ícono, nombre y moneda. */
+function AccountTile({
+  name,
+  currency,
+  behavior,
+  base,
+  image,
+  inactive,
+  className,
+}: {
+  name: string;
+  currency: string;
+  behavior: AccountBehavior;
+  base: string;
+  image?: string | null;
+  inactive: boolean;
+  className: string;
+}) {
+  const light = !image && isLightColor(base);
+  const text = light ? "text-black/85" : "text-white";
+  const sub = light ? "text-black/55" : "text-white/70";
+  const meta = TILE_DEFAULTS[behavior];
+  return (
+    <div
+      className={`relative w-full select-none overflow-hidden rounded-[4.5%/7%] shadow-[0_10px_30px_-12px_rgb(0_0_0/0.55)] ring-1 ring-black/10 [container-type:inline-size] dark:ring-white/10 ${
+        inactive ? "grayscale" : ""
+      } ${className}`}
+      style={{ aspectRatio: CARD_RATIO, background: background(base) }}
+    >
+      {image && (
+        <>
+          <img src={image} alt="" className="absolute inset-0 size-full object-cover" draggable={false} />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/5 to-black/35" />
+        </>
+      )}
+      <div className="absolute inset-0 flex flex-col justify-between p-[6.5%]">
+        <div className="flex items-start justify-between gap-2">
+          <span
+            className={`grid size-[18cqw] place-items-center rounded-[22%] ${
+              light ? "bg-black/10" : "bg-white/15"
+            } ${text}`}
+          >
+            <Icon name={meta.icon} className="size-[55%]" />
+          </span>
+          <span
+            className={`rounded-full px-[3cqw] py-[0.8cqw] font-mono text-[clamp(0.6rem,3.4cqw,0.85rem)] font-semibold ${
+              light ? "bg-black/10" : "bg-white/15"
+            } ${text}`}
+          >
+            {currency}
+          </span>
+        </div>
+        <div className="min-w-0">
+          <p className={`text-[clamp(0.6rem,3.4cqw,0.85rem)] font-medium uppercase tracking-wider ${sub}`}>
+            {meta.label}
+          </p>
+          <p className={`truncate text-[clamp(0.85rem,6.5cqw,1.6rem)] font-semibold tracking-tight ${text}`}>
+            {name}
+          </p>
+        </div>
+      </div>
       {inactive && (
         <span className="absolute right-[6.5%] top-1/2 -translate-y-1/2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white">
           Inactiva

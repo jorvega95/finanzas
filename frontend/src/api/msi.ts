@@ -13,7 +13,7 @@ export interface InstallmentOut {
 
 export interface PlanOut {
   id: string;
-  credit_card_id: string;
+  account_id: string;
   transaction_id: string;
   total_amount: string;
   months: number;
@@ -25,7 +25,7 @@ export interface PlanOut {
 export interface PlanSummaryOut {
   plan: PlanOut;
   description: string;
-  card_alias: string;
+  account_name: string;
   paid_count: number;
   charged_count: number;
   pending_count: number;
@@ -39,7 +39,7 @@ export interface CurrentInstallmentCreate {
   description: string;
   monthly_amount: string;
   currency: string;
-  credit_card_id: string;
+  account_id: string;
   current_number: number;
   total_months: number;
   category_id: string;
@@ -47,8 +47,8 @@ export interface CurrentInstallmentCreate {
 }
 
 export interface ProjectionRow {
-  credit_card_id: string;
-  card_alias: string;
+  account_id: string;
+  account_name: string;
   month: string;
   amount: string;
 }
@@ -70,7 +70,7 @@ export function useMsiProjection() {
 function useInvalidateMsi() {
   const qc = useQueryClient();
   return () =>
-    ["msi", "cards", "statements", "transactions", "forecast"].forEach(
+    ["msi", "accounts", "statements", "transactions", "forecast"].forEach(
       (k) => void qc.invalidateQueries({ queryKey: [k] }),
     );
 }

@@ -41,8 +41,9 @@ async def test_esp01_provisioning_is_idempotent(client, db_session):
 
 
 async def test_cat02_seed_catalogs_on_personal_space(client, db_session):
-    """CAT-02: every new space gets the seed categories and payment methods."""
-    from app.models.catalogs import Category, CategoryKind, PaymentMethod
+    """CAT-02: every new space gets the seed categories, account types and a cash account."""
+    from app.models.accounts import Account
+    from app.models.catalogs import AccountType, Category, CategoryKind
 
     user_id = uuid.uuid4()
     res = await client.get("/api/v1/me", headers=auth_headers(user_id))
@@ -73,12 +74,18 @@ async def test_cat02_seed_catalogs_on_personal_space(client, db_session):
     assert all(c.expense_nature is not None for c in cats if c.kind == CategoryKind.expense)
     assert all(c.expense_nature is None for c in cats if c.kind == CategoryKind.income)
 
-    methods = (
-        (await db_session.execute(select(PaymentMethod).where(PaymentMethod.space_id == space_id)))
+    types = (
+        (await db_session.execute(select(AccountType).where(AccountType.space_id == space_id)))
         .scalars()
         .all()
     )
-    assert {m.name for m in methods} == {"Efectivo", "Débito", "Transferencia"}
+    assert len(types) == 7
+    accounts = (
+        (await db_session.execute(select(Account).where(Account.space_id == space_id)))
+        .scalars()
+        .all()
+    )
+    assert [(a.name, a.allow_overdraft) for a in accounts] == [("Efectivo", True)]
 
 
 async def test_esp02_create_shared_space(client):

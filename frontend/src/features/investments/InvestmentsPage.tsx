@@ -173,13 +173,14 @@ export default function InvestmentsPage() {
         ))}
       </div>
       <p className="text-xs text-ink-muted">
-        Patrimonio = inversiones − deuda de tarjetas. Aún no incluye saldos de cuentas de
-        efectivo o débito.
+        Patrimonio = inversiones + saldos de cuentas (efectivo, débito, billeteras, ahorro) −
+        deuda de tarjetas. Los saldos en dólares se valúan al tipo de cambio del día, así que
+        es un aproximado.
       </p>
 
       {/* Cuentas + movimientos */}
       <section className="card space-y-4 p-5">
-        <h2 className="text-base font-semibold tracking-tight">Cuentas y movimientos</h2>
+        <h2 className="text-base font-semibold tracking-tight">Cuentas de inversión y movimientos</h2>
         <form
           onSubmit={(e) => {
             e.preventDefault();

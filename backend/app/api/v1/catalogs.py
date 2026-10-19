@@ -1,4 +1,4 @@
-"""Router: catalogs. Implements CAT-01..CAT-07; permissions per ESP-03."""
+"""Router: catalogs. Implements CAT-01..CAT-08; permissions per ESP-03."""
 
 import uuid
 
@@ -6,17 +6,14 @@ from fastapi import APIRouter, status
 from sqlalchemy import select
 
 from app.core.deps import ActiveSpace, CurrentUser, DbSession, EditorSpace
-from app.models.catalogs import CardType, Category, CategoryKind, PaymentMethod
+from app.models.catalogs import AccountType, Category, CategoryKind
 from app.schemas.catalogs import (
-    CardTypeCreate,
-    CardTypeOut,
-    CardTypeUpdate,
+    AccountTypeCreate,
+    AccountTypeOut,
+    AccountTypeUpdate,
     CategoryCreate,
     CategoryOut,
     CategoryUpdate,
-    PaymentMethodCreate,
-    PaymentMethodOut,
-    PaymentMethodUpdate,
 )
 from app.services import catalogs as svc
 
@@ -87,75 +84,27 @@ async def delete_category(
     await svc.delete_category(db, space.id, category_id)
 
 
-@router.get("/payment-methods", response_model=list[PaymentMethodOut])
-async def list_payment_methods(
+# --- Account types (CAT-08) -----------------------------------------------------
+
+
+@router.get("/account-types", response_model=list[AccountTypeOut])
+async def list_account_types(
     db: DbSession, space_and_member: ActiveSpace, include_inactive: bool = False
-) -> list[PaymentMethod]:
+) -> list[AccountType]:
     space, _ = space_and_member
-    stmt = select(PaymentMethod).where(PaymentMethod.space_id == space.id)
+    stmt = select(AccountType).where(AccountType.space_id == space.id)
     if not include_inactive:
-        stmt = stmt.where(PaymentMethod.is_active.is_(True))
-    rows = await db.execute(stmt.order_by(PaymentMethod.name))
+        stmt = stmt.where(AccountType.is_active.is_(True))
+    rows = await db.execute(stmt.order_by(AccountType.name))
     return list(rows.scalars().all())
 
 
-@router.post(
-    "/payment-methods", response_model=PaymentMethodOut, status_code=status.HTTP_201_CREATED
-)
-async def create_payment_method(
-    db: DbSession,
-    space_and_member: EditorSpace,
-    user: CurrentUser,
-    payload: PaymentMethodCreate,
-) -> PaymentMethod:
+@router.post("/account-types", response_model=AccountTypeOut, status_code=status.HTTP_201_CREATED)
+async def create_account_type(
+    db: DbSession, space_and_member: EditorSpace, user: CurrentUser, payload: AccountTypeCreate
+) -> AccountType:
     space, _ = space_and_member
-    return await svc.create_payment_method(
-        db, space.id, user.id, name=payload.name, type=payload.type
-    )
-
-
-@router.patch("/payment-methods/{method_id}", response_model=PaymentMethodOut)
-async def update_payment_method(
-    db: DbSession,
-    space_and_member: EditorSpace,
-    method_id: uuid.UUID,
-    payload: PaymentMethodUpdate,
-) -> PaymentMethod:
-    space, _ = space_and_member
-    return await svc.update_payment_method(
-        db, space.id, method_id, name=payload.name, is_active=payload.is_active
-    )
-
-
-@router.delete("/payment-methods/{method_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_payment_method(
-    db: DbSession, space_and_member: EditorSpace, method_id: uuid.UUID
-) -> None:
-    space, _ = space_and_member
-    await svc.delete_payment_method(db, space.id, method_id)
-
-
-# --- Card types (CAT-08) -----------------------------------------------------
-
-
-@router.get("/card-types", response_model=list[CardTypeOut])
-async def list_card_types(
-    db: DbSession, space_and_member: ActiveSpace, include_inactive: bool = False
-) -> list[CardType]:
-    space, _ = space_and_member
-    stmt = select(CardType).where(CardType.space_id == space.id)
-    if not include_inactive:
-        stmt = stmt.where(CardType.is_active.is_(True))
-    rows = await db.execute(stmt.order_by(CardType.name))
-    return list(rows.scalars().all())
-
-
-@router.post("/card-types", response_model=CardTypeOut, status_code=status.HTTP_201_CREATED)
-async def create_card_type(
-    db: DbSession, space_and_member: EditorSpace, user: CurrentUser, payload: CardTypeCreate
-) -> CardType:
-    space, _ = space_and_member
-    return await svc.create_card_type(
+    return await svc.create_account_type(
         db,
         space.id,
         user.id,
@@ -166,18 +115,18 @@ async def create_card_type(
     )
 
 
-@router.patch("/card-types/{card_type_id}", response_model=CardTypeOut)
-async def update_card_type(
+@router.patch("/account-types/{account_type_id}", response_model=AccountTypeOut)
+async def update_account_type(
     db: DbSession,
     space_and_member: EditorSpace,
-    card_type_id: uuid.UUID,
-    payload: CardTypeUpdate,
-) -> CardType:
+    account_type_id: uuid.UUID,
+    payload: AccountTypeUpdate,
+) -> AccountType:
     space, _ = space_and_member
-    return await svc.update_card_type(
+    return await svc.update_account_type(
         db,
         space.id,
-        card_type_id,
+        account_type_id,
         name=payload.name,
         icon=payload.icon,
         color=payload.color,
@@ -185,9 +134,9 @@ async def update_card_type(
     )
 
 
-@router.delete("/card-types/{card_type_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_card_type(
-    db: DbSession, space_and_member: EditorSpace, card_type_id: uuid.UUID
+@router.delete("/account-types/{account_type_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account_type(
+    db: DbSession, space_and_member: EditorSpace, account_type_id: uuid.UUID
 ) -> None:
     space, _ = space_and_member
-    await svc.delete_card_type(db, space.id, card_type_id)
+    await svc.delete_account_type(db, space.id, account_type_id)

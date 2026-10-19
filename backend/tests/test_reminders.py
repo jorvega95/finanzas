@@ -14,7 +14,7 @@ Y el centro de notificaciones in-app (OPP-01):
 from freezegun import freeze_time
 
 from tests.conftest import bootstrap_space
-from tests.test_cards import charge, close_cycles, create_card
+from tests.test_accounts import charge, close_cycles, create_card
 
 # ---------------------------------------------------------------------------
 # Helpers del centro de notificaciones (REM-06)
@@ -53,7 +53,7 @@ async def test_rem01_no_past_reminders_on_historical_charge(client):
     fire_at en el pasado ni dispararlos inmediatamente al inbox."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, reminder_days=[3, 1])
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     # Cargo del 10-may → ciclo [16-abr, 15-may] → due 4-jun → fire_at 1-jun y 3-jun (pasados).
     await charge(client, ctx, method_id, "2026-05-10", "300.00")
@@ -111,7 +111,7 @@ async def test_rem01_opening_balance_zeroed_cancels_reminders(client):
 
     # Editar a 0 → statement queda pagado y reminders cancelados.
     res = await client.patch(
-        f"/api/v1/cards/{card['id']}",
+        f"/api/v1/accounts/{card['id']}",
         headers=ctx["headers"],
         json={"opening_balance": "0"},
     )
@@ -132,8 +132,8 @@ async def test_rem01b_sent_reminders_canceled_on_payment(client):
     Usa fecha 2026-07-02 = primer fire_at del corte [16-may, 15-jun] con due 5-jul."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, reminder_days=[3, 1])
-    method_id = card["payment_method_id"]
-    debito = ctx["methods"]["Débito"]["id"]
+    method_id = card["id"]
+    debito = ctx["accounts"]["Débito"]["id"]
 
     # Cargo del 10-jun → ciclo [16-may, 15-jun] → due 5-jul → fire_at 2-jul (hoy) y 4-jul.
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
@@ -150,11 +150,11 @@ async def test_rem01b_sent_reminders_canceled_on_payment(client):
 
     # Pago completo → REM-01b: sent y pending deben cancelarse.
     res = await client.post(
-        f"/api/v1/cards/{card['id']}/payments",
+        f"/api/v1/accounts/{card['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "500.00",
-            "from_payment_method_id": debito,
+            "from_account_id": debito,
             "date": "2026-07-02",
             "statement_id": statement_id,
         },
@@ -173,8 +173,8 @@ async def test_rem01b_partial_payment_keeps_reminders(client):
     """REM-01b: un pago parcial NO cancela los reminders — el statement sigue pendiente."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, reminder_days=[3, 1])
-    method_id = card["payment_method_id"]
-    debito = ctx["methods"]["Débito"]["id"]
+    method_id = card["id"]
+    debito = ctx["accounts"]["Débito"]["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
     closed = await close_cycles(client, ctx)
@@ -182,11 +182,11 @@ async def test_rem01b_partial_payment_keeps_reminders(client):
 
     # Pago parcial (solo 200 de 500).
     res = await client.post(
-        f"/api/v1/cards/{card['id']}/payments",
+        f"/api/v1/accounts/{card['id']}/payments",
         headers=ctx["headers"],
         json={
             "amount": "200.00",
-            "from_payment_method_id": debito,
+            "from_account_id": debito,
             "date": "2026-07-02",
             "statement_id": statement_id,
         },
@@ -210,7 +210,7 @@ async def test_rem05_dismiss_removes_from_inbox(client):
     pero se conserva en el historial para auditoría."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, reminder_days=[3, 1])
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
     await close_cycles(client, ctx)
@@ -235,7 +235,7 @@ async def test_rem05_dismiss_cross_space_404(client):
     ctx_b = await bootstrap_space(client)
 
     card = await create_card(client, ctx_a, reminder_days=[3])
-    await charge(client, ctx_a, card["payment_method_id"], "2026-06-10", "100.00")
+    await charge(client, ctx_a, card["id"], "2026-06-10", "100.00")
     await close_cycles(client, ctx_a)
 
     reminder_id = (await inbox(client, ctx_a))[0]["id"]
@@ -252,7 +252,7 @@ async def test_rem05_dismiss_does_not_cancel_statement(client):
     """REM-05: descartar no cancela el statement ni afecta otros reminders."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, reminder_days=[3, 1])
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
     closed = await close_cycles(client, ctx)
@@ -264,12 +264,12 @@ async def test_rem05_dismiss_does_not_cancel_statement(client):
 
     # El statement sigue cerrado y pendiente de pago.
     statements = (
-        await client.get(f"/api/v1/cards/{card['id']}/statements", headers=ctx["headers"])
+        await client.get(f"/api/v1/accounts/{card['id']}/statements", headers=ctx["headers"])
     ).json()
     st = next(s for s in statements if s["id"] == statement_id)
     assert st["status"] == "closed"
 
-    detail = (await client.get(f"/api/v1/cards/{card['id']}", headers=ctx["headers"])).json()
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
     assert detail["debt"]["statement_balance"] == "500.00"
 
     # El recordatorio aún pendiente de disparar no se ve afectado (REM-05).
@@ -287,7 +287,7 @@ async def test_rem07_unread_badge_and_mark_one_read(client):
     """REM-07: leer un aviso baja el badge pero lo deja visible en el inbox."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, reminder_days=[3, 1])
-    await charge(client, ctx, card["payment_method_id"], "2026-06-10", "500.00")
+    await charge(client, ctx, card["id"], "2026-06-10", "500.00")
     await close_cycles(client, ctx)
 
     assert await unread(client, ctx) == 1
@@ -313,8 +313,8 @@ async def test_rem07_read_all_is_idempotent(client):
     ctx = await bootstrap_space(client)
     # Dos tarjetas con el mismo corte → dos avisos disparados hoy (fire_at = due − 3).
     for alias in ("Oro", "Platino"):
-        card = await create_card(client, ctx, alias=alias, reminder_days=[3])
-        await charge(client, ctx, card["payment_method_id"], "2026-06-10", "500.00")
+        card = await create_card(client, ctx, name=alias, reminder_days=[3])
+        await charge(client, ctx, card["id"], "2026-06-10", "500.00")
     await close_cycles(client, ctx)
 
     assert len(await inbox(client, ctx)) == 2
@@ -336,7 +336,7 @@ async def test_rem06_inbox_is_scoped_to_active_space(client):
     ctx_b = await bootstrap_space(client)
 
     card = await create_card(client, ctx_a, reminder_days=[3])
-    await charge(client, ctx_a, card["payment_method_id"], "2026-06-10", "500.00")
+    await charge(client, ctx_a, card["id"], "2026-06-10", "500.00")
     await close_cycles(client, ctx_a)
 
     assert await unread(client, ctx_a) == 1
@@ -351,7 +351,7 @@ async def test_rem07_read_cross_space_404(client):
     ctx_b = await bootstrap_space(client)
 
     card = await create_card(client, ctx_a, reminder_days=[3])
-    await charge(client, ctx_a, card["payment_method_id"], "2026-06-10", "500.00")
+    await charge(client, ctx_a, card["id"], "2026-06-10", "500.00")
     await close_cycles(client, ctx_a)
     reminder_id = (await inbox(client, ctx_a))[0]["id"]
 
@@ -369,7 +369,7 @@ async def test_rem02_no_duplicate_reminders(client):
     """REM-02: cerrar ciclos múltiples veces no duplica recordatorios."""
     ctx = await bootstrap_space(client)
     card = await create_card(client, ctx, reminder_days=[3, 1])
-    method_id = card["payment_method_id"]
+    method_id = card["id"]
 
     await charge(client, ctx, method_id, "2026-06-10", "500.00")
 

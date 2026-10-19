@@ -1,4 +1,4 @@
-// Transacciones (TXN-01..06). GLO-01: montos como strings, nunca float.
+// Transacciones (TXN-01..14). GLO-01: montos como strings, nunca float.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 
@@ -12,9 +12,11 @@ export interface TransactionOut {
   description: string;
   notes: string | null;
   category_id: string | null;
-  payment_method_id: string | null;
-  payment_method_to_id: string | null;
-  card_id: string | null;
+  account_id: string; // TAR-03
+  account_to_id: string | null; // TXN-02: transfer target
+  amount_to: string | null; // TXN-13: received in the target currency
+  fee_amount: string | null; // TXN-14: fee of this transfer
+  fee_for_id: string | null; // TXN-14: set on the fee row itself
   statement_id: string | null; // TXN-09: set when transfer is a TDC payment
   expense_nature_override: string | null;
   recurring_rule_id: string | null;
@@ -31,7 +33,7 @@ export interface TransactionFilters {
   date_to?: string;
   type?: string;
   category_id?: string;
-  payment_method_id?: string;
+  account_id?: string; // TXN-10: movements touching the account
   needs_review?: boolean;
   q?: string; // TXN-12: búsqueda por descripción
   limit?: number;
@@ -45,8 +47,10 @@ export interface TransactionBody {
   currency: string;
   description?: string;
   category_id?: string | null;
-  payment_method_id?: string | null;
-  payment_method_to_id?: string | null;
+  account_id: string;
+  account_to_id?: string | null;
+  amount_to?: string | null; // TXN-13
+  fee_amount?: string | null; // TXN-14
   cycle_hint?: "current" | "next" | null; // TDC-05a
   target_statement_id?: string | null; // TXN-09: explicit statement for TDC payment
 }
@@ -87,7 +91,7 @@ export function fetchPossibleDuplicates(query: DuplicateQuery): Promise<Transact
 function useInvalidateTransactions() {
   const qc = useQueryClient();
   return () =>
-    ["transactions", "cards", "statements", "budgets", "forecast"].forEach(
+    ["transactions", "accounts", "statements", "budgets", "forecast"].forEach(
       (k) => void qc.invalidateQueries({ queryKey: [k] }),
     );
 }

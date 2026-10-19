@@ -278,12 +278,13 @@ async def snapshot_portfolio(
 
 
 async def snapshot_net_worth(session: AsyncSession, space: Space) -> NetWorthSnapshot:
-    """PAT-01/PAT-02: activos = portafolio + saldos de tarjetas no-crédito
-    (TAR-05); pasivos = deuda de tarjetas de crédito (TDC-09 a+b+c). Idempotente
+    """PAT-01/PAT-02: activos = portafolio + saldos de cuentas con saldo
+    (TAR-05); pasivos = deuda de tarjetas de crédito (TDC-09 a+b+c). Saldos y
+    deudas en moneda ≠ base se valúan a la tasa del día (FX-04). Idempotente
     por día."""
-    from app.models.cards import Card
-    from app.models.catalogs import CardBehavior, CardType
-    from app.services.cards import card_balance, debt_summary
+    from app.models.accounts import Account
+    from app.models.catalogs import AccountBehavior, AccountType
+    from app.services.accounts import account_balance, debt_summary
 
     today = today_in_tz(space.timezone)
     portfolio = await session.scalar(
@@ -293,34 +294,46 @@ async def snapshot_net_worth(session: AsyncSession, space: Space) -> NetWorthSna
     )
     portfolio_value = portfolio.total_value if portfolio is not None else ZERO
 
-    cards = (
+    accounts = (
         await session.execute(
-            select(Card, CardType.behavior)
-            .join(CardType, Card.card_type_id == CardType.id)
-            .where(Card.space_id == space.id)
+            select(Account, AccountType.behavior)
+            .join(AccountType, Account.account_type_id == AccountType.id)
+            .where(Account.space_id == space.id)
         )
     ).all()
     liabilities = ZERO
-    card_balances = ZERO
-    for card, behavior in cards:
-        if behavior == CardBehavior.credit:
-            debt = await debt_summary(session, card)
-            liabilities += debt["total_debt"]
+    account_balances = ZERO
+    unvalued: set[str] = set()
+    for account, behavior in accounts:
+        if behavior == AccountBehavior.credit:
+            amount = (await debt_summary(session, account))["total_debt"]
         else:
-            card_balances += await card_balance(session, card)  # TAR-05
+            amount = await account_balance(session, account)  # TAR-05
+        valued = await fx.mark_to_market(
+            session, amount, account.currency, space.base_currency, today
+        )
+        if valued is None:
+            unvalued.add(account.currency)
+            continue
+        if behavior == AccountBehavior.credit:
+            liabilities += valued
+        else:
+            account_balances += valued
 
-    assets = portfolio_value + card_balances
+    assets = portfolio_value + account_balances
 
     existing = await session.scalar(
         select(NetWorthSnapshot).where(
             NetWorthSnapshot.space_id == space.id, NetWorthSnapshot.date == today
         )
     )
-    breakdown = {
+    breakdown: dict[str, Any] = {
         "portfolio": str(portfolio_value),
-        "card_balances": str(card_balances),
+        "account_balances": str(account_balances),
         "card_debt": str(liabilities),
     }
+    if unvalued:
+        breakdown["unvalued_currencies"] = sorted(unvalued)  # no rate known (FX-04)
     if existing is not None:
         existing.assets = assets
         existing.liabilities = liabilities

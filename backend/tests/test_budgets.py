@@ -87,8 +87,8 @@ async def test_pre02_consumption_with_subcategories(client):
             "date": "2026-06-02",
             "amount": "500.00",
             "currency": "MXN",
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
-            "payment_method_to_id": ctx["methods"]["Efectivo"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
+            "account_to_id": ctx["accounts"]["Efectivo"]["id"],
         },
     )
 

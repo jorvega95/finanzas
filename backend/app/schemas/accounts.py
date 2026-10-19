@@ -1,32 +1,33 @@
-"""Pydantic schemas for cards, statements, MSI and reminders (Fase 2)."""
+"""Pydantic schemas for accounts, statements, MSI and reminders (Fase 2)."""
 
 import datetime as dt
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.cards import CutoffDayPolicy, StatementStatus
-from app.models.catalogs import CardBehavior
+from app.models.accounts import CutoffDayPolicy, StatementStatus
+from app.models.catalogs import AccountBehavior
 from app.models.msi import InstallmentStatus, PlanStatus
 from app.schemas.transactions import Money, MoneyNonNeg, MoneyOut
 
-# TAR-08: card design. Hex base color and a front-image data URL (never the PAN:
+# TAR-08: account design. Hex base color and a front-image data URL (never the PAN:
 # TDC-01 — the UI warns; the backend only checks format and size).
-CARD_COLOR_PATTERN = r"^#[0-9a-fA-F]{6}$"
-CARD_IMAGE_PATTERN = r"^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$"
-CARD_IMAGE_MAX_LENGTH = 1_000_000
+COLOR_PATTERN = r"^#[0-9a-fA-F]{6}$"
+IMAGE_PATTERN = r"^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$"
+IMAGE_MAX_LENGTH = 1_000_000
 
 
-class CardCreate(BaseModel):
-    card_type_id: uuid.UUID  # CAT-08/TAR-01
-    alias: str = Field(min_length=1, max_length=60)
-    bank: str = Field(min_length=1, max_length=60)
-    network: str = Field(min_length=1, max_length=20)
-    last4: str = Field(pattern=r"^\d{4}$")
+class AccountCreate(BaseModel):
+    account_type_id: uuid.UUID  # CAT-08/TAR-01
+    name: str = Field(min_length=1, max_length=60)
+    # TAR-02: plastic details are optional for every behavior.
+    bank: str | None = Field(default=None, min_length=1, max_length=60)
+    network: str | None = Field(default=None, min_length=1, max_length=20)
+    last4: str | None = Field(default=None, pattern=r"^\d{4}$")
     currency: str = Field(default="MXN", pattern="^[A-Z]{3}$")
-    color: str | None = Field(default=None, pattern=CARD_COLOR_PATTERN)  # TAR-08
+    color: str | None = Field(default=None, pattern=COLOR_PATTERN)  # TAR-08
     image: str | None = Field(
-        default=None, pattern=CARD_IMAGE_PATTERN, max_length=CARD_IMAGE_MAX_LENGTH
+        default=None, pattern=IMAGE_PATTERN, max_length=IMAGE_MAX_LENGTH
     )  # TAR-08
     # TAR-02 credit-only fields (TDC-15: all optional, fillable later).
     statement_day: int | str | None = None  # 1-28 | "last" (TDC-02)
@@ -36,23 +37,23 @@ class CardCreate(BaseModel):
     credit_limit: Money | None = None
     reminder_days: list[int] | None = None  # REM-01, default [3, 1]
     opening_balance: MoneyNonNeg | None = None  # TDC-14: deuda del corte anterior
-    # TAR-05 non-credit fields. Opening balance may be zero.
+    # TAR-05 balance fields. Opening balance may be zero.
     initial_balance: MoneyNonNeg | None = None
-    allow_overdraft: bool = False
+    allow_overdraft: bool = False  # TAR-09: ignored for cash (always allowed)
 
 
-class CardUpdate(BaseModel):
+class AccountUpdate(BaseModel):
     """TDC-15: full edit. Only the fields sent are applied (model_dump
-    exclude_unset). Card type/behavior is immutable."""
+    exclude_unset). Account type/behavior is immutable."""
 
-    alias: str | None = Field(default=None, min_length=1, max_length=60)
+    name: str | None = Field(default=None, min_length=1, max_length=60)
     bank: str | None = Field(default=None, min_length=1, max_length=60)
     network: str | None = Field(default=None, min_length=1, max_length=20)
     last4: str | None = Field(default=None, pattern=r"^\d{4}$")
     currency: str | None = Field(default=None, pattern="^[A-Z]{3}$")
-    color: str | None = Field(default=None, pattern=CARD_COLOR_PATTERN)  # TAR-08
+    color: str | None = Field(default=None, pattern=COLOR_PATTERN)  # TAR-08
     image: str | None = Field(
-        default=None, pattern=CARD_IMAGE_PATTERN, max_length=CARD_IMAGE_MAX_LENGTH
+        default=None, pattern=IMAGE_PATTERN, max_length=IMAGE_MAX_LENGTH
     )  # TAR-08
     # Credit-only (TAR-02):
     statement_day: int | str | None = None
@@ -62,17 +63,23 @@ class CardUpdate(BaseModel):
     credit_limit: Money | None = None
     reminder_days: list[int] | None = None
     opening_balance: MoneyNonNeg | None = None  # TDC-14: deuda del corte anterior
-    # Non-credit (TAR-05):
+    # Balance accounts (TAR-05):
     initial_balance: MoneyNonNeg | None = None
     allow_overdraft: bool | None = None
     is_active: bool | None = None  # TDC-12
 
 
-class CardLayoutUpdate(BaseModel):
-    """TAR-07: full ordered list of card ids for the current user in the space.
-    Ids not belonging to the space are ignored; missing cards keep alias order."""
+class AccountLayoutUpdate(BaseModel):
+    """TAR-07: full ordered list of account ids for the current user in the space.
+    Ids not belonging to the space are ignored; missing accounts keep name order."""
 
-    card_ids: list[uuid.UUID]
+    account_ids: list[uuid.UUID]
+
+
+class CashBalanceAdjust(BaseModel):
+    """TAR-09: the real cash on hand; the computed balance is set to it."""
+
+    balance: MoneyNonNeg
 
 
 class DebtSummary(BaseModel):
@@ -84,15 +91,15 @@ class DebtSummary(BaseModel):
     total_debt: MoneyOut
 
 
-class CardOut(BaseModel):
+class AccountOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    card_type_id: uuid.UUID
-    alias: str
-    bank: str
-    network: str
-    last4: str
+    account_type_id: uuid.UUID
+    name: str
+    bank: str | None
+    network: str | None
+    last4: str | None
     currency: str
     credit_limit: Money | None
     statement_day: int | None
@@ -102,11 +109,10 @@ class CardOut(BaseModel):
     payment_day: int | None
     payment_day_is_last: bool
     reminder_days: list[int]
-    initial_balance: MoneyNonNeg | None
+    initial_balance: MoneyOut | None  # TAR-09: a cash adjustment may make it negative
     allow_overdraft: bool
     color: str | None
     image: str | None  # TAR-08
-    payment_method_id: uuid.UUID | None
     is_active: bool
 
 
@@ -117,10 +123,10 @@ class NextPaymentOut(BaseModel):
     due_date: dt.date
 
 
-class CardWithDebtOut(CardOut):
-    behavior: CardBehavior | None = None
+class AccountWithDebtOut(AccountOut):
+    behavior: AccountBehavior | None = None
     debt: DebtSummary | None = None  # TDC-09, credit only
-    balance: MoneyOut | None = None  # TAR-05, debit/prepaid only
+    balance: MoneyOut | None = None  # TAR-05, balance accounts only
     signed_balance: MoneyOut | None = None  # TAR-06: +asset or -liability for PAT-01
     next_payment: NextPaymentOut | None = None  # TDC-14, credit only
     opening_balance: MoneyNonNeg | None = None  # TDC-14: synthetic previous-cut debt
@@ -130,7 +136,7 @@ class StatementOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    credit_card_id: uuid.UUID
+    account_id: uuid.UUID
     period_start: dt.date
     period_end: dt.date
     due_date: dt.date
@@ -145,13 +151,13 @@ class PaymentCreate(BaseModel):
     """TDC-10."""
 
     amount: Money
-    from_payment_method_id: uuid.UUID
+    from_account_id: uuid.UUID
     date: dt.date
     statement_id: uuid.UUID | None = None
 
 
 class PlanCreate(BaseModel):
-    """MSI-01: convert an existing card purchase into an MSI plan."""
+    """MSI-01: convert an existing account purchase into an MSI plan."""
 
     transaction_id: uuid.UUID
     months: int = Field(ge=2, le=60)
@@ -163,7 +169,7 @@ class PlanCurrentInstallmentCreate(BaseModel):
     description: str = Field(default="", max_length=200)
     monthly_amount: Money
     currency: str = Field(default="MXN", pattern="^[A-Z]{3}$")
-    credit_card_id: uuid.UUID
+    account_id: uuid.UUID
     current_number: int = Field(ge=1, le=60)
     total_months: int = Field(ge=2, le=60)
     category_id: uuid.UUID
@@ -185,7 +191,7 @@ class PlanOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    credit_card_id: uuid.UUID
+    account_id: uuid.UUID
     transaction_id: uuid.UUID
     total_amount: Money
     months: int
@@ -199,7 +205,7 @@ class PlanSummaryOut(BaseModel):
 
     plan: PlanOut
     description: str
-    card_alias: str
+    account_name: str
     paid_count: int
     charged_count: int
     pending_count: int
@@ -210,10 +216,10 @@ class PlanSummaryOut(BaseModel):
 
 
 class ProjectionRow(BaseModel):
-    """MSI-06 global: month × card commitment."""
+    """MSI-06 global: month × account commitment."""
 
-    credit_card_id: uuid.UUID
-    card_alias: str
+    account_id: uuid.UUID
+    account_name: str
     month: str
     amount: Money
 

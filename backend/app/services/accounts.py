@@ -1,11 +1,14 @@
-"""Credit cards and statements. Implements TDC-01..TDC-12, MSI-05, REM-01.
+"""Accounts and credit statements. Implements TAR-01..TAR-10, TDC-01..TDC-16,
+MSI-05, REM-01.
 
 The pure cycle math lives in services/billing_cycles.py; this module owns
-persistence: cards, statement materialization (TDC-11), charge assignment
-(TDC-05/TXN-06), closing (TDC-07), payments (TDC-10) and debt (TDC-09).
+persistence: accounts, balances (TAR-05/TAR-09), statement materialization
+(TDC-11), charge assignment (TDC-05/TXN-06), closing (TDC-07), payments
+(TDC-10) and debt (TDC-09).
 """
 
 import uuid
+from collections.abc import Collection
 from datetime import date
 from decimal import Decimal
 
@@ -15,15 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dates import today_in_tz
 from app.core.text import normalize_name
-from app.models.cards import Card, CardLayout, CardStatement, StatementStatus
+from app.models.accounts import Account, AccountLayout, Statement, StatementStatus
 from app.models.catalogs import (
-    CardBehavior,
-    CardType,
+    BALANCE_BEHAVIORS,
+    AccountBehavior,
+    AccountType,
     Category,
     CategoryKind,
     ExpenseNature,
-    PaymentMethod,
-    PaymentMethodType,
 )
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus, PlanStatus
 from app.models.spaces import Space
@@ -34,113 +36,146 @@ ZERO = Decimal("0.00")
 FEES_CATEGORY_NAME = "Comisiones e intereses"  # TDC-13
 
 
-def spec_for(card: Card) -> cycles.CardCycleSpec:
+def spec_for(account: Account) -> cycles.CardCycleSpec:
     return cycles.CardCycleSpec(
-        statement_day="last" if card.statement_day_is_last else (card.statement_day or 1),
+        statement_day="last" if account.statement_day_is_last else (account.statement_day or 1),
         # str() works whether the attribute holds the StrEnum member or a raw
-        # string not yet round-tripped through the DB (e.g. just-built card).
-        cutoff_day_policy=str(card.cutoff_day_policy),
-        payment_due_days=card.payment_due_days,
+        # string not yet round-tripped through the DB (e.g. just-built account).
+        cutoff_day_policy=str(account.cutoff_day_policy),
+        payment_due_days=account.payment_due_days,
         payment_day="last"
-        if card.payment_day_is_last
-        else card.payment_day
-        if card.payment_day is not None
+        if account.payment_day_is_last
+        else account.payment_day
+        if account.payment_day is not None
         else None,
     )
 
 
-async def get_card(session: AsyncSession, space_id: uuid.UUID, card_id: uuid.UUID) -> Card:
-    card = await session.get(Card, card_id)
-    if card is None or card.space_id != space_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tarjeta no encontrada")
-    return card
+async def get_account(session: AsyncSession, space_id: uuid.UUID, account_id: uuid.UUID) -> Account:
+    account = await session.get(Account, account_id)
+    if account is None or account.space_id != space_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Cuenta no encontrada")
+    return account
 
 
-# --- TAR-07: per-user card ordering --------------------------------------------
+# --- TAR-07: per-user account ordering --------------------------------------------
 
 
-async def get_card_layout(
+async def get_account_layout(
     session: AsyncSession, user_id: uuid.UUID, space_id: uuid.UUID
-) -> CardLayout | None:
-    layout: CardLayout | None = await session.scalar(
-        select(CardLayout).where(CardLayout.user_id == user_id, CardLayout.space_id == space_id)
+) -> AccountLayout | None:
+    layout: AccountLayout | None = await session.scalar(
+        select(AccountLayout).where(
+            AccountLayout.user_id == user_id, AccountLayout.space_id == space_id
+        )
     )
     return layout
 
 
-def order_cards(cards: list[Card], layout_ids: list[str]) -> list[Card]:
-    """TAR-07: order `cards` by the user's saved layout; cards not in the layout
-    keep alias order at the end. Pure list ordering (not a SQL aggregate), so it
+def order_accounts(accounts: list[Account], layout_ids: list[str]) -> list[Account]:
+    """TAR-07: order `accounts` by the user's saved layout; accounts not in the layout
+    keep name order at the end. Pure list ordering (not a SQL aggregate), so it
     doesn't fall under DSH-03."""
     position = {cid: i for i, cid in enumerate(layout_ids)}
     end = len(layout_ids)
-    return sorted(cards, key=lambda c: (position.get(str(c.id), end), c.alias))
+    return sorted(accounts, key=lambda c: (position.get(str(c.id), end), c.name))
 
 
-async def set_card_layout(
+async def set_account_layout(
     session: AsyncSession,
     user_id: uuid.UUID,
     space_id: uuid.UUID,
-    card_ids: list[uuid.UUID],
+    account_ids: list[uuid.UUID],
 ) -> None:
     """TAR-07: upsert the user's ordered list for the space, dropping ids that
     don't belong to the space (defensive)."""
     valid = set(
-        (await session.execute(select(Card.id).where(Card.space_id == space_id))).scalars().all()
+        (await session.execute(select(Account.id).where(Account.space_id == space_id)))
+        .scalars()
+        .all()
     )
-    ordered = [str(cid) for cid in card_ids if cid in valid]
-    layout = await get_card_layout(session, user_id, space_id)
+    ordered = [str(cid) for cid in account_ids if cid in valid]
+    layout = await get_account_layout(session, user_id, space_id)
     if layout is None:
-        session.add(CardLayout(user_id=user_id, space_id=space_id, card_ids=ordered))
+        session.add(AccountLayout(user_id=user_id, space_id=space_id, account_ids=ordered))
     else:
-        layout.card_ids = ordered
+        layout.account_ids = ordered
     await session.commit()
 
 
-async def _ensure_fees_category(
+async def ensure_fees_category(
     session: AsyncSession, space_id: uuid.UUID, created_by: uuid.UUID
-) -> None:
-    """TDC-13: seed 'Comisiones e intereses' with the first card."""
+) -> Category:
+    """TDC-13/TXN-14: 'Comisiones e intereses', seeded with the first credit
+    account or the first transfer fee."""
     normalized = normalize_name(FEES_CATEGORY_NAME)
-    exists_already = await session.scalar(
-        select(Category.id).where(
+    category: Category | None = await session.scalar(
+        select(Category).where(
             Category.space_id == space_id,
             Category.kind == CategoryKind.expense,
             Category.name_normalized == normalized,
         )
     )
-    if exists_already is None:
-        session.add(
-            Category(
-                space_id=space_id,
-                name=FEES_CATEGORY_NAME,
-                name_normalized=normalized,
-                kind=CategoryKind.expense,
-                expense_nature=ExpenseNature.fixed,
-                created_by=created_by,
-            )
+    if category is None:
+        category = Category(
+            space_id=space_id,
+            name=FEES_CATEGORY_NAME,
+            name_normalized=normalized,
+            kind=CategoryKind.expense,
+            expense_nature=ExpenseNature.fixed,
+            created_by=created_by,
         )
+        session.add(category)
+        await session.flush()
+    return category
 
 
-_METHOD_TYPE_FOR: dict[CardBehavior, PaymentMethodType] = {
-    CardBehavior.credit: PaymentMethodType.credit_card,
-    CardBehavior.debit: PaymentMethodType.debit,
-    CardBehavior.prepaid: PaymentMethodType.prepaid,
-}
+async def _unique_account_name(
+    session: AsyncSession,
+    space_id: uuid.UUID,
+    name: str,
+    exclude_id: uuid.UUID | None = None,
+) -> str:
+    """CAT-01: account name unique per space, case/accent-insensitive."""
+    normalized = normalize_name(name)
+    stmt = select(Account.id).where(
+        Account.space_id == space_id, Account.name_normalized == normalized
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Account.id != exclude_id)
+    if await session.scalar(stmt) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ya existe una cuenta con ese nombre")
+    return normalized
 
 
-def cycle_ready(card: Card) -> bool:
-    """TDC-15: a credit card runs its cycle engine only once it has a cut day.
+def _validate_last4(last4: object) -> None:
+    """TDC-01/TAR-02: optional, but exactly 4 digits when present."""
+    if last4 is not None and not (isinstance(last4, str) and last4.isdigit() and len(last4) == 4):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "last4 debe ser 4 dígitos")
+
+
+async def has_movements(session: AsyncSession, account_id: uuid.UUID) -> bool:
+    """Whether any transaction touches the account (source or target)."""
+    found = await session.scalar(
+        select(Transaction.id)
+        .where((Transaction.account_id == account_id) | (Transaction.account_to_id == account_id))
+        .limit(1)
+    )
+    return found is not None
+
+
+def cycle_ready(account: Account) -> bool:
+    """TDC-15: a credit account runs its cycle engine only once it has a cut day.
     Until then its charges are not assigned to any statement."""
-    return card.statement_day is not None or card.statement_day_is_last
+    return account.statement_day is not None or account.statement_day_is_last
 
 
-def _payment_ready(card: Card) -> bool:
-    """A card has its payment terms set (needed to compute a due_date)."""
+def _payment_ready(account: Account) -> bool:
+    """A account has its payment terms set (needed to compute a due_date)."""
     return (
-        card.payment_due_days is not None
-        or card.payment_day is not None
-        or card.payment_day_is_last
+        account.payment_due_days is not None
+        or account.payment_day is not None
+        or account.payment_day_is_last
     )
 
 
@@ -150,7 +185,7 @@ def _resolve_credit_fields(
     payment_day: int | str | None,
 ) -> dict[str, object]:
     """TDC-01/TDC-15: validate the (optional) cycle config. Fields may be left
-    unset for a partially-captured card; at most one payment rule is allowed."""
+    unset for a partially-captured account; at most one payment rule is allowed."""
     if payment_due_days is not None and payment_day is not None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -189,19 +224,21 @@ async def _statement_has_charges(session: AsyncSession, statement_id: uuid.UUID)
     return inst is not None
 
 
-async def get_opening_balance(session: AsyncSession, space: Space, card: Card) -> Decimal | None:
+async def get_opening_balance(
+    session: AsyncSession, space: Space, account: Account
+) -> Decimal | None:
     """TDC-14: return the computed_total of the synthetic opening-balance statement
     (previous period, no itemized charges), or None if no such statement exists."""
-    if not (cycle_ready(card) and _payment_ready(card)):
+    if not (cycle_ready(account) and _payment_ready(account)):
         return None
-    spec = spec_for(card)
+    spec = spec_for(account)
     today = today_in_tz(space.timezone)
     opening_cutoff = cycles.previous_cutoff(cycles.cutoff_on_or_after(today, spec), spec)
     _, period_end = cycles.cycle_for_cutoff(opening_cutoff, spec)
     existing = await session.scalar(
-        select(CardStatement).where(
-            CardStatement.credit_card_id == card.id,
-            CardStatement.period_end == period_end,
+        select(Statement).where(
+            Statement.account_id == account.id,
+            Statement.period_end == period_end,
         )
     )
     if existing is None:
@@ -212,8 +249,8 @@ async def get_opening_balance(session: AsyncSession, space: Space, card: Card) -
 
 
 async def set_opening_balance(
-    session: AsyncSession, space: Space, card: Card, amount: Decimal
-) -> CardStatement | None:
+    session: AsyncSession, space: Space, account: Account, amount: Decimal
+) -> Statement | None:
     """TDC-14: record the pending debt from the previous cut as a closed
     statement (due at the next payment date) so it enters TDC-09 (saldo al
     corte) and is paid via TDC-10. Create-or-update on the previous cut; never
@@ -223,20 +260,20 @@ async def set_opening_balance(
     ones when amount is zeroed out."""
     from app.services.reminders import cancel_card_reminders, schedule_card_reminders
 
-    if not (cycle_ready(card) and _payment_ready(card)):
+    if not (cycle_ready(account) and _payment_ready(account)):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Para registrar deuda inicial configura el día de corte y los términos de pago",
         )
-    spec = spec_for(card)
+    spec = spec_for(account)
     today = today_in_tz(space.timezone)
     opening_cutoff = cycles.previous_cutoff(cycles.cutoff_on_or_after(today, spec), spec)
     period_start, period_end = cycles.cycle_for_cutoff(opening_cutoff, spec)
 
     existing = await session.scalar(
-        select(CardStatement).where(
-            CardStatement.credit_card_id == card.id,
-            CardStatement.period_end == period_end,
+        select(Statement).where(
+            Statement.account_id == account.id,
+            Statement.period_end == period_end,
         )
     )
     if existing is None and amount == ZERO:
@@ -255,12 +292,12 @@ async def set_opening_balance(
         if amount == ZERO:
             await cancel_card_reminders(session, existing)
         else:
-            await schedule_card_reminders(session, card, existing, today)
+            await schedule_card_reminders(session, account, existing, today)
         return existing
 
-    statement = CardStatement(
+    statement = Statement(
         space_id=space.id,
-        credit_card_id=card.id,
+        account_id=account.id,
         period_start=period_start,
         period_end=period_end,
         due_date=cycles.due_date_for(period_end, spec),
@@ -272,24 +309,22 @@ async def set_opening_balance(
     session.add(statement)
     await session.flush()
     # REM-01: schedule reminders for the new statement; filter past fire dates.
-    await schedule_card_reminders(session, card, statement, today)
+    await schedule_card_reminders(session, account, statement, today)
     return statement
 
 
-async def next_payment_due(session: AsyncSession, card: Card) -> tuple[Decimal, date] | None:
+async def next_payment_due(session: AsyncSession, account: Account) -> tuple[Decimal, date] | None:
     """TDC-09/TDC-14: the nearest closed (unpaid) statement to settle — the
     amount due at the upcoming payment date."""
     statements = (
         (
             await session.execute(
-                select(CardStatement)
+                select(Statement)
                 .where(
-                    CardStatement.credit_card_id == card.id,
-                    CardStatement.status.in_(
-                        [StatementStatus.closed, StatementStatus.partially_paid]
-                    ),
+                    Statement.account_id == account.id,
+                    Statement.status.in_([StatementStatus.closed, StatementStatus.partially_paid]),
                 )
-                .order_by(CardStatement.due_date)
+                .order_by(Statement.due_date)
             )
         )
         .scalars()
@@ -302,16 +337,16 @@ async def next_payment_due(session: AsyncSession, card: Card) -> tuple[Decimal, 
     return None
 
 
-async def create_card(
+async def create_account(
     session: AsyncSession,
     space: Space,
     created_by: uuid.UUID,
     *,
-    card_type_id: uuid.UUID,
-    alias: str,
-    bank: str,
-    network: str,
-    last4: str,
+    account_type_id: uuid.UUID,
+    name: str,
+    bank: str | None = None,
+    network: str | None = None,
+    last4: str | None = None,
     currency: str = "MXN",
     # TAR-02 credit-only fields (all optional, TDC-15: may be filled later).
     statement_day: int | str | None = None,
@@ -321,24 +356,36 @@ async def create_card(
     credit_limit: Decimal | None = None,
     reminder_days: list[int] | None = None,
     opening_balance: Decimal | None = None,  # TDC-14: deuda del corte anterior
-    # TAR-05 non-credit fields.
+    # TAR-05 balance fields.
     initial_balance: Decimal | None = None,
     allow_overdraft: bool = False,
     color: str | None = None,
     image: str | None = None,  # TAR-08
-) -> Card:
-    """TAR-01/03 + TDC-01 + CAT-07: creates the card and its linked method.
-    Credit cards carry (optional) cycle fields and an optional opening debt
-    (TDC-14); debit/prepaid carry a balance."""
-    from app.services.catalogs import get_card_type
+) -> Account:
+    """TAR-01/02 + TDC-01: creates an account. Credit accounts carry (optional)
+    cycle fields and an optional opening debt (TDC-14); the rest carry a
+    balance (TAR-05). Cash always allows overdraft (TAR-09)."""
+    from app.services.catalogs import get_account_type
 
-    if not (last4.isdigit() and len(last4) == 4):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "last4 debe ser 4 dígitos")
+    _validate_last4(last4)
+    account_type = await get_account_type(session, space.id, account_type_id)  # GLO-05
+    behavior = account_type.behavior
+    name_normalized = await _unique_account_name(session, space.id, name)
+    common: dict[str, object] = {
+        "space_id": space.id,
+        "account_type_id": account_type_id,
+        "name": name,
+        "name_normalized": name_normalized,
+        "bank": bank,
+        "network": network,
+        "last4": last4,
+        "currency": currency,
+        "color": color,
+        "image": image,
+        "created_by": created_by,
+    }
 
-    card_type = await get_card_type(session, space.id, card_type_id)  # GLO-05: 404 cross-space
-    behavior = card_type.behavior
-
-    if behavior == CardBehavior.credit:
+    if behavior == AccountBehavior.credit:
         # TDC-15: cycle fields are optional and can be completed later via edit.
         if initial_balance is not None:
             raise HTTPException(
@@ -346,77 +393,46 @@ async def create_card(
                 "Una tarjeta de crédito no lleva saldo inicial",
             )
         cfg = _resolve_credit_fields(statement_day, payment_due_days, payment_day)
-        card = Card(
-            space_id=space.id,
-            card_type_id=card_type_id,
-            alias=alias,
-            bank=bank,
-            network=network,
-            last4=last4,
-            currency=currency,
+        account = Account(
+            **common,
             credit_limit=credit_limit,
             cutoff_day_policy=cutoff_day_policy,
             reminder_days=reminder_days if reminder_days is not None else [3, 1],
-            color=color,
-            image=image,
-            created_by=created_by,
             **cfg,
         )
     else:
-        # TAR-02: non-credit must not carry credit fields; it carries a balance.
+        # TAR-02: balance accounts must not carry credit fields.
         if any(
             v is not None
             for v in (statement_day, payment_due_days, payment_day, credit_limit, opening_balance)
         ):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Una tarjeta no-crédito no lleva campos de corte/pago/límite/deuda",
+                "Solo las tarjetas de crédito llevan campos de corte/pago/límite/deuda",
             )
-        card = Card(
-            space_id=space.id,
-            card_type_id=card_type_id,
-            alias=alias,
-            bank=bank,
-            network=network,
-            last4=last4,
-            currency=currency,
+        account = Account(
+            **common,
             initial_balance=initial_balance if initial_balance is not None else ZERO,
-            allow_overdraft=allow_overdraft,
+            allow_overdraft=True if behavior == AccountBehavior.cash else allow_overdraft,
             reminder_days=[],
-            color=color,
-            image=image,
-            created_by=created_by,
         )
-    session.add(card)
+    session.add(account)
     await session.flush()
-
-    # CAT-07/TAR-03: auto-create the linked payment method, type per behavior.
-    method = PaymentMethod(
-        space_id=space.id,
-        name=alias,
-        name_normalized=normalize_name(alias),
-        type=_METHOD_TYPE_FOR[behavior],
-        card_id=card.id,
-        created_by=created_by,
-    )
-    session.add(method)
-    await session.flush()
-    card.payment_method_id = method.id
-    if behavior == CardBehavior.credit:
-        await _ensure_fees_category(session, space.id, created_by)  # TDC-13
+    if behavior == AccountBehavior.credit:
+        await ensure_fees_category(session, space.id, created_by)  # TDC-13
         if opening_balance is not None and opening_balance > ZERO:
-            await set_opening_balance(session, space, card, opening_balance)  # TDC-14
+            await set_opening_balance(session, space, account, opening_balance)  # TDC-14
     await session.commit()
-    await session.refresh(card)
-    return card
+    await session.refresh(account)
+    return account
 
 
-async def update_card(
-    session: AsyncSession, space: Space, card: Card, changes: dict[str, object]
-) -> Card:
-    """TDC-15: full edit of a card (like a transaction edit). Re-validates the
-    fields present in `changes`, behavior-aware. Card type/behavior is fixed."""
-    behavior = await card_behavior(session, card)
+async def update_account(
+    session: AsyncSession, space: Space, account: Account, changes: dict[str, object]
+) -> Account:
+    """TDC-15: full edit of an account (like a transaction edit). Re-validates
+    the fields present in `changes`, behavior-aware. Type/behavior is fixed."""
+    behavior = await account_behavior(session, account)
     credit_only = {
         "statement_day",
         "cutoff_day_policy",
@@ -426,23 +442,36 @@ async def update_card(
         "reminder_days",
     }
     balance_only = {"initial_balance", "allow_overdraft"}
-    if behavior != CardBehavior.credit and credit_only & changes.keys():
+    if behavior != AccountBehavior.credit and credit_only & changes.keys():
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Esta tarjeta no lleva campos de corte/pago/límite",
+            "Esta cuenta no lleva campos de corte/pago/límite",
         )
-    if behavior == CardBehavior.credit and balance_only & changes.keys():
+    if behavior == AccountBehavior.credit and balance_only & changes.keys():
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "Una tarjeta de crédito no lleva saldo"
         )
+    if behavior == AccountBehavior.cash:
+        changes.pop("allow_overdraft", None)  # TAR-09: always allowed for cash.
     if "last4" in changes:
-        last4 = changes["last4"]
-        if not (isinstance(last4, str) and last4.isdigit() and len(last4) == 4):
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "last4 debe ser 4 dígitos")
+        _validate_last4(changes["last4"])
+    if "name" in changes:
+        account.name_normalized = await _unique_account_name(
+            session, space.id, str(changes["name"]), exclude_id=account.id
+        )
+    if (
+        "currency" in changes
+        and changes["currency"] != account.currency
+        and await has_movements(session, account.id)
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "La cuenta ya tiene movimientos; no se puede cambiar su moneda",
+        )  # TAR-10
 
     # Re-derive the cycle config if any cut/payment field changed (TDC-15).
     if (
-        behavior == CardBehavior.credit
+        behavior == AccountBehavior.credit
         and {
             "statement_day",
             "payment_due_days",
@@ -450,18 +479,22 @@ async def update_card(
         }
         & changes.keys()
     ):
-        cur_sd: int | str | None = "last" if card.statement_day_is_last else card.statement_day
-        cur_pd: int | str | None = "last" if card.payment_day_is_last else card.payment_day
+        cur_sd: int | str | None = (
+            "last" if account.statement_day_is_last else account.statement_day
+        )
+        cur_pd: int | str | None = "last" if account.payment_day_is_last else account.payment_day
         eff_sd = changes["statement_day"] if "statement_day" in changes else cur_sd
         eff_pdd = (
-            changes["payment_due_days"] if "payment_due_days" in changes else card.payment_due_days
+            changes["payment_due_days"]
+            if "payment_due_days" in changes
+            else account.payment_due_days
         )
         eff_pd = changes["payment_day"] if "payment_day" in changes else cur_pd
         for key, value in _resolve_credit_fields(eff_sd, eff_pdd, eff_pd).items():  # type: ignore[arg-type]
-            setattr(card, key, value)
+            setattr(account, key, value)
 
     for field in (
-        "alias",
+        "name",
         "bank",
         "network",
         "last4",
@@ -475,130 +508,173 @@ async def update_card(
         "allow_overdraft",
     ):
         if field in changes:
-            setattr(card, field, changes[field])
-
-    # Keep the linked payment method name in sync with the alias (CAT-07).
-    if "alias" in changes and card.payment_method_id is not None:
-        method = await session.get(PaymentMethod, card.payment_method_id)
-        if method is not None:
-            normalized = normalize_name(str(changes["alias"]))
-            dup = await session.scalar(
-                select(PaymentMethod.id).where(
-                    PaymentMethod.space_id == space.id,
-                    PaymentMethod.name_normalized == normalized,
-                    PaymentMethod.id != method.id,
-                )
-            )
-            if dup is not None:
-                raise HTTPException(
-                    status.HTTP_409_CONFLICT, "Ya existe un método de pago con ese nombre"
-                )
-            method.name = str(changes["alias"])
-            method.name_normalized = normalized
+            setattr(account, field, changes[field])
 
     # TDC-14: pending balance from the previous cut (credit only). Applied last
     # so it reads any cut/payment fields updated in this same edit.
     if "opening_balance" in changes:
-        if behavior != CardBehavior.credit:
+        if behavior != AccountBehavior.credit:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Solo las tarjetas de crédito llevan deuda del corte anterior",
             )
         amount = changes["opening_balance"]
         if isinstance(amount, Decimal) and amount >= ZERO:
-            await set_opening_balance(session, space, card, amount)
+            await set_opening_balance(session, space, account, amount)
 
     await session.commit()
-    await session.refresh(card)
-    return card
+    await session.refresh(account)
+    return account
 
 
-async def set_card_active(session: AsyncSession, card: Card, active: bool) -> None:
-    """Reactivate a card and its linked method (mirror of deactivate_card)."""
-    card.is_active = active
-    if card.payment_method_id is not None:
-        method = await session.get(PaymentMethod, card.payment_method_id)
-        if method is not None:
-            method.is_active = active  # CAT-07
+async def set_account_active(session: AsyncSession, account: Account, active: bool) -> None:
+    """CAT-04/TDC-12: (de)activate an account. CAT-05: never the last active one."""
+    if not active and account.is_active:
+        active_count = await session.scalar(
+            select(func.count())
+            .select_from(Account)
+            .where(Account.space_id == account.space_id, Account.is_active.is_(True))
+        )
+        if (active_count or 0) <= 1:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "No puedes desactivar la última cuenta activa",
+            )
+    account.is_active = active
     await session.commit()
 
 
-async def card_behavior(session: AsyncSession, card: Card) -> CardBehavior:
-    """TAR-01: the card's behavior, read from its type (CAT-08)."""
-    card_type = await session.get(CardType, card.card_type_id)
-    assert card_type is not None
-    return card_type.behavior
+async def account_behavior(session: AsyncSession, account: Account) -> AccountBehavior:
+    """TAR-01: the account's behavior, read from its type (CAT-08)."""
+    account_type = await session.get(AccountType, account.account_type_id)
+    assert account_type is not None
+    return account_type.behavior
 
 
-async def card_balance(
-    session: AsyncSession, card: Card, exclude_txn_id: uuid.UUID | None = None
+def balance_predicates(account_id: uuid.UUID) -> dict[str, list[ColumnElement[bool]]]:
+    """TAR-05: the four flows of a balance account. Shared by account_balance
+    and the forecast's as-of balance (DSH-03: predicates in one place)."""
+    return {
+        "income": [
+            Transaction.type == TransactionType.income,
+            Transaction.account_id == account_id,
+        ],
+        "transfer_in": [
+            Transaction.type == TransactionType.transfer,
+            Transaction.account_to_id == account_id,
+        ],
+        "expense": [
+            Transaction.type == TransactionType.expense,
+            Transaction.account_id == account_id,
+            Transaction.installment_plan_id.is_(None),  # MSI parent excluded
+        ],
+        "transfer_out": [
+            Transaction.type == TransactionType.transfer,
+            Transaction.account_id == account_id,
+        ],
+    }
+
+
+# TXN-13: an incoming transfer adds what was received, in the target currency.
+RECEIVED_AMOUNT = func.coalesce(Transaction.amount_to, Transaction.amount)
+
+
+async def account_balance(
+    session: AsyncSession,
+    account: Account,
+    exclude_txn_ids: Collection[uuid.UUID] = (),
+    as_of: date | None = None,
 ) -> Decimal:
-    """TAR-05: stored-value balance for debit/prepaid, computed in SQL:
-    initial + income + incoming transfers − expenses − outgoing transfers,
-    over the card's linked payment method. `exclude_txn_id` ignores one
-    transaction (used while validating an edit)."""
-    if card.payment_method_id is None:
-        return ZERO
-    method_id = card.payment_method_id
-    scope: list[ColumnElement[bool]] = [Transaction.space_id == card.space_id]
-    if exclude_txn_id is not None:
-        scope.append(Transaction.id != exclude_txn_id)
+    """TAR-05: stored-value balance, computed in SQL: initial + income +
+    incoming transfers (received amount) − expenses − outgoing transfers.
+    `exclude_txn_ids` ignores transactions (an edit and its fee, while
+    validating it); `as_of` bounds it to movements dated up to that day (PRO-02)."""
+    scope: list[ColumnElement[bool]] = [Transaction.space_id == account.space_id]
+    if exclude_txn_ids:
+        scope.append(Transaction.id.not_in(list(exclude_txn_ids)))
+    if as_of is not None:
+        scope.append(Transaction.date <= as_of)
 
-    async def total(*predicates: ColumnElement[bool]) -> Decimal:
+    flows = balance_predicates(account.id)
+
+    async def total(key: str) -> Decimal:
+        column = RECEIVED_AMOUNT if key == "transfer_in" else Transaction.amount
         value = await session.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), 0)).where(*scope, *predicates)
+            select(func.coalesce(func.sum(column), 0)).where(*scope, *flows[key])
         )
         return Decimal(value or 0)
 
-    inflow_income = await total(
-        Transaction.type == TransactionType.income,
-        Transaction.payment_method_id == method_id,
+    initial = Decimal(account.initial_balance if account.initial_balance is not None else 0)
+    return (
+        initial
+        + await total("income")
+        + await total("transfer_in")
+        - await total("expense")
+        - await total("transfer_out")
     )
-    inflow_transfer = await total(
-        Transaction.type == TransactionType.transfer,
-        Transaction.payment_method_to_id == method_id,
-    )
-    outflow_expense = await total(
-        Transaction.type == TransactionType.expense,
-        Transaction.payment_method_id == method_id,
-        Transaction.installment_plan_id.is_(None),  # MSI parent excluded
-    )
-    outflow_transfer = await total(
-        Transaction.type == TransactionType.transfer,
-        Transaction.payment_method_id == method_id,
-    )
-    initial = Decimal(card.initial_balance if card.initial_balance is not None else 0)
-    return initial + inflow_income + inflow_transfer - outflow_expense - outflow_transfer
 
 
-async def deactivate_card(session: AsyncSession, card: Card) -> None:
+async def adjust_cash_balance(session: AsyncSession, account: Account, target: Decimal) -> None:
+    """TAR-09: set a cash account's balance to what the user really has by
+    shifting initial_balance. No transaction is created and no aggregate moves:
+    lost or unrecorded cash doesn't become an invented expense."""
+    if await account_behavior(session, account) != AccountBehavior.cash:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Solo el efectivo se ajusta a mano; las demás cuentas se cuadran "
+            "con su estado de cuenta",
+        )
+    current = await account_balance(session, account)
+    initial = Decimal(account.initial_balance if account.initial_balance is not None else 0)
+    account.initial_balance = initial + (target - current)
+    await session.commit()
+
+
+async def deactivate_account(session: AsyncSession, account: Account) -> None:
     """TDC-12: no new charges, but cycles keep closing until settled."""
-    card.is_active = False
-    if card.payment_method_id is not None:
-        method = await session.get(PaymentMethod, card.payment_method_id)
-        if method is not None:
-            method.is_active = False  # CAT-07
+    await set_account_active(session, account, False)
+
+
+async def delete_account(session: AsyncSession, account: Account) -> None:
+    """GLO-03: physical delete only without references (movements, statements,
+    MSI plans); otherwise the client deactivates it. CAT-05 still applies."""
+    has_statements = await session.scalar(
+        select(Statement.id).where(Statement.account_id == account.id).limit(1)
+    )
+    has_plans = await session.scalar(
+        select(InstallmentPlan.id).where(InstallmentPlan.account_id == account.id).limit(1)
+    )
+    if await has_movements(session, account.id) or has_statements or has_plans:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "La cuenta tiene movimientos asociados; desactívala en su lugar",
+        )
+    if account.is_active:
+        await set_account_active(session, account, False)  # CAT-05 guard
+    await session.delete(account)
     await session.commit()
 
 
 # --- Statements ----------------------------------------------------------------
 
 
-async def get_or_create_statement(session: AsyncSession, card: Card, cutoff: date) -> CardStatement:
+async def get_or_create_statement(
+    session: AsyncSession, account: Account, cutoff: date
+) -> Statement:
     """TDC-11: statements materialize on demand, never in advance."""
     existing = await session.scalar(
-        select(CardStatement).where(
-            CardStatement.credit_card_id == card.id,
-            CardStatement.period_end == cutoff,
+        select(Statement).where(
+            Statement.account_id == account.id,
+            Statement.period_end == cutoff,
         )
     )
     if existing is not None:
         return existing
-    spec = spec_for(card)
+    spec = spec_for(account)
     period_start, period_end = cycles.cycle_for_cutoff(cutoff, spec)
-    statement = CardStatement(
-        space_id=card.space_id,
-        credit_card_id=card.id,
+    statement = Statement(
+        space_id=account.space_id,
+        account_id=account.id,
         period_start=period_start,
         period_end=period_end,
         due_date=cycles.due_date_for(period_end, spec),
@@ -610,16 +686,16 @@ async def get_or_create_statement(session: AsyncSession, card: Card, cutoff: dat
 
 async def assign_charge_to_statement(
     session: AsyncSession,
-    card: Card,
+    account: Account,
     txn: Transaction,
     cycle_hint: str | None = None,
-) -> CardStatement:
-    """TDC-05/TXN-06: assign a card charge to its billing cycle.
+) -> Statement:
+    """TDC-05/TXN-06: assign a credit charge to its billing cycle.
 
     TDC-05a: if cycle_hint ('current'|'next') is provided and the transaction
     date falls exactly on the cutoff day, it overrides cutoff_day_policy.
     """
-    spec = spec_for(card)
+    spec = spec_for(account)
     if cycle_hint is not None:
         override = "include" if cycle_hint == "current" else "next_cycle"
         spec = cycles.CardCycleSpec(
@@ -629,30 +705,28 @@ async def assign_charge_to_statement(
             payment_day=spec.payment_day,
         )
     _, cutoff = cycles.cycle_for_purchase(txn.date, spec)
-    statement = await get_or_create_statement(session, card, cutoff)
+    statement = await get_or_create_statement(session, account, cutoff)
     txn.statement_id = statement.id
     return statement
 
 
 async def assign_refund_to_statement(
-    session: AsyncSession, card: Card, txn: Transaction
-) -> CardStatement:
+    session: AsyncSession, account: Account, txn: Transaction
+) -> Statement:
     """TDC-16: a refund (income) posted after a statement's cutoff but on/before
     its due_date reduces that pending statement instead of the next cycle,
     mirroring how a bank applies a late refund to the bill already issued."""
     candidates = (
         (
             await session.execute(
-                select(CardStatement)
+                select(Statement)
                 .where(
-                    CardStatement.credit_card_id == card.id,
-                    CardStatement.status.in_(
-                        [StatementStatus.closed, StatementStatus.partially_paid]
-                    ),
-                    CardStatement.period_end < txn.date,
-                    CardStatement.due_date >= txn.date,
+                    Statement.account_id == account.id,
+                    Statement.status.in_([StatementStatus.closed, StatementStatus.partially_paid]),
+                    Statement.period_end < txn.date,
+                    Statement.due_date >= txn.date,
                 )
-                .order_by(CardStatement.period_end)
+                .order_by(Statement.period_end)
             )
         )
         .scalars()
@@ -662,19 +736,19 @@ async def assign_refund_to_statement(
         if statement.computed_total - statement.paid_amount > ZERO:
             txn.statement_id = statement.id
             return statement
-    return await assign_charge_to_statement(session, card, txn)
+    return await assign_charge_to_statement(session, account, txn)
 
 
 async def get_statement(
     session: AsyncSession, space_id: uuid.UUID, statement_id: uuid.UUID
-) -> CardStatement:
-    statement = await session.get(CardStatement, statement_id)
+) -> Statement:
+    statement = await session.get(Statement, statement_id)
     if statement is None or statement.space_id != space_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Statement no encontrado")
     return statement
 
 
-async def _raw_statement_total(session: AsyncSession, statement: CardStatement) -> Decimal:
+async def _raw_statement_total(session: AsyncSession, statement: Statement) -> Decimal:
     """Opening balance + charges − refunds + MSI installments charged into
     this statement.
 
@@ -709,7 +783,7 @@ async def _raw_statement_total(session: AsyncSession, statement: CardStatement) 
 
 async def recompute_statement_total(session: AsyncSession, statement_id: uuid.UUID) -> None:
     """Recompute a closed statement after charge edits/moves (TDC-06)."""
-    statement = await session.get(CardStatement, statement_id)
+    statement = await session.get(Statement, statement_id)
     if statement is None or statement.status == StatementStatus.open:
         return
     statement.computed_total = (
@@ -719,7 +793,7 @@ async def recompute_statement_total(session: AsyncSession, statement_id: uuid.UU
     await session.flush()
 
 
-def _update_payment_status(statement: CardStatement) -> None:
+def _update_payment_status(statement: Statement) -> None:
     """TDC-08 transitions for non-open statements."""
     if statement.status == StatementStatus.open:
         return
@@ -733,7 +807,7 @@ def _update_payment_status(statement: CardStatement) -> None:
 
 async def close_due_statements(
     session: AsyncSession, space: Space, today: date | None = None
-) -> list[CardStatement]:
+) -> list[Statement]:
     """TDC-07: close every open statement with period_end < today. Closing:
     assigns due MSI installments (MSI-04/05), applies previous overpayment
     (TDC-10), computes the total and schedules reminders (REM-01).
@@ -741,40 +815,40 @@ async def close_due_statements(
     from app.services.reminders import schedule_card_reminders
 
     today = today or today_in_tz(space.timezone)
-    closed: list[CardStatement] = []
+    closed: list[Statement] = []
 
-    # TAR-04: only credit cards have statements/cycles; skip debit/prepaid.
-    # TDC-15: skip credit cards without a cut day configured yet.
-    cards = (
+    # TAR-04: only credit accounts have statements/cycles.
+    # TDC-15: skip credit accounts without a cut day configured yet.
+    accounts = (
         (
             await session.execute(
-                select(Card)
-                .join(CardType, Card.card_type_id == CardType.id)
+                select(Account)
+                .join(AccountType, Account.account_type_id == AccountType.id)
                 .where(
-                    Card.space_id == space.id,
-                    CardType.behavior == CardBehavior.credit,
-                    Card.statement_day.is_not(None) | Card.statement_day_is_last.is_(True),
+                    Account.space_id == space.id,
+                    AccountType.behavior == AccountBehavior.credit,
+                    Account.statement_day.is_not(None) | Account.statement_day_is_last.is_(True),
                 )
             )
         )
         .scalars()
         .all()
     )
-    for card in cards:
-        spec = spec_for(card)
+    for account in accounts:
+        spec = spec_for(account)
         # Materialize any statement whose cycle already ended (covers gaps
         # since the earliest charge thanks to on-demand creation TDC-11).
         while True:
             open_statements = (
                 (
                     await session.execute(
-                        select(CardStatement)
+                        select(Statement)
                         .where(
-                            CardStatement.credit_card_id == card.id,
-                            CardStatement.status == StatementStatus.open,
-                            CardStatement.period_end < today,
+                            Statement.account_id == account.id,
+                            Statement.status == StatementStatus.open,
+                            Statement.period_end < today,
                         )
-                        .order_by(CardStatement.period_end)
+                        .order_by(Statement.period_end)
                     )
                 )
                 .scalars()
@@ -790,7 +864,7 @@ async def close_due_statements(
                             select(Installment)
                             .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
                             .where(
-                                InstallmentPlan.credit_card_id == card.id,
+                                InstallmentPlan.account_id == account.id,
                                 Installment.status == InstallmentStatus.pending,
                                 Installment.estimated_charge_date <= statement.period_end,
                             )
@@ -806,13 +880,13 @@ async def close_due_statements(
 
                 # TDC-10: previous overpayment becomes credit here.
                 previous = await session.scalar(
-                    select(CardStatement)
+                    select(Statement)
                     .where(
-                        CardStatement.credit_card_id == card.id,
-                        CardStatement.period_end < statement.period_end,
-                        CardStatement.status != StatementStatus.open,
+                        Statement.account_id == account.id,
+                        Statement.period_end < statement.period_end,
+                        Statement.status != StatementStatus.open,
                     )
-                    .order_by(CardStatement.period_end.desc())
+                    .order_by(Statement.period_end.desc())
                     .limit(1)
                 )
                 credit = ZERO
@@ -823,13 +897,13 @@ async def close_due_statements(
                 statement.status = StatementStatus.closed
                 _update_payment_status(statement)
                 # REM-01: pass today so past fire dates are skipped.
-                await schedule_card_reminders(session, card, statement, today)
+                await schedule_card_reminders(session, account, statement, today)
                 closed.append(statement)
             await session.flush()
 
         # Keep one open statement materialized for the current cycle.
         current_cutoff = cycles.cutoff_on_or_after(today, spec)
-        await get_or_create_statement(session, card, current_cutoff)
+        await get_or_create_statement(session, account, current_cutoff)
 
     await session.commit()
     return closed
@@ -838,10 +912,15 @@ async def close_due_statements(
 # --- Payments (TDC-10 / TXN-09) -------------------------------------------------
 
 
+def received_amount(txn: Transaction) -> Decimal:
+    """TXN-09/TXN-13: what a transfer delivers to its target account."""
+    return txn.amount_to if txn.amount_to is not None else txn.amount
+
+
 async def apply_card_payment(
     session: AsyncSession,
     space: Space,
-    card: Card,
+    account: Account,
     txn: Transaction,
     target_statement_id: uuid.UUID | None = None,
 ) -> None:
@@ -853,7 +932,7 @@ async def apply_card_payment(
     Does NOT commit — caller is responsible."""
     from app.services.reminders import cancel_card_reminders
 
-    if not cycle_ready(card):
+    if not cycle_ready(account):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Configura el día de corte de la tarjeta antes de registrar pagos",
@@ -861,25 +940,25 @@ async def apply_card_payment(
 
     if target_statement_id is not None:
         statement = await get_statement(session, space.id, target_statement_id)
-        if statement.credit_card_id != card.id:
+        if statement.account_id != account.id:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Statement no encontrado")
     else:
         candidate = await session.scalar(
-            select(CardStatement)
+            select(Statement)
             .where(
-                CardStatement.credit_card_id == card.id,
-                CardStatement.status.in_([StatementStatus.closed, StatementStatus.partially_paid]),
+                Statement.account_id == account.id,
+                Statement.status.in_([StatementStatus.closed, StatementStatus.partially_paid]),
             )
-            .order_by(CardStatement.period_end)
+            .order_by(Statement.period_end)
             .limit(1)
         )
         if candidate is None:
-            cutoff = cycles.cutoff_on_or_after(today_in_tz(space.timezone), spec_for(card))
-            candidate = await get_or_create_statement(session, card, cutoff)
+            cutoff = cycles.cutoff_on_or_after(today_in_tz(space.timezone), spec_for(account))
+            candidate = await get_or_create_statement(session, account, cutoff)
         statement = candidate
 
     txn.statement_id = statement.id
-    statement.paid_amount = statement.paid_amount + txn.amount
+    statement.paid_amount = statement.paid_amount + received_amount(txn)
     _update_payment_status(statement)
     await session.flush()
 
@@ -911,7 +990,7 @@ async def revert_card_payment(
     mutates `txn.amount`) from paid_amount and re-evaluate the statement status."""
     if txn.statement_id is None:
         return
-    statement = await session.get(CardStatement, txn.statement_id)
+    statement = await session.get(Statement, txn.statement_id)
     if statement is None or statement.space_id != space_id:
         return
     statement.paid_amount = max(statement.paid_amount - applied_amount, ZERO)
@@ -924,21 +1003,20 @@ async def register_payment(
     session: AsyncSession,
     space: Space,
     user_id: uuid.UUID,
-    card: Card,
+    account: Account,
     *,
     amount: Decimal,
-    from_payment_method_id: uuid.UUID,
+    from_account_id: uuid.UUID,
     payment_date: date,
     statement_id: uuid.UUID | None = None,
 ) -> Transaction:
-    """TDC-10: a card payment is a transfer (TXN-02) into the card's method.
-    Delegates payment accounting to apply_card_payment via create_transaction."""
+    """TDC-10: a card payment is a transfer (TXN-02) into the credit account.
+    Delegates payment accounting to apply_card_payment via create_transaction.
+    TAR-10: the transfer goes in the source account's currency."""
     from app.services.transactions import TransactionInput, create_transaction
 
-    if card.payment_method_id is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "La tarjeta no tiene método vinculado")
-
-    txn = await create_transaction(
+    source = await get_account(session, space.id, from_account_id)
+    return await create_transaction(
         session,
         space,
         user_id,
@@ -946,14 +1024,13 @@ async def register_payment(
             type=TransactionType.transfer,
             date=payment_date,
             amount=amount,
-            currency=card.currency,
-            description=f"Pago {card.alias}",
-            payment_method_id=from_payment_method_id,
-            payment_method_to_id=card.payment_method_id,
+            currency=source.currency,
+            description=f"Pago {account.name}",
+            account_id=source.id,
+            account_to_id=account.id,
             target_statement_id=statement_id,
         ),
     )
-    return txn
 
 
 async def _complete_plans_if_done(session: AsyncSession, plan_ids: list[uuid.UUID]) -> None:
@@ -976,17 +1053,15 @@ async def _complete_plans_if_done(session: AsyncSession, plan_ids: list[uuid.UUI
 # --- Debt (TDC-09) ---------------------------------------------------------------
 
 
-async def debt_summary(session: AsyncSession, card: Card) -> dict[str, Decimal]:
+async def debt_summary(session: AsyncSession, account: Account) -> dict[str, Decimal]:
     """TDC-09: (a) saldo al corte, (b) gasto del ciclo en curso,
     (c) comprometido futuro MSI. Deuda total = a + b + c."""
     closed_unpaid = (
         (
             await session.execute(
-                select(CardStatement).where(
-                    CardStatement.credit_card_id == card.id,
-                    CardStatement.status.in_(
-                        [StatementStatus.closed, StatementStatus.partially_paid]
-                    ),
+                select(Statement).where(
+                    Statement.account_id == account.id,
+                    Statement.status.in_([StatementStatus.closed, StatementStatus.partially_paid]),
                 )
             )
         )
@@ -1000,9 +1075,9 @@ async def debt_summary(session: AsyncSession, card: Card) -> dict[str, Decimal]:
     open_statements = (
         (
             await session.execute(
-                select(CardStatement).where(
-                    CardStatement.credit_card_id == card.id,
-                    CardStatement.status == StatementStatus.open,
+                select(Statement).where(
+                    Statement.account_id == account.id,
+                    Statement.status == StatementStatus.open,
                 )
             )
         )
@@ -1018,7 +1093,7 @@ async def debt_summary(session: AsyncSession, card: Card) -> dict[str, Decimal]:
         .select_from(Installment)
         .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
         .where(
-            InstallmentPlan.credit_card_id == card.id,
+            InstallmentPlan.account_id == account.id,
             Installment.status == InstallmentStatus.pending,
         )
     )
@@ -1035,18 +1110,18 @@ async def debt_summary(session: AsyncSession, card: Card) -> dict[str, Decimal]:
 # --- Signed balance (TAR-06) -----------------------------------------------------
 
 
-async def card_signed_balance(session: AsyncSession, card: Card) -> Decimal | None:
+async def account_signed_balance(session: AsyncSession, account: Account) -> Decimal | None:
     """TAR-06: asset-perspective balance with sign.
 
-    debit/prepaid → +card_balance() (positive asset)
-    credit        → -(total_debt) (negative liability), null if not cycle-ready
+    balance accounts → +account_balance() (asset; negative if overdrawn)
+    credit           → -(total_debt) (liability), null if not cycle-ready
     """
-    behavior = await card_behavior(session, card)
-    if behavior != CardBehavior.credit:
-        return await card_balance(session, card)
-    if not cycle_ready(card):
+    behavior = await account_behavior(session, account)
+    if behavior in BALANCE_BEHAVIORS:
+        return await account_balance(session, account)
+    if not cycle_ready(account):
         return None
-    summary = await debt_summary(session, card)
+    summary = await debt_summary(session, account)
     return -summary["total_debt"]
 
 
@@ -1061,19 +1136,19 @@ async def move_charge_cycle(
     direction: str,
 ) -> Transaction:
     """TDC-06: move a charge one cycle back/forward; recompute both statements."""
-    if txn.statement_id is None or txn.card_id is None:
+    if txn.statement_id is None or txn.account_id is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "El cargo no tiene ciclo")
     if direction not in ("prev", "next"):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "direction: prev | next")
 
-    card = await get_card(session, space.id, txn.card_id)
-    spec = spec_for(card)
+    account = await get_account(session, space.id, txn.account_id)
+    spec = spec_for(account)
     current = await get_statement(session, space.id, txn.statement_id)
     if direction == "prev":
         target_cutoff = cycles.previous_cutoff(current.period_end, spec)
     else:
         target_cutoff = cycles.next_cutoff(current.period_end, spec)
-    target = await get_or_create_statement(session, card, target_cutoff)
+    target = await get_or_create_statement(session, account, target_cutoff)
 
     old_id = txn.statement_id
     txn.statement_id = target.id

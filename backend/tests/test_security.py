@@ -11,7 +11,7 @@ import jwt as pyjwt
 from freezegun import freeze_time
 
 from tests.conftest import JWT_SECRET, auth_headers, bootstrap_space
-from tests.test_cards import create_card
+from tests.test_accounts import create_card
 
 
 async def other_space_ctx(client):
@@ -36,7 +36,7 @@ async def test_glo05_msi_backfill_rejects_foreign_category(client):
             "description": "Smart TV",
             "monthly_amount": "2692.00",
             "currency": "MXN",
-            "credit_card_id": card["id"],
+            "account_id": card["id"],
             "current_number": 6,
             "total_months": 12,
             # Categoría válida, pero de OTRO espacio.
@@ -59,7 +59,7 @@ async def test_glo05_msi_backfill_rejects_income_category(client):
             "description": "Smart TV",
             "monthly_amount": "2692.00",
             "currency": "MXN",
-            "credit_card_id": card["id"],
+            "account_id": card["id"],
             "current_number": 6,
             "total_months": 12,
             "category_id": ctx["income_categories"]["Nómina"]["id"],
@@ -83,7 +83,7 @@ async def test_glo05_recurring_update_rejects_foreign_references(client):
             "currency": "MXN",
             "description": "Spotify",
             "category_id": ctx["categories"]["Entretenimiento"]["id"],
-            "payment_method_id": ctx["methods"]["Débito"]["id"],
+            "account_id": ctx["accounts"]["Débito"]["id"],
             "frequency": "monthly",
             "start_date": "2026-01-15",
             "month_day": 15,
@@ -100,11 +100,11 @@ async def test_glo05_recurring_update_rejects_foreign_references(client):
     )
     assert res.status_code == 404, res.text
 
-    foreign_method = intruder["methods"]["Efectivo"]["id"]
+    foreign_method = intruder["accounts"]["Efectivo"]["id"]
     res = await client.patch(
         f"/api/v1/recurring-rules/{rule_id}",
         headers=ctx["headers"],
-        json={"payment_method_id": foreign_method},
+        json={"account_id": foreign_method},
     )
     assert res.status_code == 404, res.text
 
@@ -112,7 +112,7 @@ async def test_glo05_recurring_update_rejects_foreign_references(client):
     current = await client.get("/api/v1/recurring-rules", headers=ctx["headers"])
     rule = next(r for r in current.json() if r["id"] == rule_id)
     assert rule["category_id"] == ctx["categories"]["Entretenimiento"]["id"]
-    assert rule["payment_method_id"] == ctx["methods"]["Débito"]["id"]
+    assert rule["account_id"] == ctx["accounts"]["Débito"]["id"]
 
 
 # --- CWE-1236: CSV formula injection --------------------------------------
@@ -127,7 +127,7 @@ async def test_csv_export_neutralizes_formulas(client):
         "amount": "150.00",
         "currency": "MXN",
         "category_id": ctx["expense_categories"]["Comida"]["id"],
-        "payment_method_id": ctx["methods"]["Efectivo"]["id"],
+        "account_id": ctx["accounts"]["Efectivo"]["id"],
         "description": '=HYPERLINK("http://evil.example","x")',
         "notes": "@SUM(A1:A9)",
     }

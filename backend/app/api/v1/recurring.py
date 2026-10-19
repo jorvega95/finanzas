@@ -47,10 +47,14 @@ async def create_rule(
         from app.services.transactions import _validate_category
 
         await _validate_category(db, space.id, payload.category_id, payload.type)
-    if payload.payment_method_id is not None:
-        from app.services.transactions import _validate_payment_method
+    from app.services.transactions import validate_account
 
-        await _validate_payment_method(db, space.id, payload.payment_method_id)
+    account = await validate_account(db, space.id, payload.account_id)
+    if payload.currency != account.currency:  # TAR-10
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"La cuenta {account.name} maneja {account.currency}",
+        )
 
     rule = RecurringRule(
         space_id=space.id,
@@ -60,7 +64,7 @@ async def create_rule(
         currency=payload.currency,
         description=payload.description,
         category_id=payload.category_id,
-        payment_method_id=payload.payment_method_id,
+        account_id=payload.account_id,
         frequency=payload.frequency,
         start_date=payload.start_date,
         end_date=payload.end_date,
@@ -89,10 +93,17 @@ async def update_rule(
         from app.services.transactions import _validate_category
 
         await _validate_category(db, space.id, data["category_id"], rule.type)
-    if data.get("payment_method_id") is not None:
-        from app.services.transactions import _validate_payment_method
+    if "account_id" in data:
+        if data["account_id"] is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "La cuenta es obligatoria")
+        from app.services.transactions import validate_account
 
-        await _validate_payment_method(db, space.id, data["payment_method_id"])
+        account = await validate_account(db, space.id, data["account_id"])
+        if account.currency != rule.currency:  # TAR-10
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"La cuenta {account.name} maneja {account.currency}",
+            )
 
     for field, value in data.items():
         setattr(rule, field, value)

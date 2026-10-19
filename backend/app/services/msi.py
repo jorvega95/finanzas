@@ -13,14 +13,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.catalogs import CardBehavior
+from app.models.catalogs import AccountBehavior
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus, PlanStatus
 from app.models.spaces import Space
 from app.models.transactions import Transaction, TransactionType
 from app.services import billing_cycles as cycles
-from app.services.cards import (
-    card_behavior,
-    get_card,
+from app.services.accounts import (
+    account_behavior,
+    get_account,
     get_or_create_statement,
     recompute_statement_total,
     spec_for,
@@ -73,7 +73,7 @@ async def create_plan_from_transaction(
     txn = await session.get(Transaction, transaction_id)
     if txn is None or txn.space_id != space.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Transacción no encontrada")
-    if txn.type != TransactionType.expense or txn.card_id is None:
+    if txn.type != TransactionType.expense:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "MSI solo aplica a compras con tarjeta de crédito",
@@ -85,21 +85,21 @@ async def create_plan_from_transaction(
     if txn.amount < CENT * months:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Monto demasiado pequeño")
 
-    card = await get_card(session, space.id, txn.card_id)
-    # MSI-01/TAR-02: MSI only exists on credit cards.
-    if await card_behavior(session, card) != CardBehavior.credit:
+    account = await get_account(session, space.id, txn.account_id)
+    # MSI-01/TAR-02: MSI only exists on credit accounts.
+    if await account_behavior(session, account) != AccountBehavior.credit:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "MSI solo aplica a tarjetas de crédito",
         )
     # MSI-09: compra en moneda distinta a la de la tarjeta no soportada en v1.
-    if txn.currency != card.currency:
+    if txn.currency != account.currency:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Compras MSI en moneda distinta a la de la tarjeta no se soportan",
         )
 
-    spec = spec_for(card)
+    spec = spec_for(account)
     amounts = split_installments(txn.amount, months)
     charge_dates = installment_charge_dates(txn.date, spec, months)
     old_statement_id = txn.statement_id
@@ -113,7 +113,7 @@ async def create_plan_from_transaction(
 
     plan = InstallmentPlan(
         space_id=space.id,
-        credit_card_id=card.id,
+        account_id=account.id,
         transaction_id=txn.id,
         total_amount=txn.amount,
         months=months,
@@ -134,7 +134,7 @@ async def create_plan_from_transaction(
             inst_status = InstallmentStatus.paid
         elif charge_date == current_cutoff:
             # Current open cycle: charge lands here.
-            open_stmt = await get_or_create_statement(session, card, charge_date)
+            open_stmt = await get_or_create_statement(session, account, charge_date)
             stmt_id = open_stmt.id
             inst_status = InstallmentStatus.charged
         else:
@@ -204,7 +204,7 @@ async def create_plan_from_current_installment(
     description: str,
     monthly_amount: Decimal,
     currency: str,
-    card_id: uuid.UUID,
+    account_id: uuid.UUID,
     category_id: uuid.UUID,
     current_number: int,
     total_months: int,
@@ -231,29 +231,24 @@ async def create_plan_from_current_installment(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Monto inválido")
 
     # GLO-05/TXN-01: la categoría debe pertenecer al espacio activo y ser de gasto.
-    # Import local: transactions importa de cards/msi (evita ciclo de imports).
+    # Import local: transactions importa de accounts/msi (evita ciclo de imports).
     from app.services.transactions import _validate_category
 
     await _validate_category(session, space.id, category_id, TransactionType.expense)
 
-    card = await get_card(session, space.id, card_id)
-    if await card_behavior(session, card) != CardBehavior.credit:
+    account = await get_account(session, space.id, account_id)
+    if await account_behavior(session, account) != AccountBehavior.credit:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "MSI solo aplica a tarjetas de crédito",
         )
-    if currency != card.currency:
+    if currency != account.currency:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Compras MSI en moneda distinta a la de la tarjeta no se soportan",
         )
-    if card.payment_method_id is None:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "La tarjeta no tiene método de pago asociado",
-        )
 
-    spec = spec_for(card)
+    spec = spec_for(account)
     today = _today_for_space(space)
 
     # Determina el corte ancla de la cuota actual.
@@ -291,8 +286,7 @@ async def create_plan_from_current_installment(
         amount=total_amount,
         currency=currency,
         category_id=category_id,
-        payment_method_id=card.payment_method_id,
-        card_id=card.id,
+        account_id=account.id,
         created_by=created_by,
     )
     session.add(txn)
@@ -300,7 +294,7 @@ async def create_plan_from_current_installment(
 
     plan = InstallmentPlan(
         space_id=space.id,
-        credit_card_id=card.id,
+        account_id=account.id,
         transaction_id=txn.id,
         total_amount=total_amount,
         months=total_months,
@@ -346,7 +340,7 @@ async def create_plan_from_current_installment(
         # Asignar la cuota activa al statement abierto del ciclo en curso.
         active_inst = installments_created[active_number - 1]
         active_cutoff = charge_dates[active_number - 1]
-        open_stmt = await get_or_create_statement(session, card, active_cutoff)
+        open_stmt = await get_or_create_statement(session, account, active_cutoff)
         active_inst.statement_id = open_stmt.id
         active_inst.status = InstallmentStatus.charged
     elif current_is_charged:
@@ -374,10 +368,10 @@ async def settle_plan_early(
         raise HTTPException(status.HTTP_409_CONFLICT, "No hay cuotas pendientes")
     total_pending = sum((i.amount for i in pending), Decimal("0"))
 
-    card = await get_card(session, space.id, plan.credit_card_id)
+    account = await get_account(session, space.id, plan.account_id)
     purchase = await session.get(Transaction, plan.transaction_id)
     assert purchase is not None
-    spec = spec_for(card)
+    spec = spec_for(account)
     # Cargo único en el statement abierto actual de la tarjeta.
     settlement = Transaction(
         space_id=space.id,
@@ -387,14 +381,13 @@ async def settle_plan_early(
         amount=Decimal(total_pending),
         currency=purchase.currency,
         category_id=purchase.category_id,
-        payment_method_id=purchase.payment_method_id,
-        card_id=card.id,
+        account_id=account.id,
         created_by=user_id,
     )
     session.add(settlement)
     await session.flush()
     statement = await get_or_create_statement(
-        session, card, cycles.cycle_for_purchase(settlement.date, spec)[1]
+        session, account, cycles.cycle_for_purchase(settlement.date, spec)[1]
     )
     settlement.statement_id = statement.id
 
@@ -417,7 +410,7 @@ async def delete_plan_if_allowed(session: AsyncSession, plan: InstallmentPlan) -
     corte cerrado. Una cuota charged en statement OPEN todavía puede cancelarse
     (el cargo aún no está impreso); si el corte ya cerró o la cuota está paid,
     se bloquea."""
-    from app.models.cards import CardStatement, StatementStatus
+    from app.models.accounts import Statement, StatementStatus
 
     for inst in plan.installments:
         if inst.status == InstallmentStatus.paid:
@@ -426,7 +419,7 @@ async def delete_plan_if_allowed(session: AsyncSession, plan: InstallmentPlan) -
                 "El plan tiene cuotas pagadas; liquida o ajusta en su lugar",
             )
         if inst.status == InstallmentStatus.charged and inst.statement_id is not None:
-            stmt = await session.get(CardStatement, inst.statement_id)
+            stmt = await session.get(Statement, inst.statement_id)
             if stmt is not None and stmt.status != StatementStatus.open:
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
@@ -487,7 +480,7 @@ async def monthly_projection(session: AsyncSession, space_id: uuid.UUID) -> list
     pending por estimated_charge_date)."""
     rows = await session.execute(
         select(
-            InstallmentPlan.credit_card_id,
+            InstallmentPlan.account_id,
             Installment.estimated_charge_date,
             Installment.amount,
         )
@@ -498,10 +491,10 @@ async def monthly_projection(session: AsyncSession, space_id: uuid.UUID) -> list
         )
     )
     buckets: dict[tuple[uuid.UUID, str], Decimal] = {}
-    for card_id, charge_date, amount in rows.all():
-        key = (card_id, charge_date.strftime("%Y-%m"))
+    for account_id, charge_date, amount in rows.all():
+        key = (account_id, charge_date.strftime("%Y-%m"))
         buckets[key] = buckets.get(key, Decimal("0")) + amount
     return [
-        {"credit_card_id": card_id, "month": month, "amount": amount}
-        for (card_id, month), amount in sorted(buckets.items(), key=lambda kv: kv[0][1])
+        {"account_id": account_id, "month": month, "amount": amount}
+        for (account_id, month), amount in sorted(buckets.items(), key=lambda kv: kv[0][1])
     ]

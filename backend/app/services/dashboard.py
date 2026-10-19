@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.dates import today_in_tz
-from app.models.cards import CardStatement, StatementStatus
-from app.models.catalogs import Category, ExpenseNature, PaymentMethod
+from app.models.accounts import Account, Statement, StatementStatus
+from app.models.catalogs import Category, ExpenseNature
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus
 from app.models.recurring import RecurringRule
 from app.models.spaces import Space
@@ -83,16 +83,16 @@ def _msi_quota_query(space_id: uuid.UUID, start: dt.date, end: dt.date) -> Any:
             (Installment.amount * func.coalesce(parent.fx_rate_to_base, 1)).label("amount_base"),
             parent.category_id.label("category_id"),
             parent.expense_nature_override.label("expense_nature_override"),
-            parent.payment_method_id.label("payment_method_id"),
+            parent.account_id.label("account_id"),
         )
         .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
         .join(parent, InstallmentPlan.transaction_id == parent.id)
-        .join(CardStatement, Installment.statement_id == CardStatement.id)
+        .join(Statement, Installment.statement_id == Statement.id)
         .where(
             InstallmentPlan.space_id == space_id,
             Installment.status.in_([InstallmentStatus.charged, InstallmentStatus.paid]),
-            CardStatement.period_end >= start,
-            CardStatement.period_end <= end,
+            Statement.period_end >= start,
+            Statement.period_end <= end,
         )
     )
 
@@ -218,12 +218,12 @@ async def expenses_by_nature(
             .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
             .join(parent_txn, InstallmentPlan.transaction_id == parent_txn.id)
             .join(parent_cat, parent_txn.category_id == parent_cat.id)
-            .join(CardStatement, Installment.statement_id == CardStatement.id)
+            .join(Statement, Installment.statement_id == Statement.id)
             .where(
                 InstallmentPlan.space_id == space.id,
                 Installment.status.in_([InstallmentStatus.charged, InstallmentStatus.paid]),
-                CardStatement.period_end >= start,
-                CardStatement.period_end <= end,
+                Statement.period_end >= start,
+                Statement.period_end <= end,
             )
             .group_by(msi_nature)
         )
@@ -270,10 +270,10 @@ async def expenses_by_nature_detail(
                 AMOUNT_BASE.label("amount_base"),
                 Transaction.category_id,
                 Category.name.label("category_name"),
-                PaymentMethod.name.label("payment_method_name"),
+                Account.name.label("account_name"),
             )
             .join(Category, Transaction.category_id == Category.id)
-            .outerjoin(PaymentMethod, Transaction.payment_method_id == PaymentMethod.id)
+            .outerjoin(Account, Transaction.account_id == Account.id)
             .where(
                 *expense_predicates(space.id, start, end, today),
                 _nature_filter(direct_nature, nature),
@@ -299,19 +299,19 @@ async def expenses_by_nature_detail(
                 ),
                 parent_txn.category_id,
                 parent_cat.name.label("category_name"),
-                PaymentMethod.name.label("payment_method_name"),
+                Account.name.label("account_name"),
             )
             .select_from(Installment)
             .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
             .join(parent_txn, InstallmentPlan.transaction_id == parent_txn.id)
             .join(parent_cat, parent_txn.category_id == parent_cat.id)
-            .join(CardStatement, Installment.statement_id == CardStatement.id)
-            .outerjoin(PaymentMethod, parent_txn.payment_method_id == PaymentMethod.id)
+            .join(Statement, Installment.statement_id == Statement.id)
+            .outerjoin(Account, parent_txn.account_id == Account.id)
             .where(
                 InstallmentPlan.space_id == space.id,
                 Installment.status.in_([InstallmentStatus.charged, InstallmentStatus.paid]),
-                CardStatement.period_end >= start,
-                CardStatement.period_end <= end,
+                Statement.period_end >= start,
+                Statement.period_end <= end,
                 _nature_filter(msi_nature, nature),
             )
         )
@@ -328,7 +328,7 @@ async def expenses_by_nature_detail(
                 "description": row.description,
                 "category_id": row.category_id,
                 "category_name": row.category_name,
-                "payment_method_name": row.payment_method_name,
+                "account_name": row.account_name,
                 "amount": to_money(row.amount_base),
                 "original_amount": to_money(row.amount) if row.currency != base_currency else None,
                 "currency": row.currency,
@@ -343,7 +343,7 @@ async def expenses_by_nature_detail(
                 "description": row.description,
                 "category_id": row.category_id,
                 "category_name": row.category_name,
-                "payment_method_name": row.payment_method_name,
+                "account_name": row.account_name,
                 "amount": to_money(row.amount_base),
                 "original_amount": to_money(row.amount) if row.currency != base_currency else None,
                 "currency": row.currency,
@@ -395,11 +395,9 @@ async def upcoming_commitments(
     statements = (
         (
             await session.execute(
-                select(CardStatement).where(
-                    CardStatement.space_id == space.id,
-                    CardStatement.status.in_(
-                        [StatementStatus.closed, StatementStatus.partially_paid]
-                    ),
+                select(Statement).where(
+                    Statement.space_id == space.id,
+                    Statement.status.in_([StatementStatus.closed, StatementStatus.partially_paid]),
                 )
             )
         )
@@ -425,7 +423,7 @@ async def upcoming_commitments(
             select(Installment, Transaction.description)
             .join(InstallmentPlan, Installment.plan_id == InstallmentPlan.id)
             .join(Transaction, InstallmentPlan.transaction_id == Transaction.id)
-            .outerjoin(CardStatement, Installment.statement_id == CardStatement.id)
+            .outerjoin(Statement, Installment.statement_id == Statement.id)
             .where(
                 InstallmentPlan.space_id == space.id,
                 Installment.status.in_([InstallmentStatus.pending, InstallmentStatus.charged]),
@@ -434,7 +432,7 @@ async def upcoming_commitments(
                 # card_due; only include those in open statements or no statement.
                 or_(
                     Installment.statement_id.is_(None),
-                    CardStatement.status == StatementStatus.open,
+                    Statement.status == StatementStatus.open,
                 ),
             )
         )
