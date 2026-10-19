@@ -18,6 +18,7 @@ from app.core.dates import today_in_tz
 from app.core.text import normalize_name
 from app.models.accounts import Account
 from app.models.catalogs import AccountBehavior, AccountType
+from app.models.commitments import Commitment
 from app.models.events import Event
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus
 from app.models.spaces import Space
@@ -112,8 +113,6 @@ async def update_event(session: AsyncSession, event: Event, changes: dict[str, A
 async def delete_event(session: AsyncSession, event: Event) -> None:
     """GLO-03: physical delete only without linked movements; otherwise 409 so
     the client deactivates it."""
-    from app.models.commitments import Commitment
-
     linked = await session.scalar(
         select(Transaction.id).where(Transaction.event_id == event.id).limit(1)
     )
@@ -146,6 +145,8 @@ async def event_summary(session: AsyncSession, space: Space, event: Event) -> di
                it's the event's whole cost, not a month's, and by MSI-02 it
                equals the parent amount without counting it twice. An early
                settlement (MSI-07) is its own expense, linked like its parent.
+               Plus what was paid to its vendors before using the app
+               (paid_before_tracking, CXP-01), reported apart too.
     received = Σ linked incomes (cash gifts).
     net      = spent − received.
     """
@@ -190,8 +191,30 @@ async def event_summary(session: AsyncSession, space: Space, event: Event) -> di
     )
     movements = await session.scalar(select(func.count()).select_from(Transaction).where(*linked))
 
+    # EVT-03/CXP-01: what was paid to the event's vendors before using the app
+    # (canceled commitments too: that money is gone). No frozen rate exists,
+    # so a foreign currency is valued at today's rate (FX-04).
+    today = today_in_tz(space.timezone)
+    before_rows: list[tuple[uuid.UUID | None, Decimal]] = []
+    paid_before = (
+        await session.execute(
+            select(
+                Commitment.category_id, Commitment.currency, Commitment.paid_before_tracking
+            ).where(
+                Commitment.space_id == space.id,
+                Commitment.event_id == event.id,
+                Commitment.paid_before_tracking > 0,
+            )
+        )
+    ).all()
+    for category_id, currency, amount in paid_before:
+        valued = await fx.mark_to_market(session, amount, currency, space.base_currency, today)
+        if valued is not None:
+            before_rows.append((category_id, valued))
+    spent_before_tracking = to_money(sum((amount for _, amount in before_rows), ZERO))
+
     categories = await _space_categories(session, space.id)
-    by_category = _roll_up_to_root(categories, list(direct_rows) + list(msi_rows))
+    by_category = _roll_up_to_root(categories, list(direct_rows) + list(msi_rows) + before_rows)
     spent = sum((row["total"] for row in by_category), ZERO)
     received_total = to_money(received)
 
@@ -232,7 +255,6 @@ async def event_summary(session: AsyncSession, space: Space, event: Event) -> di
 
     # CXP-03: what is still owed to its vendors, in base at today's rate (it
     # is a future payment, like PRO-06; amounts in base pass through).
-    today = today_in_tz(space.timezone)
     pending_commitments = ZERO
     for state in await list_commitments(session, space, event_id=event.id):
         valued = await fx.mark_to_market(
@@ -243,6 +265,7 @@ async def event_summary(session: AsyncSession, space: Space, event: Event) -> di
     return {
         "pending_commitments": to_money(pending_commitments),
         "spent": spent,
+        "spent_before_tracking": spent_before_tracking,
         "received": received_total,
         "net": spent - received_total,
         "budget_remaining": event.budget - spent if event.budget is not None else None,

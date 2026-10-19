@@ -71,6 +71,7 @@ async def _summary_out(db: DbSession, space: Space, event: Event) -> EventSummar
     return EventSummaryOut(
         event=EventOut.model_validate(event),
         spent=summary["spent"],
+        spent_before_tracking=summary["spent_before_tracking"],
         received=summary["received"],
         net=summary["net"],
         budget_remaining=summary["budget_remaining"],

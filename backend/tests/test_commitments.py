@@ -108,7 +108,9 @@ async def test_cxp_mandatory_case_18(client):
     assert out["income"]["category_id"] == ctx["income_categories"]["Regalos recibidos"]["id"]
     assert (await get_account(client, ctx, cash))["balance"] == "0.00"
     summary = await get_summary(client, ctx, boda["id"])
-    assert summary["spent"] == "60000.00"  # 40,000 + 20,000 (paid_before isn't a movement)
+    # EVT-03: 20,000 paid before the app + 40,000 abono + 20,000 third party.
+    assert summary["spent"] == "80000.00"
+    assert summary["spent_before_tracking"] == "20000.00"
     assert summary["received"] == "20000.00"
     assert summary["pending_commitments"] == "0.00"
     assert [e for e in (await forecast(client, ctx))["events"] if e["kind"] == "commitment"] == []
@@ -286,6 +288,51 @@ async def test_cxp05_06_lifecycle(client):
     other = await make_commitment(client, ctx, name="Flores", total_amount="300.00")
     res = await client.delete(f"/api/v1/commitments/{other['id']}", headers=ctx["headers"])
     assert res.status_code == 204
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_evt03_paid_before_tracking_counts_in_event_spent(client):
+    """EVT-03: what was paid to vendors before using the app is part of the
+    event's cost (canceled commitments too), under the commitment's category,
+    but it is not a dated movement: monthly aggregates don't see it."""
+    ctx = await bootstrap_space(client)
+    boda = await make_event(client, ctx, budget="100000.00")
+    await make_commitment(
+        client,
+        ctx,
+        event_id=boda["id"],
+        total_amount="50000.00",
+        paid_before_tracking="15000.00",
+        category_id=ctx["expense_categories"]["Entretenimiento"]["id"],
+    )
+    flores = await make_commitment(
+        client,
+        ctx,
+        name="Flores",
+        event_id=boda["id"],
+        total_amount="8000.00",
+        paid_before_tracking="3000.00",
+    )
+    await client.patch(
+        f"/api/v1/commitments/{flores['id']}", headers=ctx["headers"], json={"is_canceled": True}
+    )
+    await make_commitment(
+        client, ctx, name="Otro", total_amount="999.00", paid_before_tracking="999.00"
+    )  # no event
+
+    body = await get_summary(client, ctx, boda["id"])
+    assert body["spent"] == "18000.00"
+    assert body["spent_before_tracking"] == "18000.00"
+    assert body["budget_remaining"] == "82000.00"
+    assert body["net"] == "18000.00"
+    by_category = {row["category_name"]: row["total"] for row in body["by_category"]}
+    assert by_category == {"Entretenimiento": "15000.00", "Sin categoría": "3000.00"}
+    assert body["pending_commitments"] == "35000.00"  # the canceled one owes nothing
+
+    totals = (
+        await client.get("/api/v1/dashboard/summary?month=2026-06", headers=ctx["headers"])
+    ).json()["totals"]
+    assert totals["expenses"] == "0.00"
 
 
 async def test_evt01_event_with_commitments_cannot_be_deleted(client):

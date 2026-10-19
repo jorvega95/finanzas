@@ -226,6 +226,13 @@ function EventCard({
         )}
       </div>
 
+      {isPositiveAmount(summary.spent_before_tracking) && (
+        <p className="mt-2 text-xs text-ink-muted">
+          Lo gastado incluye {formatMoney(summary.spent_before_tracking, currency)} abonados a
+          proveedores antes de usar la app.
+        </p>
+      )}
+
       {usage !== null && event.budget && (
         <div className="mt-3">
           <div className="mb-1 flex justify-between text-xs text-ink-muted">

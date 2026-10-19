@@ -53,6 +53,8 @@ class EventSummaryOut(BaseModel):
 
     event: EventOut
     spent: MoneyOut
+    # EVT-03: part of `spent` paid before using the app (commitments' paid_before_tracking).
+    spent_before_tracking: MoneyOut
     received: MoneyOut
     net: MoneyOut
     budget_remaining: MoneyOut | None

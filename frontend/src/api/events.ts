@@ -24,6 +24,7 @@ export interface EventLoan {
 export interface EventSummary {
   event: EventOut;
   spent: string;
+  spent_before_tracking: string; // EVT-03: parte de `spent` pagada antes de la app
   received: string;
   net: string;
   budget_remaining: string | null;
