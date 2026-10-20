@@ -132,6 +132,15 @@
   .label {
     @apply mb-1.5 block text-xs font-medium text-ink-muted;
   }
+  /* Contenedor de cada módulo: ocupa el ancho disponible (tope en pantallas
+     muy anchas) para que el contenido se reparta en cuadrícula. */
+  .page {
+    @apply mx-auto w-full max-w-[1680px] space-y-6;
+  }
+  /* Cuadrícula de tarjetas (cuentas, eventos, compromisos, MSI). */
+  .card-grid {
+    @apply grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3;
+  }
   .page-title {
     @apply text-2xl font-semibold tracking-tight;
   }

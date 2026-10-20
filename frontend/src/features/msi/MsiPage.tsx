@@ -291,7 +291,7 @@ export default function MsiPage() {
   }, [projection.data]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <h1 className="page-title">Meses sin intereses</h1>
         <div className="flex flex-wrap items-center gap-2">
@@ -328,65 +328,67 @@ export default function MsiPage() {
           Sin planes MSI. Convierte una compra con tarjeta o registra un MSI existente.
         </div>
       ) : (
-        sortedPlans.map((summary) => {
-          const total = summary.plan.months;
-          // Cuotas canceladas por liquidación anticipada (MSI-07) cuentan como cubiertas.
-          const done = total - summary.charged_count - summary.pending_count;
-          return (
-            <section key={summary.plan.id} className="card p-5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h3 className="font-semibold">{summary.description || "Compra MSI"}</h3>
-                  <p className="text-xs text-ink-muted">
-                    {summary.account_name} · {formatMoney(summary.plan.total_amount)} a{" "}
-                    {summary.plan.months} meses · {STATUS_LABELS[summary.plan.status]}
-                  </p>
+        <div className="card-grid">
+          {sortedPlans.map((summary) => {
+            const total = summary.plan.months;
+            // Cuotas canceladas por liquidación anticipada (MSI-07) cuentan como cubiertas.
+            const done = total - summary.charged_count - summary.pending_count;
+            return (
+              <section key={summary.plan.id} className="card p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-semibold">{summary.description || "Compra MSI"}</h3>
+                    <p className="text-xs text-ink-muted">
+                      {summary.account_name} · {formatMoney(summary.plan.total_amount)} a{" "}
+                      {summary.plan.months} meses · {STATUS_LABELS[summary.plan.status]}
+                    </p>
+                  </div>
+                  {summary.plan.status === "active" && summary.pending_count > 0 && (
+                    <button className="btn-secondary" onClick={() => settle.mutate(summary.plan.id)}>
+                      Liquidar anticipado
+                    </button>
+                  )}
                 </div>
-                {summary.plan.status === "active" && summary.pending_count > 0 && (
-                  <button className="btn-secondary" onClick={() => settle.mutate(summary.plan.id)}>
-                    Liquidar anticipado
-                  </button>
-                )}
-              </div>
-              <div className="mt-3">
-                <div className="mb-1 flex justify-between text-xs text-ink-muted">
-                  <span>
-                    {done} de {total} cuotas · restan{" "}
-                    <span className="font-medium text-ink">
-                      {formatMoney(summary.remaining_amount)}
+                <div className="mt-3">
+                  <div className="mb-1 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-xs text-ink-muted">
+                    <span>
+                      {done} de {total} cuotas · restan{" "}
+                      <span className="font-medium text-ink">
+                        {formatMoney(summary.remaining_amount)}
+                      </span>
                     </span>
-                  </span>
-                  <span>
-                    último cobro: {formatDate(summary.projected_payoff)} · pago: {formatDate(summary.projected_payment_date)}
-                  </span>
+                    <span>
+                      último cobro: {formatDate(summary.projected_payoff)} · pago: {formatDate(summary.projected_payment_date)}
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-accent transition-all"
+                      style={{ width: `${total ? Math.round((done / total) * 100) : 0}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-accent transition-all"
-                    style={{ width: `${total ? Math.round((done / total) * 100) : 0}%` }}
-                  />
-                </div>
-              </div>
-              <details className="mt-3">
-                <summary className="cursor-pointer text-xs text-accent">Ver cuotas</summary>
-                <ul className="mt-2 grid grid-cols-2 gap-1 text-xs text-ink-muted md:grid-cols-3">
-                  {summary.installments.map((i) => (
-                    <li key={i.id}>
-                      #{i.number} · {formatDate(i.estimated_charge_date)} · {formatMoney(i.amount)} ·{" "}
-                      {i.status === "paid"
-                        ? "✅"
-                        : i.status === "charged"
-                          ? "🧾"
-                          : i.status === "canceled"
-                            ? "✖"
-                            : "⏳"}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </section>
-          );
-        })
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs text-accent">Ver cuotas</summary>
+                  <ul className="mt-2 grid grid-cols-1 gap-1 text-xs text-ink-muted sm:grid-cols-2">
+                    {summary.installments.map((i) => (
+                      <li key={i.id}>
+                        #{i.number} · {formatDate(i.estimated_charge_date)} · {formatMoney(i.amount)} ·{" "}
+                        {i.status === "paid"
+                          ? "✅"
+                          : i.status === "charged"
+                            ? "🧾"
+                            : i.status === "canceled"
+                              ? "✖"
+                              : "⏳"}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </section>
+            );
+          })}
+        </div>
       )}
 
       {(projection.data ?? []).length > 0 && (

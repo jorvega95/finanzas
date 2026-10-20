@@ -176,7 +176,7 @@ function EventCard({
   const overBudget = summary.budget_remaining !== null && isNegativeAmount(summary.budget_remaining);
 
   return (
-    <section className={`card p-4 sm:p-5 ${event.is_active ? "" : "opacity-70"}`}>
+    <section className={`card @container p-4 sm:p-5 ${event.is_active ? "" : "opacity-70"}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold tracking-tight">
@@ -204,7 +204,7 @@ function EventCard({
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div className="mt-4 grid grid-cols-2 gap-2 @xl:grid-cols-4">
         <Stat label="Gastado" value={formatMoney(summary.spent, currency)} />
         <Stat
           label="Regalos recibidos"
@@ -332,7 +332,7 @@ export default function EventsPage() {
   const list = events.data ?? [];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="page-title">Eventos</h1>

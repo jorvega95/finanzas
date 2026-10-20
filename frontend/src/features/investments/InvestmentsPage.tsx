@@ -61,10 +61,10 @@ function MovementForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-2">
+    <form onSubmit={handleSubmit} className="grid grid-cols-2 items-end gap-3 md:grid-cols-3 xl:grid-cols-7">
       <div>
         <label className="label">Cuenta</label>
-        <select className="input w-36" required value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+        <select className="input" required value={accountId} onChange={(e) => setAccountId(e.target.value)}>
           <option value="">Cuenta…</option>
           {(accounts.data ?? []).map((a) => (
             <option key={a.id} value={a.id}>{a.name}</option>
@@ -73,7 +73,7 @@ function MovementForm() {
       </div>
       <div>
         <label className="label">Operación</label>
-        <select className="input w-32" value={type} onChange={(e) => setType(e.target.value)}>
+        <select className="input" value={type} onChange={(e) => setType(e.target.value)}>
           <option value="buy">Compra</option>
           <option value="sell">Venta</option>
           <option value="deposit">Depósito</option>
@@ -83,7 +83,7 @@ function MovementForm() {
       <div>
         <label className="label">Activo</label>
         <input
-          className="input w-32"
+          className="input"
           placeholder="bitcoin"
           title="Crypto: id de CoinGecko (bitcoin, ethereum…). Otros: tu ticker."
           required
@@ -94,7 +94,7 @@ function MovementForm() {
       <div>
         <label className="label">Cantidad</label>
         <input
-          className="input w-32"
+          className="input"
           inputMode="decimal"
           pattern="^\d+(\.\d{1,10})?$"
           required
@@ -105,7 +105,7 @@ function MovementForm() {
       <div>
         <label className="label">Precio unitario</label>
         <input
-          className="input w-32"
+          className="input"
           inputMode="decimal"
           pattern="^\d+(\.\d{1,8})?$"
           value={price}
@@ -114,14 +114,14 @@ function MovementForm() {
       </div>
       <div>
         <label className="label">Moneda</label>
-        <select className="input w-24" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+        <select className="input" value={currency} onChange={(e) => setCurrency(e.target.value)}>
           <option>USD</option>
           <option>MXN</option>
         </select>
       </div>
-      <button className="btn-primary" disabled={register.isPending}>Registrar</button>
+      <button className="btn-primary w-full" disabled={register.isPending}>Registrar</button>
       {register.error && (
-        <p className="w-full text-sm text-red-600 dark:text-red-400">{register.error.message}</p>
+        <p className="col-span-full text-sm text-red-600 dark:text-red-400">{register.error.message}</p>
       )}
     </form>
   );
@@ -144,7 +144,7 @@ export default function InvestmentsPage() {
   const lastNetWorth = (netWorth.data ?? []).at(-1);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="page-title">Inversiones</h1>
         <button className="btn-secondary" onClick={() => takeSnapshots.mutate()}>
@@ -179,7 +179,7 @@ export default function InvestmentsPage() {
       </p>
 
       {/* Cuentas + movimientos */}
-      <section className="card space-y-4 p-5">
+      <section className="card space-y-5 p-5">
         <h2 className="text-base font-semibold tracking-tight">Cuentas de inversión y movimientos</h2>
         <form
           onSubmit={(e) => {
@@ -189,25 +189,39 @@ export default function InvestmentsPage() {
               { onSuccess: () => setAccountName("") },
             );
           }}
-          className="flex flex-wrap gap-2"
+          className="grid grid-cols-2 items-end gap-3 md:grid-cols-3 xl:grid-cols-7"
         >
-          <input
-            className="input w-44"
-            placeholder="Nueva cuenta (Binance, GBM…)"
-            required
-            value={accountName}
-            onChange={(e) => setAccountName(e.target.value)}
-          />
-          <select className="input w-36" value={accountKind} onChange={(e) => setAccountKind(e.target.value)}>
-            {Object.entries(KIND_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-          <button className="btn-secondary" disabled={createAccount.isPending}>
+          <div className="col-span-2 md:col-span-1 xl:col-span-2">
+            <label className="label" htmlFor="inv-account-name">Nueva cuenta</label>
+            <input
+              id="inv-account-name"
+              className="input"
+              placeholder="Binance, GBM…"
+              required
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="inv-account-kind">Tipo</label>
+            <select
+              id="inv-account-kind"
+              className="input"
+              value={accountKind}
+              onChange={(e) => setAccountKind(e.target.value)}
+            >
+              {Object.entries(KIND_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <button className="btn-secondary w-full" disabled={createAccount.isPending}>
             Crear cuenta
           </button>
         </form>
-        <MovementForm />
+        <div className="border-t border-line pt-5">
+          <MovementForm />
+        </div>
       </section>
 
       {/* Holdings (INV-06) */}

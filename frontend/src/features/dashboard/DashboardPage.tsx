@@ -76,7 +76,7 @@ function BudgetsSection({ month, excludeEvents }: { month: string; excludeEvents
   }
 
   return (
-    <section className="card p-5">
+    <section className="card p-5 xl:col-span-3">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">Presupuestos</h2>
         <button
@@ -119,7 +119,7 @@ function BudgetsSection({ month, excludeEvents }: { month: string; excludeEvents
           Sin presupuestos este mes.
         </p>
       ) : (
-        <ul className="space-y-3">
+        <ul className="grid gap-x-8 gap-y-3 xl:grid-cols-3">
           {(budgets.data ?? []).map((row) => {
             const consumed = Number(row.consumed);
             const total = Number(row.budget.amount);
@@ -178,7 +178,7 @@ export default function DashboardPage() {
   const natureTotal = natureData.reduce((sum, row) => sum + row.value, 0);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Dashboard</h1>
@@ -221,9 +221,11 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      {/* xl: tendencia, categoría y naturaleza en 2/3; próximos compromisos ocupa
+          el tercio derecho en dos filas; presupuestos a lo ancho. */}
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {/* Tendencia 6 meses (DSH-03) */}
-        <section className="card p-5">
+        <section className="card p-5 lg:col-span-2">
           <h2 className="mb-4 text-sm font-semibold">Tendencia 6 meses</h2>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={data?.trend ?? []}>
@@ -242,6 +244,38 @@ export default function DashboardPage() {
               <Line type="monotone" dataKey="expenses" name="Gastos" stroke="#ef4444" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
+        </section>
+
+        {/* Próximos compromisos (DSH-05) */}
+        <section className="card p-5 xl:row-span-2">
+          <h2 className="mb-4 text-sm font-semibold">Próximos compromisos</h2>
+          {(data?.upcoming ?? []).length === 0 ? (
+            <p className="text-sm text-ink-muted">Nada pendiente.</p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {(data?.upcoming ?? []).map((item) => (
+                <li key={`${item.kind}-${item.ref_id}`} className="flex items-center justify-between py-2 text-sm">
+                  <span className="flex items-center gap-2">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-ink-muted">
+                      <Icon name={KIND_ICONS[item.kind] ?? "calendar"} className="size-3.5" />
+                    </span>
+                    <span>
+                      {item.description}
+                      {item.is_overdue && (
+                        <span className="ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">
+                          Vencido
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                  <span className="text-right">
+                    <span className="tabular font-medium">{formatMoney(item.amount, currency)}</span>
+                    <span className="ml-2 text-xs text-ink-muted">{formatDate(item.date)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         {/* Por categoría (DSH-03) */}
@@ -342,40 +376,8 @@ export default function DashboardPage() {
           )}
         </section>
 
-        {/* Próximos compromisos (DSH-05) */}
-        <section className="card p-5">
-          <h2 className="mb-4 text-sm font-semibold">Próximos compromisos</h2>
-          {(data?.upcoming ?? []).length === 0 ? (
-            <p className="text-sm text-ink-muted">Nada pendiente.</p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {(data?.upcoming ?? []).map((item) => (
-                <li key={`${item.kind}-${item.ref_id}`} className="flex items-center justify-between py-2 text-sm">
-                  <span className="flex items-center gap-2">
-                    <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-ink-muted">
-                      <Icon name={KIND_ICONS[item.kind] ?? "calendar"} className="size-3.5" />
-                    </span>
-                    <span>
-                      {item.description}
-                      {item.is_overdue && (
-                        <span className="ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">
-                          Vencido
-                        </span>
-                      )}
-                    </span>
-                  </span>
-                  <span className="text-right">
-                    <span className="tabular font-medium">{formatMoney(item.amount, currency)}</span>
-                    <span className="ml-2 text-xs text-ink-muted">{formatDate(item.date)}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <BudgetsSection month={month} excludeEvents={excludeEvents} />
       </div>
-
-      <BudgetsSection month={month} excludeEvents={excludeEvents} />
 
       <NatureDetailModal
         month={month}

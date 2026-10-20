@@ -637,7 +637,7 @@ function CommitmentCard({
               .join(" · ")}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-1.5 [&>*]:h-8 [&>*]:px-2.5">
           {open && (
             <>
               <button className="btn-primary" onClick={onAbono}>
@@ -651,9 +651,8 @@ function CommitmentCard({
           <Link className="btn-secondary" to={`/transacciones?compromiso=${c.id}`}>
             Abonos
           </Link>
-          <button className="btn-secondary" onClick={onEdit}>
+          <button className="btn-secondary px-2.5" onClick={onEdit} aria-label="Editar" title="Editar">
             <Icon name="pencil" className="size-3.5" />
-            Editar
           </button>
         </div>
       </div>
@@ -762,7 +761,7 @@ export default function CommitmentsPage() {
             : "";
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="page-title">Compromisos</h1>
@@ -860,7 +859,7 @@ export default function CommitmentsPage() {
           </span>
         </button>
       ) : (
-        <div className="space-y-4">
+        <div className="card-grid">
           {list.map((c) => (
             <CommitmentCard
               key={c.id}

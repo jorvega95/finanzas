@@ -11,6 +11,7 @@ import {
   type PreviewResponse,
   type PreviewRow,
 } from "../../api/imports";
+import CollapsibleCard from "../../components/ui/CollapsibleCard";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 
@@ -86,12 +87,10 @@ export default function ImportSection() {
   const selectedCount = preview?.rows.filter((r) => r.selected).length ?? 0;
 
   return (
-    <section className="card p-5">
-      <h2 className="mb-1 text-base font-semibold tracking-tight">Importar estado de cuenta (CSV)</h2>
-      <p className="mb-4 text-xs text-ink-muted">
-        Sube el CSV de tu banco, mapea las columnas y revisa antes de confirmar.
-        Nada se guarda hasta que confirmes.
-      </p>
+    <CollapsibleCard
+      title="Importar y exportar"
+      description="Sube el CSV de tu banco, mapea las columnas y revisa antes de confirmar; nada se guarda hasta que confirmes. También descarga tus datos."
+    >
 
       <div className="flex flex-wrap items-center gap-2">
         <input
@@ -317,6 +316,6 @@ export default function ImportSection() {
           ⬇ Respaldo completo (JSON)
         </button>
       </div>
-    </section>
+    </CollapsibleCard>
   );
 }

@@ -1180,19 +1180,20 @@ function AccountItem({
       : null;
 
   return (
-    <section className={`card p-4 sm:p-5 ${account.is_active ? "" : "opacity-70"}`}>
-      <div className="flex flex-col gap-5 sm:flex-row">
-        <div className="w-full shrink-0 sm:w-72">
-          <AccountVisual {...account} inactive={!account.is_active} />
-        </div>
-
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+    <section
+      className={`card @container p-4 ${expanded ? "col-span-full" : ""} ${account.is_active ? "" : "opacity-70"}`}
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex items-start gap-4">
+          <div className="w-32 shrink-0 @md:w-40">
+            <AccountVisual {...account} inactive={!account.is_active} />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="min-w-0">
-              <h3 className="truncate text-lg font-semibold tracking-tight">{account.name}</h3>
-              <p className="text-sm text-ink-muted">{accountSummary(account)}</p>
+              <h3 className="truncate text-base font-semibold tracking-tight">{account.name}</h3>
+              <p className="text-xs text-ink-muted">{accountSummary(account)}</p>
             </div>
-            <div className="flex gap-1.5">
+            <div className="flex flex-wrap gap-1.5">
               {isCash && (
                 <button className="btn-secondary" onClick={onAdjust}>
                   Ajustar saldo
@@ -1210,74 +1211,74 @@ function AccountItem({
               )}
             </div>
           </div>
-
-          {isCredit && account.next_payment && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
-              <span className="text-amber-900 dark:text-amber-200">
-                Próximo pago · vence {formatDate(account.next_payment.due_date)}
-              </span>
-              <span className="tabular font-semibold">
-                {formatMoney(account.next_payment.amount, account.currency)}
-              </span>
-            </div>
-          )}
-
-          {isCredit && account.debt && (
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-              <Stat label="Saldo al corte" value={formatMoney(account.debt.statement_balance, account.currency)} />
-              <Stat label="Ciclo en curso" value={formatMoney(account.debt.current_cycle_spend, account.currency)} />
-              <Stat label="MSI por venir" value={formatMoney(account.debt.committed_msi, account.currency)} />
-              <Stat label="Deuda total" value={formatMoney(account.debt.total_debt, account.currency)} strong />
-            </div>
-          )}
-
-          {usage !== null && account.credit_limit && (
-            <div>
-              <div className="mb-1 flex justify-between text-xs text-ink-muted">
-                <span>Uso de la línea</span>
-                <span className="tabular">
-                  {usage.toFixed(0)}% de {formatMoney(account.credit_limit, account.currency)}
-                </span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                <div
-                  className={`h-full rounded-full ${
-                    usage > 80 ? "bg-red-500" : usage > 50 ? "bg-amber-500" : "bg-accent"
-                  }`}
-                  style={{ width: `${usage}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {isLoan(account.behavior) && account.balance !== null && <LoanBalance account={account} />}
-
-          {hasBalance(account.behavior) && !isLoan(account.behavior) && account.balance !== null && (
-            <div className="rounded-lg border border-line bg-surface px-4 py-3">
-              <p className="text-xs text-ink-muted">Saldo actual</p>
-              <p
-                className={`tabular text-2xl font-semibold tracking-tight ${
-                  negative ? "text-red-600 dark:text-red-400" : ""
-                }`}
-              >
-                {formatMoney(account.balance, account.currency)}
-              </p>
-            </div>
-          )}
-
-          {/* TAR-09: el efectivo puede quedar negativo; se sugiere ajustarlo. */}
-          {isCash && negative && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
-              <span className="flex items-center gap-2">
-                <Icon name="alert" />
-                Registraste más gastos en efectivo de los que tenías.
-              </span>
-              <button className="font-medium underline-offset-2 hover:underline" onClick={onAdjust}>
-                Ajustar saldo
-              </button>
-            </div>
-          )}
         </div>
+
+        {isCredit && account.next_payment && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+            <span className="text-amber-900 dark:text-amber-200">
+              Próximo pago · vence {formatDate(account.next_payment.due_date)}
+            </span>
+            <span className="tabular font-semibold">
+              {formatMoney(account.next_payment.amount, account.currency)}
+            </span>
+          </div>
+        )}
+
+        {isCredit && account.debt && (
+          <div className="grid grid-cols-2 gap-2 @xl:grid-cols-4">
+            <Stat label="Saldo al corte" value={formatMoney(account.debt.statement_balance, account.currency)} />
+            <Stat label="Ciclo en curso" value={formatMoney(account.debt.current_cycle_spend, account.currency)} />
+            <Stat label="MSI por venir" value={formatMoney(account.debt.committed_msi, account.currency)} />
+            <Stat label="Deuda total" value={formatMoney(account.debt.total_debt, account.currency)} strong />
+          </div>
+        )}
+
+        {usage !== null && account.credit_limit && (
+          <div>
+            <div className="mb-1 flex justify-between text-xs text-ink-muted">
+              <span>Uso de la línea</span>
+              <span className="tabular">
+                {usage.toFixed(0)}% de {formatMoney(account.credit_limit, account.currency)}
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full ${
+                  usage > 80 ? "bg-red-500" : usage > 50 ? "bg-amber-500" : "bg-accent"
+                }`}
+                style={{ width: `${usage}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {isLoan(account.behavior) && account.balance !== null && <LoanBalance account={account} />}
+
+        {hasBalance(account.behavior) && !isLoan(account.behavior) && account.balance !== null && (
+          <div className="rounded-lg border border-line bg-surface px-4 py-3">
+            <p className="text-xs text-ink-muted">Saldo actual</p>
+            <p
+              className={`tabular text-2xl font-semibold tracking-tight ${
+                negative ? "text-red-600 dark:text-red-400" : ""
+              }`}
+            >
+              {formatMoney(account.balance, account.currency)}
+            </p>
+          </div>
+        )}
+
+        {/* TAR-09: el efectivo puede quedar negativo; se sugiere ajustarlo. */}
+        {isCash && negative && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+            <span className="flex items-center gap-2">
+              <Icon name="alert" />
+              Registraste más gastos en efectivo de los que tenías.
+            </span>
+            <button className="font-medium underline-offset-2 hover:underline" onClick={onAdjust}>
+              Ajustar saldo
+            </button>
+          </div>
+        )}
       </div>
 
       {isCredit && expanded && <StatementsDetail card={account} sources={sources} />}
@@ -1426,7 +1427,7 @@ export default function AccountsPage() {
   }, [qc]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="page-title">Cuentas</h1>
@@ -1573,17 +1574,20 @@ export default function AccountsPage() {
                     </span>
                   </button>
                 ) : (
-                  items.map((account) => (
-                    <AccountItem
-                      key={account.id}
-                      account={account}
-                      expanded={expanded === account.id}
-                      onToggleExpand={() => setExpanded(expanded === account.id ? null : account.id)}
-                      onEdit={() => setEditing(account.id)}
-                      onAdjust={() => setAdjusting(account.id)}
-                      sources={paySources}
-                    />
-                  ))
+                  // items-stretch: todas las tarjetas de una fila miden lo mismo.
+                  <div className="card-grid items-stretch">
+                    {items.map((account) => (
+                      <AccountItem
+                        key={account.id}
+                        account={account}
+                        expanded={expanded === account.id}
+                        onToggleExpand={() => setExpanded(expanded === account.id ? null : account.id)}
+                        onEdit={() => setEditing(account.id)}
+                        onAdjust={() => setAdjusting(account.id)}
+                        sources={paySources}
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
             );

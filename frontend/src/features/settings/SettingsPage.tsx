@@ -10,6 +10,7 @@ import {
   type CategoryOut,
 } from "../../api/catalogs";
 import { ApiError } from "../../api/client";
+import CollapsibleCard from "../../components/ui/CollapsibleCard";
 import Modal from "../../components/ui/Modal";
 import {
   useCreateRecurringRule,
@@ -127,8 +128,10 @@ function CategoriesSection() {
   };
 
   return (
-    <section className="card p-5">
-      <h2 className="mb-4 text-base font-semibold tracking-tight">Categorías</h2>
+    <CollapsibleCard
+      title="Categorías"
+      description="Gastos e ingresos, con su naturaleza: fijo, variable o discrecional."
+    >
 
       {/* Formulario de creación */}
       <form onSubmit={handleCreate} className="mb-4 flex flex-wrap gap-2">
@@ -307,7 +310,7 @@ function CategoriesSection() {
           </div>
         )}
       </Modal>
-    </section>
+    </CollapsibleCard>
   );
 }
 
@@ -498,13 +501,12 @@ function RecurringSection() {
   return (
     <>
       {/* Gastos recurrentes */}
-      <section className="card p-5">
-        <h2 className="mb-1 text-base font-semibold tracking-tight">Gastos recurrentes</h2>
-        <p className="mb-4 text-xs text-ink-muted">
-          Suscripciones, renta, servicios. Se generan solos y aparecen en
-          &ldquo;Por confirmar&rdquo;.
-        </p>
-        <form onSubmit={handleCreateExpense} className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-6">
+      <CollapsibleCard
+        className="@container"
+        title="Gastos recurrentes"
+        description={<>Suscripciones, renta, servicios. Se generan solos y aparecen en &ldquo;Por confirmar&rdquo;.</>}
+      >
+        <form onSubmit={handleCreateExpense} className="mb-4 grid grid-cols-2 gap-2 @2xl:grid-cols-6">
           <input
             className="input col-span-2"
             placeholder="Descripción (p. ej. Spotify)"
@@ -565,16 +567,15 @@ function RecurringSection() {
           onToggle={handleToggle}
           onDelete={setDeletingRule}
         />
-      </section>
+      </CollapsibleCard>
 
       {/* Ingresos recurrentes */}
-      <section className="card p-5">
-        <h2 className="mb-1 text-base font-semibold tracking-tight">Ingresos recurrentes</h2>
-        <p className="mb-4 text-xs text-ink-muted">
-          Nómina, freelance, rentas cobradas. Se generan solos y aparecen en
-          &ldquo;Por confirmar&rdquo;.
-        </p>
-        <form onSubmit={handleCreateIncome} className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-6">
+      <CollapsibleCard
+        className="@container"
+        title="Ingresos recurrentes"
+        description={<>Nómina, freelance, rentas cobradas. Se generan solos y aparecen en &ldquo;Por confirmar&rdquo;.</>}
+      >
+        <form onSubmit={handleCreateIncome} className="mb-4 grid grid-cols-2 gap-2 @2xl:grid-cols-6">
           <input
             className="input col-span-2"
             placeholder="Descripción (p. ej. Nómina)"
@@ -635,7 +636,7 @@ function RecurringSection() {
           onToggle={handleToggle}
           onDelete={setDeletingRule}
         />
-      </section>
+      </CollapsibleCard>
 
       {/* Modal: editar regla recurrente */}
       <Modal
@@ -772,11 +773,17 @@ function RecurringSection() {
 
 export default function SettingsPage() {
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <MembersSection />
-      <CategoriesSection />
-      <RecurringSection />
-      <ImportSection />
+    <div className="page">
+      <div>
+        <h1 className="page-title">Ajustes</h1>
+        <p className="page-subtitle">Abre la sección que quieras configurar.</p>
+      </div>
+      <div className="space-y-3">
+        <MembersSection />
+        <CategoriesSection />
+        <RecurringSection />
+        <ImportSection />
+      </div>
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   useMembers,
   useRemoveMember,
 } from "../../api/spaces";
+import CollapsibleCard from "../../components/ui/CollapsibleCard";
 import { useSpace } from "./SpaceProvider";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -58,13 +59,14 @@ export default function MembersSection() {
   }
 
   return (
-    <section className="card p-5">
-      <h2 className="mb-1 text-base font-semibold tracking-tight">Espacio: {activeSpace.name}</h2>
-      <p className="mb-4 text-xs text-ink-muted">
-        {isShared
+    <CollapsibleCard
+      title={`Espacio: ${activeSpace.name}`}
+      description={
+        isShared
           ? "Espacio compartido — los miembros ven y registran según su rol."
-          : "Tu espacio personal es solo tuyo; crea uno compartido para invitar a alguien."}
-      </p>
+          : "Tu espacio personal es solo tuyo; crea uno compartido para invitar a alguien."
+      }
+    >
 
       {/* Miembros (ESP-03) */}
       <ul className="mb-4 divide-y divide-line">
@@ -253,6 +255,6 @@ export default function MembersSection() {
           <ErrorText error={deleteSpace.error} />
         </form>
       )}
-    </section>
+    </CollapsibleCard>
   );
 }

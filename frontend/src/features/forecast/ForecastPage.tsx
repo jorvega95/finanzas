@@ -73,7 +73,7 @@ export default function ForecastPage() {
   const hasOverdraft = !!data?.first_overdraft_date;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Pronóstico de flujo</h1>
