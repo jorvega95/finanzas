@@ -73,6 +73,17 @@ async def get_account_layout(
     return layout
 
 
+# TAR-07: sections of the Accounts page (fixed by behavior), default order.
+ACCOUNT_GROUPS: tuple[str, ...] = ("cash", "savings", "credit", "loan")
+
+
+def resolve_group_order(saved: list[str] | None) -> list[str]:
+    """TAR-07: the full section order: unknown keys dropped, missing ones
+    appended in the default order."""
+    seen = [g for g in dict.fromkeys(saved or []) if g in ACCOUNT_GROUPS]
+    return seen + [g for g in ACCOUNT_GROUPS if g not in seen]
+
+
 def order_accounts(accounts: list[Account], layout_ids: list[str]) -> list[Account]:
     """TAR-07: order `accounts` by the user's saved layout; accounts not in the layout
     keep name order at the end. Pure list ordering (not a SQL aggregate), so it
@@ -87,9 +98,11 @@ async def set_account_layout(
     user_id: uuid.UUID,
     space_id: uuid.UUID,
     account_ids: list[uuid.UUID],
+    group_order: list[str] | None = None,
 ) -> None:
     """TAR-07: upsert the user's ordered list for the space, dropping ids that
-    don't belong to the space (defensive)."""
+    don't belong to the space (defensive). `group_order` None keeps the saved
+    section order."""
     valid = set(
         (await session.execute(select(Account.id).where(Account.space_id == space_id)))
         .scalars()
@@ -98,9 +111,14 @@ async def set_account_layout(
     ordered = [str(cid) for cid in account_ids if cid in valid]
     layout = await get_account_layout(session, user_id, space_id)
     if layout is None:
-        session.add(AccountLayout(user_id=user_id, space_id=space_id, account_ids=ordered))
+        layout = AccountLayout(user_id=user_id, space_id=space_id, account_ids=ordered)
+        session.add(layout)
     else:
         layout.account_ids = ordered
+    if group_order is not None:
+        layout.group_order = resolve_group_order(group_order)
+    elif layout.group_order is None:
+        layout.group_order = []
     await session.commit()
 
 

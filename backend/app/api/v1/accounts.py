@@ -15,6 +15,7 @@ from app.models.catalogs import BALANCE_BEHAVIORS, AccountBehavior
 from app.models.spaces import Space
 from app.schemas.accounts import (
     AccountCreate,
+    AccountLayoutOut,
     AccountLayoutUpdate,
     AccountOut,
     AccountUpdate,
@@ -76,6 +77,19 @@ async def list_accounts(
     return [await _account_with_debt(db, space, account) for account in accounts]
 
 
+@router.get("/layout", response_model=AccountLayoutOut)
+async def get_account_layout(
+    db: DbSession, space_and_member: ActiveSpace, user: CurrentUser
+) -> AccountLayoutOut:
+    """TAR-07: the current user's account and section order for the active space."""
+    space, _ = space_and_member
+    layout = await svc.get_account_layout(db, user.id, space.id)
+    return AccountLayoutOut(
+        account_ids=[uuid.UUID(i) for i in (layout.account_ids if layout else [])],
+        group_order=svc.resolve_group_order(layout.group_order if layout else None),
+    )
+
+
 @router.put("/layout", status_code=status.HTTP_204_NO_CONTENT)
 async def set_account_layout(
     db: DbSession,
@@ -87,7 +101,7 @@ async def set_account_layout(
     UI preference (not shared domain data), so any member may set it — ActiveSpace,
     not EditorSpace. Non-members get 404 upstream (GLO-05)."""
     space, _ = space_and_member
-    await svc.set_account_layout(db, user.id, space.id, payload.account_ids)
+    await svc.set_account_layout(db, user.id, space.id, payload.account_ids, payload.group_order)
 
 
 @router.post("", response_model=AccountOut, status_code=status.HTTP_201_CREATED)

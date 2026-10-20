@@ -208,20 +208,38 @@ export function usePayCard() {
   });
 }
 
-// TAR-07: persist the current user's account order. Raw request so it can be
-// fired during unmount (auto-save on leaving the module) without depending on
-// a mutation hook's lifecycle.
-export function saveAccountLayoutRequest(accountIds: string[]) {
+// TAR-07: secciones de la página Cuentas (fijas por behavior), orden default.
+export type AccountGroupKey = "cash" | "savings" | "credit" | "loan";
+export const DEFAULT_GROUP_ORDER: AccountGroupKey[] = ["cash", "savings", "credit", "loan"];
+
+export interface AccountLayout {
+  account_ids: string[];
+  group_order: AccountGroupKey[];
+}
+
+export function useAccountLayout() {
+  return useQuery({
+    // Bajo "accounts" para que cualquier invalidación de cuentas lo refresque.
+    queryKey: ["accounts", "layout"],
+    queryFn: () => api<AccountLayout>("/api/v1/accounts/layout"),
+  });
+}
+
+// TAR-07: persist the current user's account (and section) order. Raw request
+// so it can be fired during unmount (auto-save on leaving the module) without
+// depending on a mutation hook's lifecycle.
+export function saveAccountLayoutRequest(accountIds: string[], groupOrder?: AccountGroupKey[]) {
   return api("/api/v1/accounts/layout", {
     method: "PUT",
-    body: JSON.stringify({ account_ids: accountIds }),
+    body: JSON.stringify({ account_ids: accountIds, group_order: groupOrder }),
   });
 }
 
 export function useSaveAccountLayout() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (accountIds: string[]) => saveAccountLayoutRequest(accountIds),
+    mutationFn: ({ accountIds, groupOrder }: { accountIds: string[]; groupOrder?: AccountGroupKey[] }) =>
+      saveAccountLayoutRequest(accountIds, groupOrder),
     // Only the order changed: invalidate just accounts, not the broad debt/MSI set.
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["accounts"] }),
   });

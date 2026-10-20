@@ -72,9 +72,18 @@ class AccountUpdate(BaseModel):
 
 class AccountLayoutUpdate(BaseModel):
     """TAR-07: full ordered list of account ids for the current user in the space.
-    Ids not belonging to the space are ignored; missing accounts keep name order."""
+    Ids not belonging to the space are ignored; missing accounts keep name order.
+    `group_order` (sections) is optional: omitted keeps the saved one."""
 
     account_ids: list[uuid.UUID]
+    group_order: list[str] | None = None
+
+
+class AccountLayoutOut(BaseModel):
+    """TAR-07: the user's layout; group_order always lists every section."""
+
+    account_ids: list[uuid.UUID]
+    group_order: list[str]
 
 
 class CashBalanceAdjust(BaseModel):

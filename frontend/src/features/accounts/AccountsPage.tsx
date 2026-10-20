@@ -24,6 +24,8 @@ import {
   isLoan,
   isPlastic,
   saveAccountLayoutRequest,
+  DEFAULT_GROUP_ORDER,
+  useAccountLayout,
   useAccounts,
   useAdjustCashBalance,
   useCloseCycles,
@@ -35,6 +37,7 @@ import {
   useUpdateAccount,
   type AccountBehavior,
   type AccountBody,
+  type AccountGroupKey,
   type AccountOut,
   type AccountUpdateBody,
   type StatementOut,
@@ -46,7 +49,7 @@ import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
 import Spinner from "../../components/ui/Spinner";
 import AccountDesigner, { type AccountDesign } from "./AccountDesigner";
-import AccountVisual from "./AccountVisual";
+import AccountVisual, { defaultColorFor } from "./AccountVisual";
 
 const STATUS_LABELS: Record<StatementOut["status"], string> = {
   open: "Abierto",
@@ -64,25 +67,46 @@ const BEHAVIOR_LABELS: Record<AccountBehavior, string> = {
   loan: "Préstamo personal",
 };
 
-// Secciones de la página; el orden dentro de cada una respeta TAR-07.
-const GROUPS: { title: string; hint: string; behaviors: AccountBehavior[] }[] = [
+// Secciones de la página (TAR-07): fijas por behavior; su orden y el de las
+// cuentas dentro de cada una son preferencia de cada usuario.
+type AccountGroup = {
+  key: AccountGroupKey;
+  title: string;
+  hint: string;
+  behaviors: AccountBehavior[];
+};
+const GROUPS: AccountGroup[] = [
   {
+    key: "cash",
     title: "Efectivo y cuentas",
     hint: "Efectivo, débito, billeteras digitales y vales.",
     behaviors: ["cash", "debit", "prepaid"],
   },
-  { title: "Ahorro", hint: "Dinero apartado; no cuenta como disponible.", behaviors: ["savings"] },
   {
+    key: "savings",
+    title: "Ahorro",
+    hint: "Dinero apartado; no cuenta como disponible.",
+    behaviors: ["savings"],
+  },
+  {
+    key: "credit",
     title: "Tarjetas de crédito",
     hint: "Ciclos de corte, pagos y deuda.",
     behaviors: ["credit"],
   },
   {
+    key: "loan",
     title: "Préstamos",
     hint: "Dinero que debes a alguien o que te deben; no cuenta como disponible.",
     behaviors: ["loan"],
   },
 ];
+
+const GROUP_BY_KEY = new Map(GROUPS.map((g) => [g.key, g]));
+
+function groupKeyOf(behavior: AccountBehavior | null): AccountGroupKey | null {
+  return GROUPS.find((g) => behavior && g.behaviors.includes(behavior))?.key ?? null;
+}
 
 const CURRENCIES = ["MXN", "USD"];
 
@@ -956,32 +980,115 @@ function StatementsDetail({ card, sources }: { card: AccountOut; sources: Accoun
   );
 }
 
-// TAR-07: a draggable row used only inside the reorder mode.
+// TAR-07: lo que se muestra a la derecha de una fila compacta del modo ordenar.
+function compactAmount(account: AccountOut): string | null {
+  if (account.behavior === "credit") {
+    return account.debt ? `debe ${formatMoney(account.debt.total_debt, account.currency)}` : null;
+  }
+  return account.balance !== null ? formatMoney(account.balance, account.currency) : null;
+}
+
+// TAR-07: fila compacta y arrastrable, solo dentro de su sección.
 function SortableAccountRow({ account }: { account: AccountOut }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: account.id,
   });
-  const style = { transform: CSS.Transform.toString(transform), transition };
+  // Solo traslación: Transform incluye el scale con que dnd-kit iguala alturas
+  // distintas, y estiraba la fila/sección al pasar sobre otra más grande.
+  const style = { transform: CSS.Translate.toString(transform), transition };
+  const color = account.color ?? defaultColorFor(account.behavior, account.last4);
+  const amount = compactAmount(account);
   return (
     <li
       ref={setNodeRef}
       style={style}
-      className={`card flex items-center gap-4 p-3 ${isDragging ? "z-10 ring-2 ring-accent" : ""}`}
+      className={`flex items-center gap-2.5 rounded-lg border border-line bg-surface px-2 py-1.5 ${
+        isDragging ? "relative z-10 shadow-lg ring-2 ring-accent" : ""
+      } ${account.is_active ? "" : "opacity-60"}`}
     >
       <button
         type="button"
-        className="cursor-grab touch-none rounded-md p-1 text-ink-subtle hover:bg-muted hover:text-ink"
-        aria-label="Arrastrar para reordenar"
+        className="cursor-grab touch-none rounded p-1 text-ink-subtle hover:bg-muted hover:text-ink"
+        aria-label={`Arrastrar ${account.name}`}
         {...attributes}
         {...listeners}
       >
-        <Icon name="grip" />
+        <Icon name="grip" className="size-3.5" />
       </button>
-      <AccountVisual {...account} inactive={!account.is_active} className="w-24 shrink-0" />
-      <div className="min-w-0">
-        <p className="truncate font-medium">{account.name}</p>
-        <p className="truncate text-xs text-ink-muted">{accountSummary(account)}</p>
+      <span
+        aria-hidden
+        className="size-3 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/15"
+        style={{ backgroundColor: color }}
+      />
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">{account.name}</span>
+      {account.last4 && <span className="hidden text-xs text-ink-subtle sm:inline">····{account.last4}</span>}
+      {amount && <span className="tabular shrink-0 text-xs text-ink-muted">{amount}</span>}
+    </li>
+  );
+}
+
+// TAR-07: sección arrastrable (desde su encabezado) con sus cuentas, que se
+// reordenan en su propio contexto: una cuenta no puede cambiar de sección.
+function SortableGroup({
+  group,
+  items,
+  sensors,
+  onReorder,
+}: {
+  group: AccountGroup;
+  items: AccountOut[];
+  sensors: ReturnType<typeof useSensors>;
+  onReorder: (items: AccountOut[]) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: `group:${group.key}`,
+  });
+  // Solo traslación: Transform incluye el scale con que dnd-kit iguala alturas
+  // distintas, y estiraba la fila/sección al pasar sobre otra más grande.
+  const style = { transform: CSS.Translate.toString(transform), transition };
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const from = items.findIndex((a) => a.id === active.id);
+    const to = items.findIndex((a) => a.id === over.id);
+    if (from >= 0 && to >= 0) onReorder(arrayMove(items, from, to));
+  }
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={`card p-3 ${isDragging ? "relative z-20 shadow-xl ring-2 ring-accent" : ""}`}
+    >
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="cursor-grab touch-none rounded-md p-1 text-ink-subtle hover:bg-muted hover:text-ink"
+          aria-label={`Arrastrar la sección ${group.title}`}
+          {...attributes}
+          {...listeners}
+        >
+          <Icon name="grip" />
+        </button>
+        <h3 className="text-sm font-semibold tracking-tight">{group.title}</h3>
+        <span className="text-xs text-ink-muted">
+          {items.length} {items.length === 1 ? "cuenta" : "cuentas"}
+        </span>
       </div>
+      {items.length > 0 ? (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={items.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+            <ul className="mt-2 space-y-1 pl-8">
+              {items.map((account) => (
+                <SortableAccountRow key={account.id} account={account} />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
+      ) : (
+        <p className="mt-1 pl-9 text-xs text-ink-subtle">Sin cuentas en esta sección.</p>
+      )}
     </li>
   );
 }
@@ -1225,62 +1332,93 @@ export default function AccountsPage() {
   );
 
   // TAR-07: reorder mode. Gated by a button; drag is active only inside it.
+  // Sections and the accounts inside each one are ordered independently.
   const qc = useQueryClient();
+  const layout = useAccountLayout();
+  const groupOrder = layout.data?.group_order ?? DEFAULT_GROUP_ORDER;
+  const orderedGroups = groupOrder
+    .map((key) => GROUP_BY_KEY.get(key))
+    .filter((g): g is AccountGroup => g !== undefined);
   const saveLayout = useSaveAccountLayout();
   const [reordering, setReordering] = useState(false);
-  const [draftOrder, setDraftOrder] = useState<AccountOut[]>([]);
+  const [draftGroups, setDraftGroups] = useState<AccountGroupKey[]>([]);
+  const [draftItems, setDraftItems] = useState<Record<AccountGroupKey, AccountOut[]>>({
+    cash: [],
+    savings: [],
+    credit: [],
+    loan: [],
+  });
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  function groupItems(source: AccountOut[]): Record<AccountGroupKey, AccountOut[]> {
+    const items: Record<AccountGroupKey, AccountOut[]> = { cash: [], savings: [], credit: [], loan: [] };
+    for (const account of source) {
+      const key = groupKeyOf(account.behavior);
+      if (key) items[key].push(account);
+    }
+    return items;
+  }
 
   function startReorder() {
     setExpanded(null);
     setEditing(null);
-    setDraftOrder(list);
+    setDraftGroups(groupOrder);
+    setDraftItems(groupItems(list));
     setReordering(true);
   }
 
-  function handleDragEnd(e: DragEndEvent) {
+  function handleGroupDragEnd(e: DragEndEvent) {
     const { active, over } = e;
-    if (over && active.id !== over.id) {
-      setDraftOrder((items) => {
-        const from = items.findIndex((a) => a.id === active.id);
-        const to = items.findIndex((a) => a.id === over.id);
-        return arrayMove(items, from, to);
-      });
-    }
+    if (!over || active.id === over.id) return;
+    setDraftGroups((groups) => {
+      const from = groups.indexOf(String(active.id).replace("group:", "") as AccountGroupKey);
+      const to = groups.indexOf(String(over.id).replace("group:", "") as AccountGroupKey);
+      return from >= 0 && to >= 0 ? arrayMove(groups, from, to) : groups;
+    });
+  }
+
+  function draftAccountIds(groups: AccountGroupKey[], items: Record<AccountGroupKey, AccountOut[]>) {
+    return groups.flatMap((key) => items[key].map((a) => a.id));
   }
 
   function saveReorder() {
-    const ordered = draftOrder;
+    const groups = draftGroups;
+    const ordered = groups.flatMap((key) => draftItems[key]);
     setReordering(false);
     // Reflect the new order in the cache right away; the mutation's
     // invalidation refetches in the background to confirm.
     qc.setQueryData<AccountOut[]>(["accounts", { includeInactive: showInactive }], ordered);
-    saveLayout.mutate(ordered.map((a) => a.id));
+    qc.setQueryData(["accounts", "layout"], {
+      account_ids: ordered.map((a) => a.id),
+      group_order: groups,
+    });
+    saveLayout.mutate({ accountIds: ordered.map((a) => a.id), groupOrder: groups });
   }
 
   function cancelReorder() {
     setReordering(false);
-    setDraftOrder([]);
   }
 
   // Auto-save on leaving the module with unsaved order (TAR-07). A ref holds the
   // latest state so the unmount cleanup can fire a raw request even though the
   // component (and its mutation hook) is gone.
-  const autoSaveRef = useRef<{ active: boolean; ids: string[]; baseline: string[] }>({
-    active: false,
-    ids: [],
-    baseline: [],
-  });
+  const autoSaveRef = useRef<{
+    active: boolean;
+    ids: string[];
+    groups: AccountGroupKey[];
+    baseline: string;
+  }>({ active: false, ids: [], groups: [], baseline: "" });
   autoSaveRef.current = {
     active: reordering,
-    ids: draftOrder.map((a) => a.id),
-    baseline: list.map((a) => a.id),
+    ids: draftAccountIds(draftGroups, draftItems),
+    groups: draftGroups,
+    baseline: JSON.stringify([list.map((a) => a.id), groupOrder]),
   };
   useEffect(() => {
     return () => {
-      const { active, ids, baseline } = autoSaveRef.current;
-      if (active && ids.length > 0 && JSON.stringify(ids) !== JSON.stringify(baseline)) {
-        void saveAccountLayoutRequest(ids)
+      const { active, ids, groups, baseline } = autoSaveRef.current;
+      if (active && groups.length > 0 && JSON.stringify([ids, groups]) !== baseline) {
+        void saveAccountLayoutRequest(ids, groups)
           .then(() => qc.invalidateQueries({ queryKey: ["accounts"] }))
           .catch(() => {});
       }
@@ -1357,8 +1495,8 @@ export default function AccountsPage() {
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-ink-muted">
-              Arrastra para reordenar. Este orden es solo tuyo; si sales sin guardar, también se
-              conserva.
+              Arrastra las secciones desde su encabezado y las cuentas dentro de cada una. Este
+              orden es solo tuyo; si sales sin guardar, también se conserva.
             </p>
             <div className="flex gap-2">
               <button className="btn-secondary" onClick={cancelReorder}>
@@ -1369,12 +1507,25 @@ export default function AccountsPage() {
               </button>
             </div>
           </div>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={draftOrder.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
+            <SortableContext
+              items={draftGroups.map((key) => `group:${key}`)}
+              strategy={verticalListSortingStrategy}
+            >
               <ul className="space-y-2">
-                {draftOrder.map((account) => (
-                  <SortableAccountRow key={account.id} account={account} />
-                ))}
+                {draftGroups.map((key) => {
+                  const group = GROUP_BY_KEY.get(key);
+                  if (!group) return null;
+                  return (
+                    <SortableGroup
+                      key={key}
+                      group={group}
+                      items={draftItems[key]}
+                      sensors={sensors}
+                      onReorder={(items) => setDraftItems((all) => ({ ...all, [key]: items }))}
+                    />
+                  );
+                })}
               </ul>
             </SortableContext>
           </DndContext>
@@ -1393,7 +1544,7 @@ export default function AccountsPage() {
         </div>
       ) : (
         <div className="space-y-8">
-          {GROUPS.map((group) => {
+          {orderedGroups.map((group) => {
             const items = list.filter((a) => a.behavior && group.behaviors.includes(a.behavior));
             return (
               <div key={group.title} className="space-y-3">

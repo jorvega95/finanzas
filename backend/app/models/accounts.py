@@ -120,7 +120,8 @@ class Account(Base, AuditMixin):
 
 class AccountLayout(Base):
     """TAR-07: per-user ordering of accounts within a space, stored as an
-    ordered list of account ids (one row per user+space). Accounts absent from
+    ordered list of account ids plus the order of the page sections (one row
+    per user+space). Accounts absent from
     the list fall back to name order at the end; ids no longer present are
     ignored. This is a personal UI preference, not shared domain data, so any
     member (incl. viewer) may set their own layout."""
@@ -137,6 +138,8 @@ class AccountLayout(Base):
     )
     # Ordered account ids as strings (JSON-portable; UUIDs don't serialize natively).
     account_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # Ordered page sections (ACCOUNT_GROUPS keys); empty = default order.
+    group_order: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
 
 
 class Statement(Base):

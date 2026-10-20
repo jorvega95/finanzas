@@ -483,6 +483,34 @@ async def test_tar07_viewer_can_reorder_and_nonmember_404(client):
     assert res.status_code == 404
 
 
+async def test_tar07_section_order(client):
+    """TAR-07: the section order is saved per user; unknown keys are dropped,
+    missing ones appended in the default order, and omitting it keeps it."""
+    ctx = await bootstrap_space(client)
+    res = await client.get("/api/v1/accounts/layout", headers=ctx["headers"])
+    assert res.status_code == 200
+    assert res.json() == {
+        "account_ids": [],
+        "group_order": ["cash", "savings", "credit", "loan"],
+    }
+
+    a = await create_card_for(client, ctx["headers"], "Alfa")
+    res = await client.put(
+        "/api/v1/accounts/layout",
+        headers=ctx["headers"],
+        json={"account_ids": [a["id"]], "group_order": ["credit", "bogus", "loan", "credit"]},
+    )
+    assert res.status_code == 204
+    body = (await client.get("/api/v1/accounts/layout", headers=ctx["headers"])).json()
+    assert body["group_order"] == ["credit", "loan", "cash", "savings"]
+    assert body["account_ids"] == [a["id"]]
+
+    # Saving only the accounts keeps the saved section order.
+    await put_layout(client, ctx["headers"], [a["id"]])
+    body = (await client.get("/api/v1/accounts/layout", headers=ctx["headers"])).json()
+    assert body["group_order"] == ["credit", "loan", "cash", "savings"]
+
+
 # --- TDC-14: opening debt --------------------------------------------------------
 
 
