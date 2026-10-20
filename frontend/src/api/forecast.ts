@@ -12,6 +12,8 @@ export interface ForecastEvent {
     | "manual_expense"
     | "loan_in" // TAR-11: recibes lo prestado
     | "loan_out" // TAR-11: abonas a un préstamo
+    | "savings_in" // PRO-07: retiro del ahorro
+    | "savings_out" // PRO-07: apartado al ahorro
     | "commitment"; // CXP-07: pago pendiente a un proveedor
   direction: "in" | "out";
   description: string;
@@ -43,17 +45,20 @@ export interface ForecastSummary {
   alerts: ForecastAlert[];
   // CXP-07: pendientes con proveedores sin fecha (no entran a la serie).
   undated_commitments: { description: string; amount: string; currency: string }[];
+  include_savings: boolean; // PRO-08
+  savings_included: string; // PRO-08: parte de la caja inicial que es ahorro
 }
 
-export function useForecast(horizonMonths: number, cashAdjustment: string) {
+export function useForecast(horizonMonths: number, cashAdjustment: string, includeSavings = false) {
   // GLO-01: el ajuste viaja como string decimal; nunca aritmética float aquí.
   const adjustment = cashAdjustment.trim() === "" ? "0" : cashAdjustment;
   return useQuery({
-    queryKey: ["forecast", horizonMonths, adjustment],
+    queryKey: ["forecast", horizonMonths, adjustment, { includeSavings }],
     queryFn: () =>
       api<ForecastSummary>(
         `/api/v1/dashboard/forecast?horizon_months=${horizonMonths}` +
-          `&cash_adjustment=${encodeURIComponent(adjustment)}`,
+          `&cash_adjustment=${encodeURIComponent(adjustment)}` +
+          (includeSavings ? "&include_savings=true" : ""),
       ),
   });
 }

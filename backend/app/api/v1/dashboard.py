@@ -83,10 +83,16 @@ async def forecast(
     space_and_member: ActiveSpace,
     horizon_months: Annotated[int, Query(ge=1, le=24)] = 6,
     cash_adjustment: Annotated[Decimal, Query()] = Decimal("0"),
+    include_savings: bool = False,
 ) -> ForecastSummary:
-    """PRO-01..06: pronóstico de flujo a futuro y detección de sobregiro."""
+    """PRO-01..08: pronóstico de flujo a futuro y detección de sobregiro.
+    `include_savings` (PRO-08) cuenta el ahorro como dinero disponible."""
     space, _ = space_and_member
     result = await forecast_svc.forecast(
-        db, space, horizon_months=horizon_months, cash_adjustment=cash_adjustment
+        db,
+        space,
+        horizon_months=horizon_months,
+        cash_adjustment=cash_adjustment,
+        include_savings=include_savings,
     )
     return ForecastSummary(**result)

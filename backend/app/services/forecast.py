@@ -52,7 +52,8 @@ def add_months(d: dt.date, months: int) -> dt.date:
 class _Event:
     date: dt.date
     kind: str  # income | recurring_income | card_due | recurring_expense | manual_expense
-    # | loan_in | loan_out (TAR-11) | commitment (CXP-07)
+    # | loan_in | loan_out (TAR-11) | savings_in | savings_out (PRO-07)
+    # | commitment (CXP-07)
     direction: str  # in | out
     description: str
     amount: Decimal  # base, magnitud positiva
@@ -111,6 +112,38 @@ async def _credit_account_ids(session: AsyncSession, space_id: uuid.UUID) -> set
 LIQUID_BEHAVIORS = (AccountBehavior.debit, AccountBehavior.prepaid, AccountBehavior.cash)
 
 
+@dataclass
+class _Perimeter:
+    """PRO-07/08: qué cuentas son "el dinero disponible" en este pronóstico.
+
+    liquid   cuentas cuya caja se proyecta (efectivo/débito/prepago, y ahorro
+             si `include_savings`).
+    outside  cuentas con saldo fuera del perímetro (préstamos siempre; ahorro
+             si no se incluye): lo que pasa dentro de ellas no es flujo, y una
+             transferencia que cruza la frontera sí lo es.
+    """
+
+    liquid_behaviors: tuple[AccountBehavior, ...]
+    liquid: set[uuid.UUID]
+    outside: set[uuid.UUID]
+    savings: set[uuid.UUID]
+
+
+async def _perimeter(
+    session: AsyncSession, space_id: uuid.UUID, include_savings: bool
+) -> _Perimeter:
+    behaviors = LIQUID_BEHAVIORS + ((AccountBehavior.savings,) if include_savings else ())
+    outside_behaviors: tuple[AccountBehavior, ...] = (AccountBehavior.loan,) + (
+        () if include_savings else (AccountBehavior.savings,)
+    )
+    return _Perimeter(
+        liquid_behaviors=behaviors,
+        liquid=await _account_ids(session, space_id, behaviors),
+        outside=await _account_ids(session, space_id, outside_behaviors),
+        savings=await _account_ids(session, space_id, (AccountBehavior.savings,)),
+    )
+
+
 async def _account_ids(
     session: AsyncSession, space_id: uuid.UUID, behaviors: tuple[AccountBehavior, ...]
 ) -> set[uuid.UUID]:
@@ -123,11 +156,15 @@ async def _account_ids(
 
 
 async def _as_of_balance(
-    session: AsyncSession, rates: _RateCache, space: Space, today: dt.date
+    session: AsyncSession,
+    rates: _RateCache,
+    space: Space,
+    today: dt.date,
+    behaviors: tuple[AccountBehavior, ...] = LIQUID_BEHAVIORS,
 ) -> Decimal:
-    """PRO-02: caja líquida a hoy = Σ saldos (TAR-05) de cuentas líquidas
-    activas, acotados a date <= hoy (el saldo actual, no el all-time que
-    incluye movimientos futuros). Convertida a base (PRO-06)."""
+    """PRO-02: caja líquida a hoy = Σ saldos (TAR-05) de las cuentas activas
+    del perímetro (PRO-07/08), acotados a date <= hoy (el saldo actual, no el
+    all-time que incluye movimientos futuros). Convertida a base (PRO-06)."""
     accounts = (
         (
             await session.execute(
@@ -136,7 +173,7 @@ async def _as_of_balance(
                 .where(
                     Account.space_id == space.id,
                     Account.is_active.is_(True),
-                    AccountType.behavior.in_(LIQUID_BEHAVIORS),
+                    AccountType.behavior.in_(behaviors),
                 )
             )
         )
@@ -345,11 +382,12 @@ async def _income_events(
     space_id: uuid.UUID,
     today: dt.date,
     horizon_end: dt.date,
+    outside: set[uuid.UUID],
 ) -> list[_Event]:
     """PRO-04: ingresos recurrentes (nómina) + ingresos futuros manuales.
-    Un ingreso en un préstamo (condonación, TAR-11) no es flujo de caja."""
+    Un ingreso en una cuenta fuera del perímetro (PRO-07: préstamo, o ahorro
+    si no se incluye) no es flujo de caja."""
     events: list[_Event] = []
-    loan_ids = await _account_ids(session, space_id, (AccountBehavior.loan,))
     rules = (
         (
             await session.execute(
@@ -364,7 +402,7 @@ async def _income_events(
         .all()
     )
     for rule in rules:
-        if rule.account_id in loan_ids:
+        if rule.account_id in outside:
             continue
         for occ in occurrences(rule, horizon_end):
             if occ <= today:
@@ -400,7 +438,7 @@ async def _income_events(
         .all()
     )
     for txn in future:
-        if txn.account_id in loan_ids:
+        if txn.account_id in outside:
             continue
         events.append(
             _Event(
@@ -421,16 +459,17 @@ async def _non_credit_expense_events(
     space_id: uuid.UUID,
     today: dt.date,
     horizon_end: dt.date,
+    outside: set[uuid.UUID],
 ) -> list[_Event]:
     """PRO-03/TAR-04: salidas inmediatas (efectivo/débito/prepago): domiciliados
-    no-crédito + gastos futuros manuales sin statement. Un gasto que paga el
-    acreedor de un préstamo (TAR-11) no sale de tu caja."""
+    no-crédito + gastos futuros manuales sin statement. Un gasto en una cuenta
+    fuera del perímetro (PRO-07: lo que paga el acreedor de un préstamo, o un
+    gasto desde el ahorro si no se incluye) no sale de tu caja."""
     events: list[_Event] = []
-    loan_ids = await _account_ids(session, space_id, (AccountBehavior.loan,))
     for rule, rule_credit_id in await _active_expense_rules(session, space_id):
         if rule_credit_id is not None:
             continue  # crédito: va al statement proyectado, no es flujo inmediato
-        if rule.account_id in loan_ids:
+        if rule.account_id in outside:
             continue
         for occ in occurrences(rule, horizon_end):
             if occ <= today:
@@ -465,7 +504,7 @@ async def _non_credit_expense_events(
         .all()
     )
     for txn in future:
-        if txn.account_id in loan_ids:
+        if txn.account_id in outside:
             continue
         events.append(
             _Event(
@@ -480,20 +519,21 @@ async def _non_credit_expense_events(
     return events
 
 
-async def _loan_transfer_events(
+async def _boundary_transfer_events(
     session: AsyncSession,
     rates: _RateCache,
     space_id: uuid.UUID,
     today: dt.date,
     horizon_end: dt.date,
+    perimeter: _Perimeter,
 ) -> list[_Event]:
-    """PRO-03/TAR-11: transferencias futuras entre una cuenta líquida y un
-    préstamo. Abonar (líquida → préstamo) es salida; recibir lo prestado
-    (préstamo → líquida) es entrada, por el monto recibido (TXN-13)."""
-    loan_ids = await _account_ids(session, space_id, (AccountBehavior.loan,))
-    if not loan_ids:
+    """PRO-07/TAR-11: transferencias futuras que cruzan la frontera del
+    perímetro. Salir hacia un préstamo (abono) o hacia el ahorro no incluido
+    (apartar) es salida; volver de ellos es entrada, por el monto recibido
+    (TXN-13). Entre cuentas del mismo lado no hay flujo."""
+    if not perimeter.outside:
         return []
-    liquid_ids = await _account_ids(session, space_id, LIQUID_BEHAVIORS)
+    liquid_ids, outside = perimeter.liquid, perimeter.outside
     future = (
         (
             await session.execute(
@@ -510,13 +550,19 @@ async def _loan_transfer_events(
     )
     events: list[_Event] = []
     for txn in future:
-        if txn.account_id in liquid_ids and txn.account_to_id in loan_ids:
-            amount, currency, kind, direction = txn.amount, txn.currency, "loan_out", "out"
-        elif txn.account_id in loan_ids and txn.account_to_id in liquid_ids:
+        if txn.account_id in liquid_ids and txn.account_to_id in outside:
+            to_savings = txn.account_to_id in perimeter.savings
+            amount, currency, direction = txn.amount, txn.currency, "out"
+            kind = "savings_out" if to_savings else "loan_out"
+            label = "Apartado a ahorro" if to_savings else "Abono a préstamo"
+        elif txn.account_id in outside and txn.account_to_id in liquid_ids:
+            from_savings = txn.account_id in perimeter.savings
             received = txn.amount_to if txn.amount_to is not None else txn.amount
             target = await session.get(Account, txn.account_to_id)
             currency = target.currency if target is not None else txn.currency
-            amount, kind, direction = received, "loan_in", "in"
+            amount, direction = received, "in"
+            kind = "savings_in" if from_savings else "loan_in"
+            label = "Retiro de ahorro" if from_savings else "Préstamo recibido"
         else:
             continue
         events.append(
@@ -524,8 +570,7 @@ async def _loan_transfer_events(
                 date=txn.date,
                 kind=kind,
                 direction=direction,
-                description=txn.description
-                or ("Abono a préstamo" if direction == "out" else "Préstamo recibido"),
+                description=txn.description or label,
                 amount=to_money(await rates.to_base(amount, currency)),
                 currency=currency,
             )
@@ -581,18 +626,33 @@ async def forecast(
     *,
     horizon_months: int = 6,
     cash_adjustment: Decimal = ZERO,
+    include_savings: bool = False,
 ) -> dict[str, Any]:
-    """PRO-01..06: construye el pronóstico de flujo. Read-only (no commit)."""
+    """PRO-01..08: construye el pronóstico de flujo. Read-only (no commit).
+    `include_savings` (PRO-08) mete el ahorro al perímetro de liquidez."""
     today = today_in_tz(space.timezone)
     horizon_end = add_months(today, horizon_months)
     rates = _RateCache(session, space.base_currency, today)
+    perimeter = await _perimeter(session, space.id, include_savings)
 
-    starting_cash = to_money(await _as_of_balance(session, rates, space, today) + cash_adjustment)
+    savings_included = (
+        to_money(await _as_of_balance(session, rates, space, today, (AccountBehavior.savings,)))
+        if include_savings
+        else ZERO
+    )
+    starting_cash = to_money(
+        await _as_of_balance(session, rates, space, today, perimeter.liquid_behaviors)
+        + cash_adjustment
+    )
 
     events: list[_Event] = []
-    events += await _income_events(session, rates, space.id, today, horizon_end)
-    events += await _non_credit_expense_events(session, rates, space.id, today, horizon_end)
-    events += await _loan_transfer_events(session, rates, space.id, today, horizon_end)
+    events += await _income_events(session, rates, space.id, today, horizon_end, perimeter.outside)
+    events += await _non_credit_expense_events(
+        session, rates, space.id, today, horizon_end, perimeter.outside
+    )
+    events += await _boundary_transfer_events(
+        session, rates, space.id, today, horizon_end, perimeter
+    )
     commitment_events, undated_commitments = await _commitment_events(
         session, rates, space, today, horizon_end
     )
@@ -655,4 +715,6 @@ async def forecast(
         ],
         "alerts": alerts,
         "undated_commitments": undated_commitments,  # CXP-07
+        "include_savings": include_savings,  # PRO-08
+        "savings_included": savings_included,  # PRO-08: parte del saldo inicial
     }

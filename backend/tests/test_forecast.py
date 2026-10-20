@@ -262,3 +262,108 @@ async def test_pend02_future_refund_on_statement_not_double_counted(client):
     assert len(card_dues) == 1
     assert card_dues[0]["date"] == "2026-07-05"
     assert card_dues[0]["amount"] == "300.00"  # 500 - 200, no duplicado
+
+
+# --- PRO-07/08: perímetro de liquidez y toggle de ahorro --------------------------------
+
+
+async def _savings_case(client):
+    """Caso Lili: cuenta de ahorro con nómina quincenal de 6,200 y gasto
+    quincenal de 2,200 (le quedan 4,000 de ahorro); el débito tiene 1,000."""
+    from tests.test_wallets import make_account, post_txn
+
+    ctx = await bootstrap_space(client)
+    debit = ctx["accounts"]["Débito"]["id"]
+    banorte = await make_account(client, ctx, "Ahorro", "Banorte", initial_balance="10000.00")
+    await post_txn(
+        client,
+        ctx,
+        type="income",
+        date="2026-06-01",
+        amount="1000.00",
+        currency="MXN",
+        category_id=ctx["income_categories"]["Nómina"]["id"],
+        account_id=debit,
+    )
+    for rule_type, amount, description, category in (
+        ("income", "6200.00", "Nómina Lili", ctx["income_categories"]["Nómina"]["id"]),
+        ("expense", "2200.00", "Gastos Lili", ctx["categories"]["Otros"]["id"]),
+    ):
+        res = await client.post(
+            "/api/v1/recurring-rules",
+            headers=ctx["headers"],
+            json={
+                "type": rule_type,
+                "amount": amount,
+                "currency": "MXN",
+                "description": description,
+                "category_id": category,
+                "account_id": banorte["id"],
+                "frequency": "semimonthly",
+                "start_date": "2026-06-30",
+            },
+        )
+        assert res.status_code == 201, res.text
+    return ctx, debit, banorte
+
+
+@freeze_time("2026-06-20 12:00:00")
+async def test_pro07_savings_flows_stay_out_by_default(client):
+    """PRO-07: sin el toggle, ni el saldo ni los ingresos/gastos del ahorro
+    entran al pronóstico (antes se contaban los movimientos, no el saldo)."""
+    ctx, _, _ = await _savings_case(client)
+    body = await forecast(client, ctx, horizon_months=1)
+    assert body["include_savings"] is False
+    assert body["starting_cash"] == "1000.00"
+    assert body["savings_included"] == "0.00"
+    assert [e for e in body["events"] if "Lili" in e["description"]] == []
+
+
+@freeze_time("2026-06-20 12:00:00")
+async def test_pro08_toggle_brings_savings_in_consistently(client):
+    """PRO-08: con el toggle, el ahorro entra completo: saldo + sus flujos."""
+    ctx, _, _ = await _savings_case(client)
+    res = await client.get(
+        "/api/v1/dashboard/forecast?horizon_months=1&include_savings=true",
+        headers=ctx["headers"],
+    )
+    body = res.json()
+    assert body["include_savings"] is True
+    assert body["starting_cash"] == "11000.00"  # 1,000 débito + 10,000 ahorro
+    assert body["savings_included"] == "10000.00"
+    lili = [
+        (e["date"], e["direction"], e["amount"])
+        for e in body["events"]
+        if "Lili" in e["description"]
+    ]
+    assert lili == [
+        ("2026-06-30", "in", "6200.00"),
+        ("2026-06-30", "out", "2200.00"),
+        ("2026-07-15", "in", "6200.00"),
+        ("2026-07-15", "out", "2200.00"),
+    ]
+
+
+@freeze_time("2026-06-20 12:00:00")
+async def test_pro07_transfers_crossing_the_perimeter(client):
+    """PRO-07: apartar al ahorro es salida y retirar de él es entrada sin el
+    toggle; con el toggle son movimientos internos (no hay flujo)."""
+    from tests.test_wallets import post_txn, transfer
+
+    ctx, debit, banorte = await _savings_case(client)
+    await post_txn(client, ctx, **transfer(debit, banorte["id"], "500.00", "MXN", day="2026-07-01"))
+    await post_txn(client, ctx, **transfer(banorte["id"], debit, "300.00", "MXN", day="2026-07-02"))
+
+    body = await forecast(client, ctx, horizon_months=1)
+    moves = [
+        (e["kind"], e["direction"], e["amount"])
+        for e in body["events"]
+        if e["kind"].startswith("savings")
+    ]
+    assert moves == [("savings_out", "out", "500.00"), ("savings_in", "in", "300.00")]
+
+    res = await client.get(
+        "/api/v1/dashboard/forecast?horizon_months=1&include_savings=true",
+        headers=ctx["headers"],
+    )
+    assert [e for e in res.json()["events"] if e["kind"].startswith("savings")] == []

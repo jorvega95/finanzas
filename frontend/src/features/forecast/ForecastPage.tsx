@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { useForecast, type ForecastEvent } from "../../api/forecast";
 import { formatDate } from "../../lib/dates";
+import { useStoredToggle } from "../../lib/storedToggle";
 import { formatMoney } from "../../lib/money";
 import { useChartTheme } from "../../lib/chartTheme";
 import { useSpace } from "../spaces/SpaceProvider";
@@ -29,6 +30,8 @@ const KIND_LABEL: Record<ForecastEvent["kind"], string> = {
   manual_expense: "Gasto programado",
   loan_in: "Préstamo recibido",
   loan_out: "Abono a préstamo",
+  savings_in: "Retiro de ahorro",
+  savings_out: "Apartado a ahorro",
   commitment: "Pago a proveedor",
 };
 
@@ -40,6 +43,8 @@ const KIND_ICON: Record<ForecastEvent["kind"], IconName> = {
   manual_expense: "transactions",
   loan_in: "handshake",
   loan_out: "handshake",
+  savings_in: "piggy",
+  savings_out: "piggy",
   commitment: "party",
 };
 
@@ -51,7 +56,9 @@ export default function ForecastPage() {
   const [adjustmentInput, setAdjustmentInput] = useState("0");
   const [adjustment, setAdjustment] = useState("0");
 
-  const forecast = useForecast(horizon, adjustment);
+  // PRO-08: el ahorro entra completo (saldo + flujos) o no entra.
+  const [includeSavings, setIncludeSavings] = useStoredToggle("finanzas.forecastIncludeSavings");
+  const forecast = useForecast(horizon, adjustment, includeSavings);
   const data = forecast.data;
 
   const chartData = useMemo(() => {
@@ -91,7 +98,7 @@ export default function ForecastPage() {
         </div>
       </div>
 
-      {/* PRO-02: caja inicial = saldos de efectivo/débito/prepago + ajuste manual */}
+      {/* PRO-02/07: caja inicial = saldos del perímetro de liquidez + ajuste manual */}
       <section className="card flex flex-wrap items-end gap-4 p-5">
         <div>
           <label className="mb-1 block text-xs text-ink-muted">
@@ -114,8 +121,29 @@ export default function ForecastPage() {
           <div className="text-sm">
             <p className="text-xs text-ink-muted">Caja inicial estimada</p>
             <p className="text-lg font-semibold">{formatMoney(data.starting_cash, currency)}</p>
+            {data.include_savings && (
+              <p className="text-xs text-ink-muted">
+                incluye {formatMoney(data.savings_included, currency)} de ahorro
+              </p>
+            )}
           </div>
         )}
+        <label
+          className="ml-auto flex items-center gap-1.5 self-center text-sm text-ink-muted"
+          title="Cuenta el saldo y los movimientos de tus cuentas de ahorro como dinero disponible"
+        >
+          <input
+            type="checkbox"
+            checked={includeSavings}
+            onChange={(e) => setIncludeSavings(e.target.checked)}
+          />
+          Incluir ahorros
+        </label>
+        <p className="w-full text-xs text-ink-muted">
+          {includeSavings
+            ? "Con ahorros: ¿me alcanza si uso lo que tengo ahorrado? Mover dinero entre tus cuentas y el ahorro no cuenta."
+            : "Sin ahorros: ¿me alcanza sin tocarlos? Lo que pasa dentro de tus cuentas de ahorro y préstamos no cuenta; apartar o retirar del ahorro sí."}
+        </p>
       </section>
 
       {forecast.isLoading && (

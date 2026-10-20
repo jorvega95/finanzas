@@ -118,6 +118,8 @@ class ForecastSummary(BaseModel):
     events: list[ForecastEvent]
     alerts: list[ForecastAlert]
     undated_commitments: list[UndatedCommitment] = []  # CXP-07
+    include_savings: bool = False  # PRO-08
+    savings_included: MoneyOut = Decimal("0.00")  # PRO-08: ahorro dentro de starting_cash
 
 
 class BudgetCreate(BaseModel):
