@@ -246,3 +246,28 @@ async def test_glo07_local_mode_rejects_foreign_host_and_origin(monkeypatch):
 
     async with AsyncClient(transport=ASGITransport(app=local_app), base_url="http://evil.com") as c:
         assert (await c.get("/health")).status_code == 400
+
+
+async def test_glo07_trusted_hosts_extends_loopback(monkeypatch):
+    """TRUSTED_HOSTS admite el nombre de Tailscale sin abrir otros hosts."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.config import settings
+    from app.main import create_app
+
+    monkeypatch.setattr(settings, "auth_mode", "local")
+    monkeypatch.setattr(settings, "local_user_id", uuid.uuid4())
+    monkeypatch.setattr(settings, "trusted_hosts", "finanzas.tail1234.ts.net")
+    local_app = create_app()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=local_app), base_url="https://finanzas.tail1234.ts.net"
+    ) as c:
+        assert (await c.get("/health")).status_code == 200
+        ok = await c.get("/health", headers={"Origin": "https://finanzas.tail1234.ts.net"})
+        assert ok.status_code == 200
+        evil = await c.get("/health", headers={"Origin": "https://evil.com"})
+        assert evil.status_code == 403
+
+    async with AsyncClient(transport=ASGITransport(app=local_app), base_url="http://evil.com") as c:
+        assert (await c.get("/health")).status_code == 400

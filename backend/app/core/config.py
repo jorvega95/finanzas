@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     local_user_id: uuid.UUID | None = None
     local_user_email: str | None = None
     jwt_secret: str = ""
+    # GLO-07: hostnames extra (separados por coma) aceptados además de loopback,
+    # p. ej. el nombre MagicDNS de Tailscale detrás de `tailscale serve`.
+    trusted_hosts: str = ""
 
     # Frontend compilado (frontend/dist) servido por FastAPI (GLO-07). Vacío =
     # no se sirve (desarrollo con Vite en :5173).
@@ -36,6 +39,10 @@ class Settings(BaseSettings):
 
     # FX (FX-02)
     banxico_token: str = ""
+
+    @property
+    def trusted_host_list(self) -> list[str]:
+        return [h.strip().lower() for h in self.trusted_hosts.split(",") if h.strip()]
 
     @model_validator(mode="after")
     def _reject_dev_defaults(self) -> "Settings":

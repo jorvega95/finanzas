@@ -80,10 +80,13 @@ def create_app() -> FastAPI:
 def add_local_guards(app: FastAPI) -> None:
     """GLO-07: without auth, only the local browser may talk to the API.
 
-    - Host must be loopback: blocks DNS rebinding (evil.com -> 127.0.0.1).
-    - A present Origin must be loopback: blocks cross-site form/fetch POSTs
-      (CSRF) that the browser would send without a CORS preflight.
+    - Host must be loopback (or listed in TRUSTED_HOSTS): blocks DNS rebinding
+      (evil.com -> 127.0.0.1).
+    - A present Origin must be loopback (or listed in TRUSTED_HOSTS): blocks
+      cross-site form/fetch POSTs (CSRF) that the browser would send without a
+      CORS preflight.
     """
+    allowed = LOOPBACK_HOSTS | set(settings.trusted_host_list)
 
     @app.middleware("http")
     async def reject_foreign_origin(
@@ -92,11 +95,11 @@ def add_local_guards(app: FastAPI) -> None:
         origin = request.headers.get("origin")
         if origin is not None:
             host = origin.split("://", 1)[-1].rsplit(":", 1)[0].strip("[]")
-            if host not in LOOPBACK_HOSTS:
+            if host.lower() not in allowed:
                 return JSONResponse({"detail": "Forbidden origin"}, status_code=403)
         return await call_next(request)
 
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=sorted(LOOPBACK_HOSTS))
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=sorted(allowed))
 
 
 def mount_frontend(app: FastAPI, dist: Path) -> None:
