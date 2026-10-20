@@ -26,6 +26,7 @@ import {
   useDashboard,
   useDeleteBudget,
 } from "../../api/dashboard";
+import { useNetWorth } from "../../api/investments";
 import { useExcludeEvents } from "../../lib/excludeEvents";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
@@ -167,6 +168,7 @@ export default function DashboardPage() {
   const totals = data?.totals;
   const currency = activeSpace.base_currency;
   const chart = useChartTheme();
+  const lastNetWorth = (useNetWorth().data ?? []).at(-1); // DSH-07
 
   // DSH-06: cada rebanada es navegable; `key` conserva el valor de dominio.
   const natureData = Object.entries(data?.by_nature ?? {}).map(([key, value]) => ({
@@ -205,8 +207,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Totales del mes (DSH-02) */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      {/* Totales del mes (DSH-02) + patrimonio neto actual (DSH-07) */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
           ["Ingresos", totals?.income, "text-emerald-600 dark:text-emerald-400"],
           ["Gastos", totals?.expenses, "text-red-600 dark:text-red-400"],
@@ -219,6 +221,27 @@ export default function DashboardPage() {
             </p>
           </div>
         ))}
+        <div
+          className="card p-5"
+          title="Situación actual: activos − pasivos al último snapshot, sin importar el mes elegido"
+        >
+          <p className="text-sm text-ink-muted">Patrimonio neto (hoy)</p>
+          <p
+            className={`tabular mt-2 text-2xl font-semibold tracking-tight ${
+              lastNetWorth && Number(lastNetWorth.net_worth) < 0
+                ? "text-red-600 dark:text-red-400"
+                : ""
+            }`}
+          >
+            {lastNetWorth ? formatMoney(lastNetWorth.net_worth, currency) : "…"}
+          </p>
+          {lastNetWorth && (
+            <p className="tabular mt-1 text-xs text-ink-muted">
+              Activos {formatMoney(lastNetWorth.assets, currency)} · Pasivos{" "}
+              {formatMoney(lastNetWorth.liabilities, currency)}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* xl: tendencia, categoría y naturaleza en 2/3; próximos compromisos ocupa
