@@ -82,6 +82,28 @@ const TABS: { kind: RecurringKind; label: string; empty: string }[] = [
   },
 ];
 
+// Colores como en el dashboard: ingresos verde, gastos rojo.
+const GENERIC_GROUPS = [
+  {
+    type: "expense",
+    label: "Gastos",
+    empty: "Sin gastos recurrentes.",
+    border: "border-red-500/25",
+    header: "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300",
+    dot: "bg-red-500",
+    pill: "bg-red-500/15 text-red-700 dark:text-red-300",
+  },
+  {
+    type: "income",
+    label: "Ingresos",
+    empty: "Sin ingresos recurrentes.",
+    border: "border-emerald-500/25",
+    header: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    dot: "bg-emerald-500",
+    pill: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  },
+] as const;
+
 // REC-12: opciones de aviso (días antes del cobro).
 const REMINDER_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "Sin aviso" },
@@ -724,6 +746,57 @@ export default function SubscriptionsPage() {
   const current = TABS.find((t) => t.kind === tab)!;
   const s = summary.data;
 
+  function ruleList(group: RecurringRuleOut[]) {
+    return (
+      <ul className="divide-y divide-line">
+        {group.map((r) => (
+          <RuleRow
+            key={r.id}
+            rule={r}
+            accountName={accountNames.get(r.account_id) ?? ""}
+            onEdit={() => setModal({ rule: r, kind: r.kind })}
+            onDelete={() => setDeleting(r)}
+          />
+        ))}
+      </ul>
+    );
+  }
+
+  // "Otros recurrentes" se divide en gastos e ingresos (2 columnas en
+  // desktop, 1 en móvil); las demás pestañas solo tienen gastos (REC-07).
+  function renderRules() {
+    if (tab !== "generic") return ruleList(visible);
+    return (
+      <div className="grid gap-4 md:grid-cols-2">
+        {GENERIC_GROUPS.map((g) => {
+          const group = visible.filter((r) => r.type === g.type);
+          return (
+            <section key={g.type} className={`min-w-0 rounded-xl border ${g.border}`}>
+              <header
+                className={`flex items-center justify-between gap-2 rounded-t-xl border-b px-4 py-2.5 ${g.header}`}
+              >
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <span className={`size-2.5 rounded-full ${g.dot}`} aria-hidden />
+                  {g.label}
+                </h3>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${g.pill}`}>
+                  {group.length}
+                </span>
+              </header>
+              <div className="px-4">
+                {group.length > 0 ? (
+                  ruleList(group)
+                ) : (
+                  <p className="py-6 text-center text-sm text-ink-muted">{g.empty}</p>
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -840,37 +913,7 @@ export default function SubscriptionsPage() {
         ) : visible.length === 0 ? (
           <p className="py-8 text-center text-sm text-ink-muted">{current.empty}</p>
         ) : (
-          // "Otros recurrentes" se divide en gastos e ingresos; las demás
-          // pestañas solo tienen gastos (REC-07).
-          (tab === "generic"
-            ? ([
-                ["Gastos", visible.filter((r) => r.type === "expense")],
-                ["Ingresos", visible.filter((r) => r.type === "income")],
-              ] as const)
-            : ([[null, visible]] as const)
-          )
-            .filter(([, group]) => group.length > 0)
-            .map(([heading, group]) => (
-              <div key={heading ?? "all"} className="mt-3 first:mt-0">
-                {heading && (
-                  <h3 className="mt-2 text-xs font-medium uppercase tracking-wider text-ink-subtle">
-                    {heading}
-                    <span className="ml-1.5 normal-case tracking-normal">{group.length}</span>
-                  </h3>
-                )}
-                <ul className="divide-y divide-line">
-                  {group.map((r) => (
-                    <RuleRow
-                      key={r.id}
-                      rule={r}
-                      accountName={accountNames.get(r.account_id) ?? ""}
-                      onEdit={() => setModal({ rule: r, kind: r.kind })}
-                      onDelete={() => setDeleting(r)}
-                    />
-                  ))}
-                </ul>
-              </div>
-            ))
+          renderRules()
         )}
       </section>
 
