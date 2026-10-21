@@ -608,11 +608,6 @@ function RuleRow({
               {STATUS_LABELS[rule.status]}
             </span>
           )}
-          {rule.kind === "generic" && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-ink-muted">
-              {rule.type === "expense" ? "Gasto" : "Ingreso"}
-            </span>
-          )}
         </p>
         <p className="text-xs text-ink-muted">
           <span className="tabular">{price}</span> / {FREQ_SHORT[rule.frequency]}
@@ -845,17 +840,37 @@ export default function SubscriptionsPage() {
         ) : visible.length === 0 ? (
           <p className="py-8 text-center text-sm text-ink-muted">{current.empty}</p>
         ) : (
-          <ul className="divide-y divide-line">
-            {visible.map((r) => (
-              <RuleRow
-                key={r.id}
-                rule={r}
-                accountName={accountNames.get(r.account_id) ?? ""}
-                onEdit={() => setModal({ rule: r, kind: r.kind })}
-                onDelete={() => setDeleting(r)}
-              />
-            ))}
-          </ul>
+          // "Otros recurrentes" se divide en gastos e ingresos; las demás
+          // pestañas solo tienen gastos (REC-07).
+          (tab === "generic"
+            ? ([
+                ["Gastos", visible.filter((r) => r.type === "expense")],
+                ["Ingresos", visible.filter((r) => r.type === "income")],
+              ] as const)
+            : ([[null, visible]] as const)
+          )
+            .filter(([, group]) => group.length > 0)
+            .map(([heading, group]) => (
+              <div key={heading ?? "all"} className="mt-3 first:mt-0">
+                {heading && (
+                  <h3 className="mt-2 text-xs font-medium uppercase tracking-wider text-ink-subtle">
+                    {heading}
+                    <span className="ml-1.5 normal-case tracking-normal">{group.length}</span>
+                  </h3>
+                )}
+                <ul className="divide-y divide-line">
+                  {group.map((r) => (
+                    <RuleRow
+                      key={r.id}
+                      rule={r}
+                      accountName={accountNames.get(r.account_id) ?? ""}
+                      onEdit={() => setModal({ rule: r, kind: r.kind })}
+                      onDelete={() => setDeleting(r)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))
         )}
       </section>
 
