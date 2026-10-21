@@ -43,7 +43,14 @@ import {
   type StatementOut,
 } from "../../api/accounts";
 import { useAccountTypes } from "../../api/catalogs";
-import { formatMoney, isNegativeAmount, isPositiveAmount, subtractMoney, sumMoney } from "../../lib/money";
+import {
+  formatMoney,
+  isNegativeAmount,
+  isPositiveAmount,
+  sanitizeDecimal,
+  subtractMoney,
+  sumMoney,
+} from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
@@ -129,7 +136,7 @@ function MoneyInput({
       placeholder={placeholder}
       required={required}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => onChange(sanitizeDecimal(e.target.value))}
     />
   );
 }

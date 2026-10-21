@@ -6,7 +6,7 @@
 // entre monedas (monto recibido) y con comisión. EVT-02/05: evento opcional
 // por movimiento y filtro por evento. CXP-03: abonos a compromisos (filtro,
 // etiqueta y vínculo en la edición).
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useCategories } from "../../api/catalogs";
 import {
@@ -29,7 +29,7 @@ import {
 import { useEvents, useSetTransactionEvent } from "../../api/events";
 import { useCommitments } from "../../api/commitments";
 import { useSpace } from "../spaces/SpaceProvider";
-import { formatMoney, impliedRate, isPositiveAmount } from "../../lib/money";
+import { convertWithRate, formatMoney, impliedRate, isPositiveAmount, sanitizeDecimal } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
 import Icon from "../../components/ui/Icon";
@@ -137,6 +137,40 @@ function AccountOptions({
   );
 }
 
+// Enter dentro de un campo no guarda por accidente: solo el botón envía.
+function blockEnterSubmit(e: KeyboardEvent<HTMLFormElement>) {
+  if (e.key === "Enter" && e.target instanceof HTMLInputElement) e.preventDefault();
+}
+
+// TXN-14: comisión en la moneda de la cuenta origen.
+function FeeField({
+  source,
+  fee,
+  setFee,
+  className,
+  placeholder = "0.00",
+}: {
+  source: AccountOut | undefined;
+  fee: string;
+  setFee: (v: string) => void;
+  className?: string;
+  placeholder?: string;
+}) {
+  return (
+    <div className={className}>
+      <label className="label">Comisión{source ? ` (${source.currency})` : ""}</label>
+      <input
+        className="input"
+        inputMode="decimal"
+        pattern="^\d+(\.\d{1,2})?$"
+        placeholder={placeholder}
+        value={fee}
+        onChange={(e) => setFee(sanitizeDecimal(e.target.value))}
+      />
+    </div>
+  );
+}
+
 // TXN-13/14: monto recibido cuando las monedas difieren y comisión opcional.
 function TransferExtras({
   source,
@@ -146,6 +180,7 @@ function TransferExtras({
   setAmountTo,
   fee,
   setFee,
+  showFee = true,
 }: {
   source: AccountOut | undefined;
   target: AccountOut | undefined;
@@ -154,41 +189,59 @@ function TransferExtras({
   setAmountTo: (v: string) => void;
   fee: string;
   setFee: (v: string) => void;
+  showFee?: boolean;
 }) {
   const crossCurrency = !!source && !!target && source.currency !== target.currency;
-  const rate = crossCurrency ? impliedRate(amountTo, amount) : null;
+  // Tipo de cambio editable (p. ej. el de ARQ): al escribirlo calcula "Recibe";
+  // al escribir "Recibe" se muestra el implícito. No se persiste (TXN-13).
+  const [rateText, setRateText] = useState<string | null>(null);
+  const implied = crossCurrency ? impliedRate(amountTo, amount) : null;
+  useEffect(() => {
+    if (rateText === null) return;
+    const converted = convertWithRate(amount, rateText);
+    if (converted !== null && converted !== amountTo) setAmountTo(converted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amount]);
+  useEffect(() => {
+    if (!crossCurrency) setRateText(null);
+  }, [crossCurrency]);
   return (
     <>
       {crossCurrency && (
-        <div>
-          <label className="label">Recibe ({target.currency})</label>
-          <input
-            className="input"
-            inputMode="decimal"
-            pattern="^\d+(\.\d{1,2})?$"
-            placeholder="0.00"
-            required
-            value={amountTo}
-            onChange={(e) => setAmountTo(e.target.value)}
-          />
-          {rate && (
-            <p className="mt-1 text-xs text-ink-muted">
-              Tipo de cambio: 1 {source.currency} = {rate} {target.currency}
-            </p>
-          )}
-        </div>
+        <>
+          <div>
+            <label className="label">Recibe ({target.currency})</label>
+            <input
+              className="input"
+              inputMode="decimal"
+              pattern="^\d+(\.\d{1,2})?$"
+              placeholder="0.00"
+              required
+              value={amountTo}
+              onChange={(e) => {
+                setRateText(null);
+                setAmountTo(sanitizeDecimal(e.target.value));
+              }}
+            />
+          </div>
+          <div>
+            <label className="label">Tipo de cambio</label>
+            <input
+              className="input"
+              inputMode="decimal"
+              placeholder="opcional"
+              value={rateText ?? implied ?? ""}
+              onChange={(e) => {
+                const v = sanitizeDecimal(e.target.value, 6);
+                setRateText(v);
+                const converted = convertWithRate(amount, v);
+                if (converted !== null) setAmountTo(converted);
+              }}
+            />
+          </div>
+        </>
       )}
-      <div>
-        <label className="label">Comisión{source ? ` (${source.currency})` : ""}</label>
-        <input
-          className="input"
-          inputMode="decimal"
-          pattern="^\d+(\.\d{1,2})?$"
-          placeholder="opcional"
-          value={fee}
-          onChange={(e) => setFee(e.target.value)}
-        />
-      </div>
+      {showFee && <FeeField source={source} fee={fee} setFee={setFee} placeholder="opcional" />}
     </>
   );
 }
@@ -243,6 +296,8 @@ export default function TransactionsPage() {
   const [cycleHint, setCycleHint] = useState<"current" | "next" | null>(null);
   // EVT-02: se conserva entre altas para capturar varios gastos del mismo evento.
   const [eventId, setEventId] = useState("");
+  const [withFee, setWithFee] = useState(false); // toggle de comisión (TXN-14)
+  const [withEvent, setWithEvent] = useState(false); // toggle de evento (EVT-02)
   const eventsQuery = useEvents(true);
   const eventList = useMemo(
     () => (eventsQuery.data ?? []).map((e) => e.event),
@@ -500,9 +555,9 @@ export default function TransactionsPage() {
       account_id: accountId,
       account_to_id: type === "transfer" ? accountToId || null : null,
       amount_to: crossCurrency ? amountTo || null : null,
-      fee_amount: type === "transfer" && feeAmount ? feeAmount : null,
+      fee_amount: type === "transfer" && withFee && feeAmount ? feeAmount : null,
       cycle_hint: collision ? (cycleHint ?? collision.defaultHint) : undefined,
-      event_id: eventId || null, // EVT-02
+      event_id: withEvent && eventId ? eventId : null, // EVT-02
     };
     // TXN-11: mismo tipo, fecha, monto, moneda, categoría y descripción
     // (la cuenta se ignora) ⇒ pedir confirmación antes de registrar.
@@ -537,6 +592,7 @@ export default function TransactionsPage() {
       setDescription("");
       setAmountTo("");
       setFeeAmount("");
+      setWithFee(false);
       setCycleHint(null);
       setPendingCreate(null);
       setCreated(txn);
@@ -567,22 +623,53 @@ export default function TransactionsPage() {
   return (
     <div className="page">
       {/* Captura rápida */}
-      <form onSubmit={handleSubmit} className="card space-y-4 p-4 sm:p-5">
-        <div className="flex flex-wrap items-center gap-2">
+      <form onSubmit={handleSubmit} onKeyDown={blockEnterSubmit} className="card @container space-y-4 p-4 sm:p-5">
+        {/* Si no caben los 5 botones: tipos a todo el ancho y extras centrados debajo. */}
+        <div className="flex flex-wrap items-center gap-2 @xl:flex-nowrap">
+          <div className="flex w-full gap-2 @xl:w-auto">
           {(Object.keys(TYPE_LABELS) as TxnType[]).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setType(t)}
-              className={
-                type === t
-                  ? "btn-primary px-3 py-1.5"
-                  : "btn-secondary px-3 py-1.5"
-              }
+              className={`flex-1 @xl:flex-none ${
+                type === t ? "btn-primary px-3 py-1.5" : "btn-secondary px-3 py-1.5"
+              }`}
             >
               {TYPE_LABELS[t]}
             </button>
           ))}
+          </div>
+          {(type === "transfer" || hasActiveEvents || eventId) && (
+          <div className="flex w-full justify-center gap-2 @xl:ml-auto @xl:w-auto">
+          {type === "transfer" && (
+            <button
+              type="button"
+              aria-pressed={withFee}
+              onClick={() => {
+                setWithFee((v) => !v);
+                setFeeAmount("");
+              }}
+              className={withFee ? "btn-primary px-3 py-1.5" : "btn-secondary px-3 py-1.5"}
+            >
+              {withFee ? "✓ " : "+ "}Comisión
+            </button>
+          )}
+          {(hasActiveEvents || eventId) && (
+            <button
+              type="button"
+              aria-pressed={withEvent}
+              onClick={() => {
+                setWithEvent((v) => !v);
+                setEventId("");
+              }}
+              className={withEvent ? "btn-primary px-3 py-1.5" : "btn-secondary px-3 py-1.5"}
+            >
+              {withEvent ? "✓ " : "+ "}Evento
+            </button>
+          )}
+          </div>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <div>
@@ -597,7 +684,7 @@ export default function TransactionsPage() {
               placeholder="0.00"
               required
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => setAmount(sanitizeDecimal(e.target.value))}
             />
           </div>
           <div>
@@ -676,15 +763,20 @@ export default function TransactionsPage() {
               setAmountTo={setAmountTo}
               fee={feeAmount}
               setFee={setFeeAmount}
+              showFee={false}
             />
           )}
-          {(hasActiveEvents || eventId) && (
-            <div>
+          <div className="contents md:col-span-full md:flex md:items-end md:gap-3">
+          {type === "transfer" && withFee && (
+            <FeeField source={account} fee={feeAmount} setFee={setFeeAmount} className="md:w-36 md:shrink-0" />
+          )}
+          {withEvent && (
+            <div className="md:w-48 md:shrink-0">
               <label className="label" htmlFor="event">Evento</label>
               <EventSelect id="event" value={eventId} onChange={setEventId} events={eventList} />
             </div>
           )}
-          <div className={`col-span-2 ${hasActiveEvents || eventId ? "md:col-span-2" : "md:col-span-3"}`}>
+          <div className="col-span-2 md:min-w-0 md:flex-1">
             <label className="label" htmlFor="description">Descripción</label>
             <input
               id="description"
@@ -694,7 +786,7 @@ export default function TransactionsPage() {
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
-          <div className="flex items-end">
+          <div className="flex items-end md:w-40 md:shrink-0">
             <button
               type="submit"
               className="btn-primary w-full"
@@ -702,6 +794,7 @@ export default function TransactionsPage() {
             >
               {create.isPending || checkingDuplicates ? "Guardando…" : "Agregar"}
             </button>
+          </div>
           </div>
         </div>
         {collision && (
@@ -1291,7 +1384,7 @@ export default function TransactionsPage() {
         size="lg"
       >
         {editingMsiParent ? (
-          <form onSubmit={handleUpdate} className="space-y-4">
+          <form onSubmit={handleUpdate} onKeyDown={blockEnterSubmit} className="space-y-4">
             <p className="text-sm text-ink-muted">
               Es una compra a meses sin intereses: su monto y cuotas se ajustan desde{" "}
               <strong>MSI</strong>. Aquí solo puedes ligarla a un evento.
@@ -1311,7 +1404,7 @@ export default function TransactionsPage() {
             </div>
           </form>
         ) : (
-        <form onSubmit={handleUpdate} className="space-y-4">
+        <form onSubmit={handleUpdate} onKeyDown={blockEnterSubmit} className="space-y-4">
           {/* Fila 1 — tipo */}
           <div className="flex flex-wrap gap-2">
             {(Object.keys(TYPE_LABELS) as TxnType[]).map((t) => (
@@ -1336,7 +1429,7 @@ export default function TransactionsPage() {
                 pattern="^\d+(\.\d{1,2})?$"
                 required
                 value={editAmount}
-                onChange={(e) => setEditAmount(e.target.value)}
+                onChange={(e) => setEditAmount(sanitizeDecimal(e.target.value))}
               />
             </div>
             <div>

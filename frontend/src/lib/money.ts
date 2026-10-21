@@ -49,3 +49,22 @@ export function impliedRate(received: string, sent: string): string | null {
   const scaled = (toCents(received) * 10000n) / s;
   return `${scaled / 10000n}.${String(scaled % 10000n).padStart(4, "0")}`;
 }
+
+/** TXN-13: `amount × rate` a centavos (HALF_EVEN, tasa de hasta 6 decimales); null si no son válidos. */
+export function convertWithRate(amount: string, rate: string): string | null {
+  const m = /^(\d+)(?:\.(\d{1,6}))?$/.exec(rate.trim());
+  if (!m || !isPositiveAmount(amount) || !isPositiveAmount(rate)) return null;
+  const scaledRate = BigInt(m[1]) * 1000000n + BigInt((m[2] ?? "").padEnd(6, "0"));
+  const num = toCents(amount) * scaledRate;
+  const div = 1000000n;
+  let q = num / div;
+  const r = num % div;
+  if (r * 2n > div || (r * 2n === div && q % 2n === 1n)) q += 1n;
+  return fromCents(q);
+}
+
+/** Deja solo dígitos y un punto decimal (con `decimals` decimales máx.) al teclear/pegar un monto. */
+export function sanitizeDecimal(value: string, decimals = 2): string {
+  const [int = "", ...rest] = value.replace(/[^\d.]/g, "").split(".");
+  return rest.length ? `${int}.${rest.join("").slice(0, decimals)}` : int;
+}
