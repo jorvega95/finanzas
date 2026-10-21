@@ -15,12 +15,16 @@ class ReminderKind(enum.StrEnum):
     card_due = "card_due"
     budget_alert = "budget_alert"
     commitment_due = "commitment_due"  # CXP-08
+    subscription_charge = "subscription_charge"  # REC-12
+    trial_ending = "trial_ending"  # REC-10/12
+    bill_due = "bill_due"  # REC-11/12
     custom = "custom"
 
 
 class ReminderChannel(enum.StrEnum):
     in_app = "in_app"
     email = "email"
+    desktop = "desktop"  # REM-08: notify-send in local mode
 
 
 class ReminderStatus(enum.StrEnum):
@@ -43,7 +47,7 @@ class Reminder(Base, TimestampMixin):
         Uuid, ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
     kind: Mapped[ReminderKind] = mapped_column(
-        Enum(ReminderKind, name="reminder_kind", native_enum=False, length=15), nullable=False
+        Enum(ReminderKind, name="reminder_kind", native_enum=False, length=20), nullable=False
     )
     ref_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     offset_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -63,3 +67,9 @@ class Reminder(Base, TimestampMixin):
     sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     # REM-07: read (badge) is independent from dismissed (REM-05). NULL = unread.
     read_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # REC-12: recurring reminders point to their rule and charge date
+    # (ref_id is a deterministic id per occurrence).
+    recurring_rule_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("recurring_rules.id", ondelete="CASCADE"), index=True
+    )
+    ref_date: Mapped[dt.date | None] = mapped_column(Date)

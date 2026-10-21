@@ -20,7 +20,7 @@ from app.core.dates import today_in_tz
 from app.models.accounts import Account, Statement, StatementStatus
 from app.models.catalogs import AccountBehavior, AccountType
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus
-from app.models.recurring import RecurringRule
+from app.models.recurring import RecurringKind, RecurringRule
 from app.models.spaces import Space
 from app.models.transactions import Transaction, TransactionType
 from app.services import billing_cycles as cycles
@@ -310,8 +310,8 @@ async def _card_due_events(
     # Domiciliados recurrentes de crédito sobre esta tarjeta (REC, PRO-03).
     rules = await _active_expense_rules(session, account.space_id)
     for rule, rule_credit_id in rules:
-        if rule_credit_id != account.id:
-            continue
+        if rule_credit_id != account.id or rule.amount is None:
+            continue  # PRO-04: a bill without estimate is not projected
         for occ in occurrences(rule, horizon_end):
             if occ <= today:
                 continue  # ya generado como transacción real
@@ -402,7 +402,7 @@ async def _income_events(
         .all()
     )
     for rule in rules:
-        if rule.account_id in outside:
+        if rule.account_id in outside or rule.amount is None:
             continue
         for occ in occurrences(rule, horizon_end):
             if occ <= today:
@@ -469,8 +469,8 @@ async def _non_credit_expense_events(
     for rule, rule_credit_id in await _active_expense_rules(session, space_id):
         if rule_credit_id is not None:
             continue  # crédito: va al statement proyectado, no es flujo inmediato
-        if rule.account_id in outside:
-            continue
+        if rule.account_id in outside or rule.amount is None:
+            continue  # PRO-04: a bill without estimate is not projected
         for occ in occurrences(rule, horizon_end):
             if occ <= today:
                 continue
@@ -482,7 +482,7 @@ async def _non_credit_expense_events(
                     description=rule.description,
                     amount=to_money(await rates.to_base(rule.amount, rule.currency)),
                     currency=rule.currency,
-                    is_estimate=rule.amount_is_estimate,
+                    is_estimate=rule.amount_is_estimate or rule.kind == RecurringKind.bill,
                 )
             )
 

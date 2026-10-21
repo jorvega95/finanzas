@@ -31,7 +31,10 @@ class UpcomingItem(BaseModel):
     kind: str
     date: dt.date
     description: str
-    amount: MoneyOut
+    # REC-11: a bill without estimate has no amount.
+    amount: MoneyOut | None
+    # REC-08: set when the amount is not in base currency (e.g. a USD price).
+    currency: str | None = None
     ref_id: uuid.UUID
     is_overdue: bool
 

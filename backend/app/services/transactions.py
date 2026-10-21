@@ -387,6 +387,8 @@ async def create_transaction(
     recurring_rule_id: uuid.UUID | None = None,
     scheduled_date: date | None = None,
     needs_review: bool = False,
+    original_amount: Decimal | None = None,
+    original_currency: str | None = None,
     commit: bool = True,
 ) -> Transaction:
     """`commit=False` leaves the transaction flushed so a caller can create
@@ -417,6 +419,8 @@ async def create_transaction(
         recurring_rule_id=recurring_rule_id,
         scheduled_date=scheduled_date,
         needs_review=needs_review,
+        original_amount=original_amount,  # REC-08
+        original_currency=original_currency,
         created_by=created_by,
     )
     session.add(txn)

@@ -61,6 +61,10 @@ class Transaction(Base, AuditMixin):
     # FX-03: rate frozen at creation/edit; aggregates never re-query history.
     # NULL when currency == space.base_currency (rate 1).
     fx_rate_to_base: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    # REC-08: price of a recurring charge in another currency (e.g. 20 USD
+    # billed in MXN). Informational only: never part of any aggregate.
+    original_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    original_currency: Mapped[str | None] = mapped_column(String(3))
 
     # TXN-01: required for expense/income, NULL for transfer.
     category_id: Mapped[uuid.UUID | None] = mapped_column(

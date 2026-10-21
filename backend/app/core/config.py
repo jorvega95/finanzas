@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # FX (FX-02)
     banxico_token: str = ""
 
+    # REM-08: desktop notifications (notify-send) in local mode, never before
+    # this local hour.
+    desktop_notifications: bool = False
+    desktop_notify_hour: int = 9
+
     @property
     def trusted_host_list(self) -> list[str]:
         return [h.strip().lower() for h in self.trusted_hosts.split(",") if h.strip()]

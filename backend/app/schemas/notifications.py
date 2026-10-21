@@ -23,6 +23,9 @@ class NotificationOut(BaseModel):
     # REM-07: nulo = no leído (alimenta el badge de la campana).
     read_at: dt.datetime | None = None
     created_at: dt.datetime
+    # REC-12: rule and charge date of subscription/trial/bill reminders.
+    recurring_rule_id: uuid.UUID | None = None
+    ref_date: dt.date | None = None
 
 
 class UnreadCountOut(BaseModel):

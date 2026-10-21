@@ -32,7 +32,12 @@ from app.models.investments import (
     PortfolioSnapshot,
 )
 from app.models.msi import Installment, InstallmentPlan, InstallmentStatus, PlanStatus
-from app.models.recurring import RecurringFrequency, RecurringRule, RecurringTombstone
+from app.models.recurring import (
+    RecurringFrequency,
+    RecurringKind,
+    RecurringRule,
+    RecurringTombstone,
+)
 from app.models.reminders import Reminder, ReminderChannel, ReminderKind, ReminderStatus
 from app.models.spaces import Profile, Space, SpaceInvite, SpaceMember, SpaceRole, SpaceType
 from app.models.transactions import Transaction, TransactionType
@@ -69,6 +74,7 @@ __all__ = [
     "PlanStatus",
     "Profile",
     "RecurringFrequency",
+    "RecurringKind",
     "RecurringRule",
     "RecurringTombstone",
     "Reminder",

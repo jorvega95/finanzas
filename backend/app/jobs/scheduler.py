@@ -42,7 +42,8 @@ async def run_card_close_job() -> None:
     from app.services.accounts import close_due_statements
     from app.services.budgets import check_budget_alerts
     from app.services.commitments import sync_reminders
-    from app.services.reminders import fire_due_reminders
+    from app.services.recurring import sync_reminders as sync_recurring_reminders
+    from app.services.reminders import fire_desktop_reminders, fire_due_reminders
 
     async with SessionLocal() as session:
         spaces = (await session.execute(select(Space))).scalars().all()
@@ -54,8 +55,11 @@ async def run_card_close_job() -> None:
                 await check_budget_alerts(session, space, today.replace(day=1))
                 # CXP-08: vendor payment reminders (idempotent).
                 await sync_reminders(session, space)
+                # REC-12: subscription, trial and bill reminders (idempotent).
+                await sync_recurring_reminders(session, space)
                 await session.commit()
                 await fire_due_reminders(session, today)
+                await fire_desktop_reminders(session, space, today)  # REM-08
             except Exception:
                 logger.exception("account close job failed for space %s", space.id)
 
@@ -76,12 +80,15 @@ async def run_snapshot_job() -> None:
 
 
 async def run_fx_job() -> None:
-    """FX-02: persist today's USD/MXN FIX (carry-forward on holidays)."""
+    """FX-02: persist today's USD/MXN FIX (carry-forward on holidays), then
+    generate the foreign-currency charges that were waiting for it (REC-08)."""
     async with SessionLocal() as session:
         try:
             await fx.sync_usd_mxn_rate(session, datetime.now(UTC).date())
         except Exception:
             logger.exception("fx job failed")
+            return
+    await run_recurring_job()
 
 
 def build_scheduler() -> AsyncIOScheduler:

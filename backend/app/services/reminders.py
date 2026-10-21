@@ -9,6 +9,7 @@ from fastapi import status as http_status
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.accounts import Account, Statement
 from app.models.reminders import Reminder, ReminderChannel, ReminderKind, ReminderStatus
 from app.models.spaces import Space
@@ -16,6 +17,8 @@ from app.models.spaces import Space
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3  # REM-02
+# REM-04/REM-08: channels of every scheduled reminder (cards, commitments).
+CHANNELS = (ReminderChannel.in_app, ReminderChannel.email, ReminderChannel.desktop)
 INBOX_LIMIT = 50
 HISTORY_LIMIT = 100
 
@@ -46,7 +49,7 @@ async def schedule_card_reminders(
         # when closing historical statements (backfill, opening balance, etc.).
         if today is not None and fire_at < today:
             continue
-        for channel in (ReminderChannel.in_app, ReminderChannel.email):
+        for channel in CHANNELS:
             exists_already = await session.scalar(
                 select(Reminder.id).where(
                     Reminder.kind == ReminderKind.card_due,
@@ -184,6 +187,8 @@ async def fire_due_reminders(session: AsyncSession, today: date) -> int:
                 select(Reminder).where(
                     Reminder.status == ReminderStatus.pending,
                     Reminder.fire_at <= today,
+                    # REM-08: desktop has its own hour window per space.
+                    Reminder.channel != ReminderChannel.desktop,
                 )
             )
         )
@@ -204,5 +209,50 @@ async def fire_due_reminders(session: AsyncSession, today: date) -> int:
             if reminder.attempts >= MAX_ATTEMPTS:
                 reminder.status = ReminderStatus.failed
             logger.exception("reminder %s failed", reminder.id)
+    await session.commit()
+    return sent
+
+
+async def fire_desktop_reminders(session: AsyncSession, space: Space, today: date) -> int:
+    """REM-08: desktop notices of this space with fire_at <= today, only from
+    DESKTOP_NOTIFY_HOUR local time. Disabled or without notify-send: canceled.
+    Failures retry like REM-02."""
+    from app.core.dates import local_hour
+    from app.services import desktop
+
+    if local_hour(space.timezone) < settings.desktop_notify_hour:
+        return 0
+    due = (
+        (
+            await session.execute(
+                select(Reminder)
+                .where(
+                    Reminder.space_id == space.id,
+                    Reminder.channel == ReminderChannel.desktop,
+                    Reminder.status == ReminderStatus.pending,
+                    Reminder.fire_at <= today,
+                )
+                .order_by(Reminder.fire_at, Reminder.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not due:
+        return 0
+    available = settings.desktop_notifications and desktop.is_available()
+    sent = 0
+    for reminder in due:
+        if not available:
+            reminder.status = ReminderStatus.canceled
+            continue
+        if await desktop.notify(reminder.message):
+            reminder.status = ReminderStatus.sent
+            reminder.sent_at = datetime.now(UTC)
+            sent += 1
+        else:
+            reminder.attempts += 1
+            if reminder.attempts >= MAX_ATTEMPTS:
+                reminder.status = ReminderStatus.failed
     await session.commit()
     return sent

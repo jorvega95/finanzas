@@ -55,6 +55,37 @@ async def get_rate(session: AsyncSession, base: str, quote: str, on_date: date) 
     return None
 
 
+async def has_rate_on(session: AsyncSession, base: str, quote: str, on_date: date) -> bool:
+    """REC-08: whether a rate dated exactly `on_date` exists (either
+    direction; a carry-forward row counts)."""
+    if base == quote:
+        return True
+    found = await session.scalar(
+        select(ExchangeRate.date)
+        .where(
+            ((ExchangeRate.base == base) & (ExchangeRate.quote == quote))
+            | ((ExchangeRate.base == quote) & (ExchangeRate.quote == base)),
+            ExchangeRate.date == on_date,
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
+async def convert(
+    session: AsyncSession, amount: Decimal, currency: str, target: str, on_date: date
+) -> Decimal | None:
+    """REC-08: `amount` in `currency` expressed in `target` with the rate of
+    `on_date` (or the closest previous), HALF_EVEN to cents. None without a
+    known rate."""
+    if currency == target:
+        return Decimal(amount)
+    rate = await get_rate(session, currency, target, on_date)
+    if rate is None:
+        return None
+    return (Decimal(amount) * rate).quantize(Decimal("0.01"), ROUND_HALF_EVEN)
+
+
 async def mark_to_market(
     session: AsyncSession, amount: Decimal, currency: str, base: str, on_date: date
 ) -> Decimal | None:

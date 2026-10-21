@@ -31,6 +31,11 @@ from app.models.transactions import Transaction, TransactionType
 ZERO = Decimal("0.00")
 GIFTS_CATEGORY_NAME = "Regalos recibidos"  # CAT-02
 REMINDER_OFFSETS = (3, 1)  # CXP-08, like REM-01's default
+REMINDER_CHANNELS = (
+    ReminderChannel.in_app,
+    ReminderChannel.email,
+    ReminderChannel.desktop,
+)  # REM-08
 SUPPORTED_CURRENCIES = {"MXN", "USD"}  # TXN-04
 
 
@@ -606,7 +611,7 @@ async def sync_reminders(
                 fire_at = due - dt.timedelta(days=offset)
                 if fire_at < today:
                     continue
-                for channel in (ReminderChannel.in_app, ReminderChannel.email):
+                for channel in REMINDER_CHANNELS:
                     existing: Reminder | None = await session.scalar(
                         select(Reminder).where(
                             Reminder.kind == ReminderKind.commitment_due,

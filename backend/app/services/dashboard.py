@@ -518,6 +518,7 @@ async def upcoming_commitments(
                     "date": upcoming[0],
                     "description": rule.description,
                     "amount": rule.amount,
+                    "currency": rule.currency,
                     "type": rule.type,
                     "ref_id": rule.id,
                     "is_overdue": False,

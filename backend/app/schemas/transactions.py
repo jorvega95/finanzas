@@ -97,6 +97,9 @@ class TransactionOut(BaseModel):
     expense_nature_override: ExpenseNature | None
     recurring_rule_id: uuid.UUID | None
     needs_review: bool
+    # REC-08: informational price of a recurring charge in another currency.
+    original_amount: Money | None = None
+    original_currency: str | None = None
     event_id: uuid.UUID | None = None  # EVT-02
     commitment_id: uuid.UUID | None = None  # CXP-03
     installment_plan_id: uuid.UUID | None = None  # MSI-03: set on an MSI parent
