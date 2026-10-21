@@ -597,16 +597,21 @@ function PendingBillRow({ bill, accountName }: { bill: PendingBillOut; accountNa
   );
 }
 
+type ConfirmAction = "pause" | "cancel";
+
 function RuleRow({
   rule,
   accountName,
   onEdit,
   onDelete,
+  onConfirm,
 }: {
   rule: RecurringRuleOut;
   accountName: string;
   onEdit: () => void;
   onDelete: () => void;
+  // Pausar y cancelar piden confirmación (evita un clic accidental).
+  onConfirm: (action: ConfirmAction) => void;
 }) {
   const setCanceled = useSetRuleCanceled();
   const update = useUpdateRecurringRule();
@@ -679,7 +684,11 @@ function RuleRow({
             <button
               className="btn-secondary"
               disabled={busy}
-              onClick={() => update.mutate({ id: rule.id, is_active: rule.status === "paused" })}
+              onClick={() =>
+                rule.status === "paused"
+                  ? update.mutate({ id: rule.id, is_active: true })
+                  : onConfirm("pause")
+              }
             >
               {rule.status === "paused" ? "Reanudar" : "Pausar"}
             </button>
@@ -687,7 +696,7 @@ function RuleRow({
               <button
                 className="btn-secondary"
                 disabled={busy}
-                onClick={() => setCanceled.mutate({ id: rule.id, canceled: true })}
+                onClick={() => onConfirm("cancel")}
               >
                 Cancelar
               </button>
@@ -722,6 +731,23 @@ export default function SubscriptionsPage() {
     null,
   );
   const [deleting, setDeleting] = useState<RecurringRuleOut | null>(null);
+  const [confirming, setConfirming] = useState<{
+    rule: RecurringRuleOut;
+    action: ConfirmAction;
+  } | null>(null);
+  const pauseRule = useUpdateRecurringRule();
+  const cancelRule = useSetRuleCanceled();
+  const confirmPending = pauseRule.isPending || cancelRule.isPending;
+
+  function runConfirmed() {
+    if (!confirming) return;
+    const done = { onSuccess: () => setConfirming(null) };
+    if (confirming.action === "pause") {
+      pauseRule.mutate({ id: confirming.rule.id, is_active: false }, done);
+    } else {
+      cancelRule.mutate({ id: confirming.rule.id, canceled: true }, done);
+    }
+  }
 
   const accountList = accounts.data ?? [];
   const accountNames = useMemo(
@@ -754,6 +780,7 @@ export default function SubscriptionsPage() {
             accountName={accountNames.get(r.account_id) ?? ""}
             onEdit={() => setModal({ rule: r, kind: r.kind })}
             onDelete={() => setDeleting(r)}
+            onConfirm={(action) => setConfirming({ rule: r, action })}
           />
         ))}
       </ul>
@@ -964,7 +991,7 @@ export default function SubscriptionsPage() {
             </p>
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-secondary" onClick={() => setDeleting(null)}>
-                Cancelar
+                Volver
               </button>
               <button
                 type="button"
@@ -973,6 +1000,71 @@ export default function SubscriptionsPage() {
                 onClick={() => remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) })}
               >
                 Eliminar
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={confirming !== null}
+        onClose={() => setConfirming(null)}
+        title={
+          confirming?.action === "pause"
+            ? "Pausar"
+            : confirming?.rule.kind === "bill"
+              ? "Cancelar servicio"
+              : "Cancelar suscripción"
+        }
+      >
+        {confirming && (
+          <div className="space-y-4">
+            {confirming.action === "pause" ? (
+              <p className="text-sm">
+                ¿Pausar <strong>{confirming.rule.description}</strong>? Mientras esté pausada no se
+                registran cobros ni recibes avisos. Puedes reanudarla cuando quieras.
+              </p>
+            ) : (
+              <>
+                <p className="text-sm">
+                  ¿Cancelar <strong>{confirming.rule.description}</strong>? Ya no se registrarán
+                  cobros y sus avisos pendientes se eliminan. El historial se conserva y puedes
+                  reactivarla después.
+                </p>
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                  Esto solo la cancela en Finanzas: recuerda cancelarla también con el proveedor.
+                  {confirming.rule.cancel_url && /^https?:\/\//i.test(confirming.rule.cancel_url) && (
+                    <>
+                      {" "}
+                      <a
+                        className="font-medium underline"
+                        href={confirming.rule.cancel_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Ir a cancelar
+                      </a>
+                    </>
+                  )}
+                </p>
+              </>
+            )}
+            {(pauseRule.error ?? cancelRule.error) && (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                {errorText(pauseRule.error ?? cancelRule.error)}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setConfirming(null)}>
+                Volver
+              </button>
+              <button
+                type="button"
+                className={confirming.action === "pause" ? "btn-primary" : "btn-danger"}
+                disabled={confirmPending}
+                onClick={runConfirmed}
+              >
+                {confirming.action === "pause" ? "Pausar" : "Sí, cancelar"}
               </button>
             </div>
           </div>
