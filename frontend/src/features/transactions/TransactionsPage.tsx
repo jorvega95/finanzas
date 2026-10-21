@@ -33,7 +33,15 @@ import {
   type RecurringRuleOut,
 } from "../../api/recurring";
 import { useSpace } from "../spaces/SpaceProvider";
-import { convertWithRate, formatMoney, impliedRate, isPositiveAmount, sanitizeDecimal } from "../../lib/money";
+import {
+  convertWithRate,
+  formatMoney,
+  impliedRate,
+  isPositiveAmount,
+  sanitizeDecimal,
+  subtractMoney,
+  sumMoney,
+} from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
 import AccountOptions from "../../components/AccountOptions";
@@ -137,6 +145,85 @@ function FeeField({
   );
 }
 
+// TXN-14: la comisión se descuenta del monto (se captura el total que sale) o
+// se cobra aparte. La opción se recuerda por cuenta origen en este navegador.
+const FEE_INCLUDED_KEY = "finanzas.feeIncluded.";
+
+function storedFeeIncluded(accountId: string): boolean {
+  try {
+    return localStorage.getItem(FEE_INCLUDED_KEY + accountId) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeFeeIncluded(accountId: string, included: boolean) {
+  try {
+    localStorage.setItem(FEE_INCLUDED_KEY + accountId, included ? "1" : "0");
+  } catch {
+    // Sin almacenamiento la opción dura solo esta visita.
+  }
+}
+
+/** TXN-14: lo que se transfiere; si la comisión se descuenta, total − comisión. */
+function netTransferAmount(amount: string, fee: string, included: boolean): string {
+  return included && isPositiveAmount(amount) && isPositiveAmount(fee)
+    ? subtractMoney(amount, fee)
+    : amount;
+}
+
+function FeeModeField({
+  included,
+  setIncluded,
+  className,
+}: {
+  included: boolean;
+  setIncluded: (v: boolean) => void;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <label className="label">La comisión</label>
+      <select
+        className="input"
+        value={included ? "included" : "separate"}
+        onChange={(e) => setIncluded(e.target.value === "included")}
+      >
+        <option value="included">Se descuenta</option>
+        <option value="separate">Se cobra aparte</option>
+      </select>
+    </div>
+  );
+}
+
+// TXN-14: confirma qué llega (comisión descontada) o cuánto sale en total.
+function FeeSummary({
+  amount,
+  fee,
+  included,
+  currency,
+  crossCurrency,
+}: {
+  amount: string;
+  fee: string;
+  included: boolean;
+  currency: string;
+  crossCurrency: boolean;
+}) {
+  if (!isPositiveAmount(amount) || !isPositiveAmount(fee)) return null;
+  const net = netTransferAmount(amount, fee, included);
+  if (included && !isPositiveAmount(net)) {
+    return <p className="mt-1 text-xs text-red-500">La comisión debe ser menor al total.</p>;
+  }
+  return (
+    <p className="mt-1 text-xs text-ink-muted">
+      {included
+        ? `${crossCurrency ? "Se cambian" : "Llegan"} ${formatMoney(net, currency)}`
+        : `Salen ${formatMoney(sumMoney([amount, fee]), currency)} en total`}
+    </p>
+  );
+}
+
 // TXN-13/14: monto recibido cuando las monedas difieren y comisión opcional.
 function TransferExtras({
   source,
@@ -147,15 +234,20 @@ function TransferExtras({
   fee,
   setFee,
   showFee = true,
+  feeIncluded = false,
+  setFeeIncluded,
 }: {
   source: AccountOut | undefined;
   target: AccountOut | undefined;
+  /** Neto que se transfiere (TXN-14): base de la conversión. */
   amount: string;
   amountTo: string;
   setAmountTo: (v: string) => void;
   fee: string;
   setFee: (v: string) => void;
   showFee?: boolean;
+  feeIncluded?: boolean;
+  setFeeIncluded?: (v: boolean) => void;
 }) {
   const crossCurrency = !!source && !!target && source.currency !== target.currency;
   // Tipo de cambio editable (p. ej. el de ARQ): al escribirlo calcula "Recibe";
@@ -208,6 +300,9 @@ function TransferExtras({
         </>
       )}
       {showFee && <FeeField source={source} fee={fee} setFee={setFee} placeholder="opcional" />}
+      {showFee && setFeeIncluded && isPositiveAmount(fee) && (
+        <FeeModeField included={feeIncluded} setIncluded={setFeeIncluded} />
+      )}
     </>
   );
 }
@@ -263,6 +358,7 @@ export default function TransactionsPage() {
   // EVT-02: se conserva entre altas para capturar varios gastos del mismo evento.
   const [eventId, setEventId] = useState("");
   const [withFee, setWithFee] = useState(false); // toggle de comisión (TXN-14)
+  const [feeIncluded, setFeeIncluded] = useState(false); // TXN-14: se descuenta del monto
   const [withEvent, setWithEvent] = useState(false); // toggle de evento (EVT-02)
   const eventsQuery = useEvents(true);
   const eventList = useMemo(
@@ -354,6 +450,7 @@ export default function TransactionsPage() {
   const [editDescription, setEditDescription] = useState("");
   const [editAmountTo, setEditAmountTo] = useState("");
   const [editFeeAmount, setEditFeeAmount] = useState("");
+  const [editFeeIncluded, setEditFeeIncluded] = useState(false); // TXN-14
   const [editError, setEditError] = useState<string | null>(null);
   const [editCycleHint, setEditCycleHint] = useState<"current" | "next" | null>(null);
   const [editEventId, setEditEventId] = useState("");
@@ -364,7 +461,10 @@ export default function TransactionsPage() {
   function openEditModal(txn: TransactionOut) {
     setEditingTxn(txn);
     setEditType(txn.type as TxnType);
-    setEditAmount(txn.amount);
+    // TXN-14: con la comisión descontada, el monto se muestra como el total que salió.
+    const included = storedFeeIncluded(txn.account_id);
+    setEditFeeIncluded(included);
+    setEditAmount(included && txn.fee_amount ? sumMoney([txn.amount, txn.fee_amount]) : txn.amount);
     setEditDate(txn.date);
     setEditCategoryId(txn.category_id ?? "");
     setEditAccountId(txn.account_id);
@@ -399,12 +499,17 @@ export default function TransactionsPage() {
       );
       return;
     }
+    if (!isPositiveAmount(editNetAmount)) {
+      setEditError("La comisión debe ser menor al total.");
+      return;
+    }
+    const editHasFee = editType === "transfer" && isPositiveAmount(editFeeAmount);
     try {
       await update.mutateAsync({
         id: editingTxn.id,
         type: editType,
         date: editDate,
-        amount: editAmount,
+        amount: editNetAmount,
         currency: editCurrency,
         description: editDescription,
         category_id: editType === "transfer" ? null : editCategoryId || null,
@@ -417,6 +522,7 @@ export default function TransactionsPage() {
         // CXP-03: solo un gasto puede ser abono; el vínculo se conserva al editar.
         commitment_id: editType === "expense" ? editCommitmentId || null : null,
       });
+      if (editHasFee) storeFeeIncluded(editAccountId, editFeeIncluded);
       setEditingTxn(null);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Error al guardar");
@@ -514,6 +620,12 @@ export default function TransactionsPage() {
   const editCurrency = editAccount?.currency ?? editingTxn?.currency ?? activeSpace.base_currency;
   const editCrossCurrency =
     editType === "transfer" && !!editAccount && !!editAccountTo && editAccount.currency !== editAccountTo.currency;
+  // TXN-14: lo que se transfiere (sin la comisión si se capturó el total).
+  const showsTotal = type === "transfer" && withFee && feeIncluded;
+  const netAmount = type === "transfer" && withFee ? netTransferAmount(amount, feeAmount, feeIncluded) : amount;
+  const editShowsTotal = editType === "transfer" && editFeeIncluded && isPositiveAmount(editFeeAmount);
+  const editNetAmount =
+    editType === "transfer" ? netTransferAmount(editAmount, editFeeAmount, editFeeIncluded) : editAmount;
 
   const collision = useMemo(() => detectCutoffCollision(date, account), [date, account]);
   const editCollision = useMemo(
@@ -538,10 +650,14 @@ export default function TransactionsPage() {
       setFormError("El monto debe ser mayor a 0.");
       return;
     }
+    if (!isPositiveAmount(netAmount)) {
+      setFormError("La comisión debe ser menor al total.");
+      return;
+    }
     const body: TransactionBody = {
       type,
       date,
-      amount,
+      amount: netAmount,
       currency,
       description,
       category_id: type === "transfer" ? null : categoryId || null,
@@ -581,6 +697,7 @@ export default function TransactionsPage() {
     setFormError(null);
     try {
       const txn = await create.mutateAsync(body);
+      if (body.fee_amount) storeFeeIncluded(body.account_id, feeIncluded);
       setAmount("");
       setDescription("");
       setAmountTo("");
@@ -667,7 +784,8 @@ export default function TransactionsPage() {
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <div>
             <label className="label" htmlFor="amount">
-              Monto{account ? ` (${currency})` : ""}
+              {showsTotal ? "Total que sale" : "Monto"}
+              {account ? ` (${currency})` : ""}
             </label>
             <input
               id="amount"
@@ -679,6 +797,15 @@ export default function TransactionsPage() {
               value={amount}
               onChange={(e) => setAmount(sanitizeDecimal(e.target.value))}
             />
+            {type === "transfer" && withFee && (
+              <FeeSummary
+                amount={amount}
+                fee={feeAmount}
+                included={feeIncluded}
+                currency={currency}
+                crossCurrency={crossCurrency}
+              />
+            )}
           </div>
           <div>
             <label className="label" htmlFor="date">Fecha</label>
@@ -717,7 +844,11 @@ export default function TransactionsPage() {
               className="input"
               required
               value={accountId}
-              onChange={(e) => { setAccountId(e.target.value); setCycleHint(null); }}
+              onChange={(e) => {
+                setAccountId(e.target.value);
+                setFeeIncluded(storedFeeIncluded(e.target.value));
+                setCycleHint(null);
+              }}
             >
               <option value="">Selecciona…</option>
               <AccountOptions accounts={accountList} baseCurrency={activeSpace.base_currency} />
@@ -751,7 +882,7 @@ export default function TransactionsPage() {
             <TransferExtras
               source={account}
               target={accountTo}
-              amount={amount}
+              amount={netAmount}
               amountTo={amountTo}
               setAmountTo={setAmountTo}
               fee={feeAmount}
@@ -761,7 +892,10 @@ export default function TransactionsPage() {
           )}
           <div className="contents md:col-span-full md:flex md:items-end md:gap-3">
           {type === "transfer" && withFee && (
-            <FeeField source={account} fee={feeAmount} setFee={setFeeAmount} className="md:w-36 md:shrink-0" />
+            <>
+              <FeeField source={account} fee={feeAmount} setFee={setFeeAmount} className="md:w-36 md:shrink-0" />
+              <FeeModeField included={feeIncluded} setIncluded={setFeeIncluded} className="md:w-40 md:shrink-0" />
+            </>
           )}
           {withEvent && (
             <div className="md:w-48 md:shrink-0">
@@ -1454,7 +1588,9 @@ export default function TransactionsPage() {
           {/* Fila 2 — Monto · Fecha · Categoría/Desde · Método/Hacia */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
-              <label className="label">Monto ({editCurrency})</label>
+              <label className="label">
+                {editShowsTotal ? "Total que sale" : "Monto"} ({editCurrency})
+              </label>
               <input
                 className="input"
                 inputMode="decimal"
@@ -1463,6 +1599,15 @@ export default function TransactionsPage() {
                 value={editAmount}
                 onChange={(e) => setEditAmount(sanitizeDecimal(e.target.value))}
               />
+              {editType === "transfer" && (
+                <FeeSummary
+                  amount={editAmount}
+                  fee={editFeeAmount}
+                  included={editFeeIncluded}
+                  currency={editCurrency}
+                  crossCurrency={editCrossCurrency}
+                />
+              )}
             </div>
             <div>
               <label className="label">Fecha</label>
@@ -1512,11 +1657,13 @@ export default function TransactionsPage() {
                 <TransferExtras
                   source={editAccount}
                   target={editAccountTo}
-                  amount={editAmount}
+                  amount={editNetAmount}
                   amountTo={editAmountTo}
                   setAmountTo={setEditAmountTo}
                   fee={editFeeAmount}
                   setFee={setEditFeeAmount}
+                  feeIncluded={editFeeIncluded}
+                  setFeeIncluded={setEditFeeIncluded}
                 />
               </>
             ) : (
