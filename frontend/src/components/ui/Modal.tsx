@@ -29,14 +29,14 @@ export default function Modal({ open, onClose, title, children, size = "sm" }: M
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 backdrop-blur-sm sm:px-4"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className={`card max-h-[90vh] w-full overflow-y-auto ${SIZE_CLASSES[size]} p-6 shadow-2xl`}
+        className={`card max-h-[90dvh] w-full overflow-y-auto ${SIZE_CLASSES[size]} p-4 shadow-2xl sm:p-6`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-start justify-between gap-4">

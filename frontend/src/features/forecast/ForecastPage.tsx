@@ -99,7 +99,7 @@ export default function ForecastPage() {
       </div>
 
       {/* PRO-02/07: caja inicial = saldos del perímetro de liquidez + ajuste manual */}
-      <section className="card flex flex-wrap items-end gap-4 p-5">
+      <section className="card flex flex-wrap items-end gap-4 p-4 sm:p-5">
         <div>
           <label className="mb-1 block text-xs text-ink-muted">
             Ajuste de caja inicial (dinero no registrado en Cuentas)
@@ -179,7 +179,7 @@ export default function ForecastPage() {
           )}
 
           {/* Saldo líquido proyectado */}
-          <section className="card p-5">
+          <section className="card p-4 sm:p-5">
             <h2 className="mb-3 text-base font-semibold tracking-tight">Saldo líquido proyectado</h2>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={chartData}>
@@ -217,7 +217,7 @@ export default function ForecastPage() {
           </section>
 
           {/* Timeline de eventos */}
-          <section className="card p-5">
+          <section className="card p-4 sm:p-5">
             <h2 className="mb-3 text-base font-semibold tracking-tight">Línea de tiempo</h2>
             {data.events.length === 0 ? (
               <p className="text-sm text-ink-muted">
@@ -238,19 +238,20 @@ export default function ForecastPage() {
                           <Icon name={KIND_ICON[ev.kind]} className="size-3.5" />
                         </span>
                         <span className="min-w-0">
-                          <span className="truncate">{ev.description}</span>
-                          <span className="ml-2 text-xs text-ink-muted">
+                          <span className="block truncate sm:inline">{ev.description}</span>
+                          <span className="text-xs text-ink-muted sm:ml-2">
                             {KIND_LABEL[ev.kind]}
                             {ev.is_estimate ? " · estimado" : ""}
+                            <span className="sm:hidden"> · {formatDate(ev.date)}</span>
                           </span>
                           {!ev.covered && (
-                            <span className="ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">
+                            <span className="mt-1 inline-block rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-700 sm:ml-2 sm:mt-0 dark:text-red-300">
                               Faltan {formatMoney(ev.shortfall, currency)}
                             </span>
                           )}
                         </span>
                       </span>
-                      <span className="flex shrink-0 items-center gap-3 text-right">
+                      <span className="tabular flex shrink-0 flex-col items-end text-right sm:flex-row sm:items-center sm:gap-3">
                         <span
                           className={
                             isIn
@@ -262,7 +263,7 @@ export default function ForecastPage() {
                           {formatMoney(ev.amount, currency)}
                         </span>
                         <span
-                          className={`w-28 text-xs ${
+                          className={`text-xs sm:w-28 ${
                             balNeg
                               ? "text-red-600 dark:text-red-400"
                               : "text-ink-muted"
@@ -270,7 +271,7 @@ export default function ForecastPage() {
                         >
                           {formatMoney(ev.balance_after, currency)}
                         </span>
-                        <span className="w-20 text-xs text-ink-muted">
+                        <span className="hidden w-20 text-xs text-ink-muted sm:inline">
                           {formatDate(ev.date)}
                         </span>
                       </span>

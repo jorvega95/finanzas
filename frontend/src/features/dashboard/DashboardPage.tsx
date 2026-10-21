@@ -77,7 +77,7 @@ function BudgetsSection({ month, excludeEvents }: { month: string; excludeEvents
   }
 
   return (
-    <section className="card p-5 xl:col-span-3">
+    <section className="card p-4 sm:p-5 xl:col-span-3">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">Presupuestos</h2>
         <button
@@ -208,26 +208,26 @@ export default function DashboardPage() {
       </div>
 
       {/* Totales del mes (DSH-02) + patrimonio neto actual (DSH-07) */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           ["Ingresos", totals?.income, "text-emerald-600 dark:text-emerald-400"],
           ["Gastos", totals?.expenses, "text-red-600 dark:text-red-400"],
           ["Neto", totals?.net, ""],
         ].map(([label, value, color]) => (
-          <div key={label as string} className="card p-5">
+          <div key={label as string} className="card p-4 sm:p-5">
             <p className="text-sm text-ink-muted">{label}</p>
-            <p className={`tabular mt-2 text-2xl font-semibold tracking-tight ${color}`}>
+            <p className={`tabular mt-2 text-xl font-semibold tracking-tight sm:text-2xl ${color}`}>
               {value !== undefined ? formatMoney(value as string, currency) : "…"}
             </p>
           </div>
         ))}
         <div
-          className="card p-5"
+          className="card p-4 sm:p-5"
           title="Situación actual: activos − pasivos al último snapshot, sin importar el mes elegido"
         >
           <p className="text-sm text-ink-muted">Patrimonio neto (hoy)</p>
           <p
-            className={`tabular mt-2 text-2xl font-semibold tracking-tight ${
+            className={`tabular mt-2 text-xl font-semibold tracking-tight sm:text-2xl ${
               lastNetWorth && Number(lastNetWorth.net_worth) < 0
                 ? "text-red-600 dark:text-red-400"
                 : ""
@@ -248,7 +248,7 @@ export default function DashboardPage() {
           el tercio derecho en dos filas; presupuestos a lo ancho. */}
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {/* Tendencia 6 meses (DSH-03) */}
-        <section className="card p-5 lg:col-span-2">
+        <section className="card p-4 sm:p-5 lg:col-span-2">
           <h2 className="mb-4 text-sm font-semibold">Tendencia 6 meses</h2>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={data?.trend ?? []}>
@@ -270,7 +270,7 @@ export default function DashboardPage() {
         </section>
 
         {/* Próximos compromisos (DSH-05) */}
-        <section className="card p-5 xl:row-span-2">
+        <section className="card p-4 sm:p-5 xl:row-span-2">
           <h2 className="mb-4 text-sm font-semibold">Próximos compromisos</h2>
           {(data?.upcoming ?? []).length === 0 ? (
             <p className="text-sm text-ink-muted">Nada pendiente.</p>
@@ -302,7 +302,7 @@ export default function DashboardPage() {
         </section>
 
         {/* Por categoría (DSH-03) */}
-        <section className="card p-5">
+        <section className="card p-4 sm:p-5">
           <h2 className="mb-4 text-sm font-semibold">Gasto por categoría</h2>
           {(data?.by_category ?? []).length === 0 ? (
             <p className="text-sm text-ink-muted">Sin gastos este mes.</p>
@@ -337,7 +337,7 @@ export default function DashboardPage() {
         </section>
 
         {/* Por naturaleza (CAT-03/DSH-03), con drill-down (DSH-06) */}
-        <section className="card p-5">
+        <section className="card p-4 sm:p-5">
           <h2 className="mb-4 text-sm font-semibold">Por naturaleza</h2>
           {natureData.length === 0 ? (
             <p className="text-sm text-ink-muted">Sin gastos este mes.</p>

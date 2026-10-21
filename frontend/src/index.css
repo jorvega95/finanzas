@@ -123,11 +123,37 @@
   .btn-danger {
     @apply inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-red-600 px-3.5 text-sm font-medium text-white transition hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:pointer-events-none disabled:opacity-50;
   }
+  /* 16px en móvil: con menos, iOS Safari hace zoom al enfocar el campo. */
   .input {
-    @apply h-9 w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink transition placeholder:text-ink-subtle hover:border-line-strong focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 disabled:opacity-60;
+    @apply h-9 w-full rounded-lg border border-line bg-surface px-3 text-base text-ink transition placeholder:text-ink-subtle sm:text-sm hover:border-line-strong focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 disabled:opacity-60;
   }
   textarea.input {
     @apply h-auto py-2;
+  }
+  /* Los inputs de fecha traen un ancho mínimo nativo que los saca de su celda
+     en columnas angostas. */
+  input.input[type="date"],
+  input.input[type="month"] {
+    @apply min-w-0 px-2 sm:px-3;
+  }
+  /* iOS Safari ignora width/min-width si no se quita la apariencia nativa; sin
+     ella el valor queda centrado en horizontal y pegado arriba, así que se
+     alinea a la izquierda y se centra en vertical con el interlineado (alto del
+     campo menos el borde). */
+  @supports (-webkit-touch-callout: none) {
+    input.input[type="date"],
+    input.input[type="month"] {
+      -webkit-appearance: none;
+      appearance: none;
+      display: block;
+      padding-block: 0;
+      line-height: calc(--spacing(9) - 2px);
+    }
+    input.input::-webkit-date-and-time-value {
+      margin: 0;
+      line-height: inherit;
+      text-align: left;
+    }
   }
   .label {
     @apply mb-1.5 block text-xs font-medium text-ink-muted;

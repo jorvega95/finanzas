@@ -663,9 +663,11 @@ function CommitmentCard({
           ["Pagado", c.paid],
           ["Pendiente", c.pending],
         ].map(([label, value]) => (
-          <div key={label} className="rounded-lg border border-line bg-surface px-3 py-2.5">
-            <p className="text-xs text-ink-muted">{label}</p>
-            <p className="tabular mt-0.5 font-semibold">{formatMoney(value, c.currency)}</p>
+          <div key={label} className="min-w-0 rounded-lg border border-line bg-surface px-2.5 py-2.5 sm:px-3">
+            <p className="truncate text-xs text-ink-muted">{label}</p>
+            <p className="tabular mt-0.5 text-sm font-semibold sm:text-base">
+              {formatMoney(value, c.currency)}
+            </p>
           </div>
         ))}
       </div>

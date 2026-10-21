@@ -294,14 +294,17 @@ export default function MsiPage() {
     <div className="page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <h1 className="page-title">Meses sin intereses</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <button className="btn-secondary" onClick={() => setDialog("backfill")}>
+        {/* En móvil, dos columnas con textos cortos para que quepan lado a lado. */}
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+          <button className="btn-secondary px-3 sm:px-3.5" onClick={() => setDialog("backfill")}>
             <Icon name="plus" />
-            Registrar MSI existente
+            <span className="sm:hidden">MSI existente</span>
+            <span className="hidden sm:inline">Registrar MSI existente</span>
           </button>
-          <button className="btn-primary" onClick={() => setDialog("convert")}>
+          <button className="btn-primary px-3 sm:px-3.5" onClick={() => setDialog("convert")}>
             <Icon name="plus" />
-            Convertir compra a MSI
+            <span className="sm:hidden">Convertir compra</span>
+            <span className="hidden sm:inline">Convertir compra a MSI</span>
           </button>
         </div>
       </div>
@@ -334,7 +337,7 @@ export default function MsiPage() {
             // Cuotas canceladas por liquidación anticipada (MSI-07) cuentan como cubiertas.
             const done = total - summary.charged_count - summary.pending_count;
             return (
-              <section key={summary.plan.id} className="card p-5">
+              <section key={summary.plan.id} className="card p-4 sm:p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="font-semibold">{summary.description || "Compra MSI"}</h3>
@@ -392,7 +395,7 @@ export default function MsiPage() {
       )}
 
       {(projection.data ?? []).length > 0 && (
-        <section className="card p-5">
+        <section className="card p-4 sm:p-5">
           <h2 className="mb-3 text-base font-semibold tracking-tight">Comprometido por mes</h2>
           <div className="overflow-x-auto">
             <table className="tabular w-full text-sm">

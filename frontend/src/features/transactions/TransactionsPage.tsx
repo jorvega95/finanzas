@@ -567,7 +567,7 @@ export default function TransactionsPage() {
   return (
     <div className="page">
       {/* Captura rápida */}
-      <form onSubmit={handleSubmit} className="card space-y-4 p-5">
+      <form onSubmit={handleSubmit} className="card space-y-4 p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-2">
           {(Object.keys(TYPE_LABELS) as TxnType[]).map((t) => (
             <button
@@ -738,7 +738,7 @@ export default function TransactionsPage() {
 
       {/* Bandeja por confirmar (REC-03) */}
       {(tray.data?.total ?? 0) > 0 && (
-        <section className="card p-5">
+        <section className="card p-4 sm:p-5">
           <h2 className="mb-3 text-base font-semibold tracking-tight">
             Por confirmar
             <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-800 dark:text-amber-200">
@@ -784,7 +784,7 @@ export default function TransactionsPage() {
       )}
 
       {/* Lista con filtros */}
-      <section className="card p-5">
+      <section className="card p-4 sm:p-5">
         <div className="mb-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold tracking-tight">
@@ -836,7 +836,7 @@ export default function TransactionsPage() {
               ))}
             </div>
             {filterMode === "month" ? (
-              <div className="flex items-center gap-1">
+              <div className="flex flex-1 items-center gap-1 sm:flex-none">
                 <button
                   type="button"
                   aria-label="Mes anterior"
@@ -848,7 +848,7 @@ export default function TransactionsPage() {
                 <input
                   type="month"
                   aria-label="Mes"
-                  className="input w-auto"
+                  className="input min-w-0 flex-1 sm:w-auto sm:flex-none"
                   value={filterMonth}
                   onChange={(e) => e.target.value && setFilterMonth(e.target.value)}
                 />
@@ -895,9 +895,10 @@ export default function TransactionsPage() {
               </div>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap [&>select]:min-w-0 sm:[&>select]:w-auto">
             <select
-              className="input w-auto"
+              className="input"
+              aria-label="Tipo"
               value={filterType}
               onChange={(e) => {
                 setFilterType(e.target.value);
@@ -911,7 +912,8 @@ export default function TransactionsPage() {
             </select>
             {filterType !== "transfer" && (
               <select
-                className="input w-auto"
+                className="input"
+                aria-label="Categoría"
                 value={filterCategoryId}
                 onChange={(e) => setFilterCategoryId(e.target.value)}
               >
@@ -937,7 +939,8 @@ export default function TransactionsPage() {
               </select>
             )}
             <select
-              className="input w-auto"
+              className="input"
+              aria-label="Cuenta"
               value={filterAccountId}
               onChange={(e) => setFilterAccountId(e.target.value)}
             >
@@ -946,7 +949,7 @@ export default function TransactionsPage() {
             </select>
             {eventList.length > 0 && (
               <select
-                className="input w-auto"
+                className="input"
                 aria-label="Evento"
                 value={filterEventId}
                 onChange={(e) => setFilterEventId(e.target.value)}
@@ -1109,7 +1112,7 @@ export default function TransactionsPage() {
                     onClick={() => setDeletingTxn(t)}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                      <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd" />
+                      <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
                     </svg>
                   </button>
                   </>
@@ -1324,7 +1327,7 @@ export default function TransactionsPage() {
           </div>
 
           {/* Fila 2 — Monto · Fecha · Categoría/Desde · Método/Hacia */}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
               <label className="label">Monto ({editCurrency})</label>
               <input
@@ -1455,7 +1458,7 @@ export default function TransactionsPage() {
 
           {/* Fila 3 — Descripción (la moneda la define la cuenta, TAR-10) y evento (EVT-02) */}
           <div className="grid grid-cols-3 gap-3">
-            <div className={eventList.length > 0 ? "col-span-2" : "col-span-3"}>
+            <div className={eventList.length > 0 ? "col-span-3 sm:col-span-2" : "col-span-3"}>
               <label className="label">Descripción</label>
               <input
                 className="input"
@@ -1465,7 +1468,7 @@ export default function TransactionsPage() {
               />
             </div>
             {eventList.length > 0 && (
-              <div>
+              <div className="col-span-3 sm:col-span-1">
                 <label className="label">Evento</label>
                 <EventSelect value={editEventId} onChange={setEditEventId} events={eventList} />
               </div>

@@ -21,7 +21,7 @@ export default function CollapsibleCard({
 }: CollapsibleCardProps) {
   return (
     <details className={`card group ${className}`} open={defaultOpen}>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl p-5 transition hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl p-4 transition sm:p-5 hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent [&::-webkit-details-marker]:hidden">
         <div className="min-w-0">
           <h2 className="text-base font-semibold tracking-tight">{title}</h2>
           {description && <p className="mt-0.5 text-xs text-ink-muted">{description}</p>}
@@ -31,7 +31,7 @@ export default function CollapsibleCard({
           className="size-4 shrink-0 text-ink-subtle transition group-open:rotate-180"
         />
       </summary>
-      <div className="border-t border-line p-5">{children}</div>
+      <div className="border-t border-line p-4 sm:p-5">{children}</div>
     </details>
   );
 }

@@ -179,7 +179,7 @@ export default function InvestmentsPage() {
       </p>
 
       {/* Cuentas + movimientos */}
-      <section className="card space-y-5 p-5">
+      <section className="card space-y-5 p-4 sm:p-5">
         <h2 className="text-base font-semibold tracking-tight">Cuentas de inversión y movimientos</h2>
         <form
           onSubmit={(e) => {
@@ -225,7 +225,7 @@ export default function InvestmentsPage() {
       </section>
 
       {/* Holdings (INV-06) */}
-      <section className="card p-5">
+      <section className="card p-4 sm:p-5">
         <h2 className="mb-3 text-base font-semibold tracking-tight">Portafolio</h2>
         {(data?.holdings ?? []).length === 0 ? (
           <p className="text-sm text-ink-muted">
@@ -317,7 +317,7 @@ export default function InvestmentsPage() {
 
       {/* Historia (INV-05 + PAT-01) */}
       <div className="grid gap-6 lg:grid-cols-2">
-        <section className="card p-5">
+        <section className="card p-4 sm:p-5">
           <h2 className="mb-3 text-base font-semibold tracking-tight">Evolución del portafolio</h2>
           {(snapshots.data ?? []).length < 2 ? (
             <p className="text-sm text-ink-muted">
@@ -345,7 +345,7 @@ export default function InvestmentsPage() {
             </ResponsiveContainer>
           )}
         </section>
-        <section className="card p-5">
+        <section className="card p-4 sm:p-5">
           <h2 className="mb-3 text-base font-semibold tracking-tight">Patrimonio neto</h2>
           {(netWorth.data ?? []).length < 2 ? (
             <p className="text-sm text-ink-muted">

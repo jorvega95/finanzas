@@ -945,10 +945,10 @@ function StatementsDetail({ card, sources }: { card: AccountOut; sources: Accoun
   return (
     <div className="mt-4 border-t border-line pt-4">
       <h4 className="mb-2 text-sm font-medium">Statements</h4>
-      <ul className="space-y-1 text-sm">
+      <ul className="divide-y divide-line text-sm">
         {(statements.data ?? []).map((s) => (
-          <li key={s.id} className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-ink-muted">
+          <li key={s.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 py-1.5">
+            <span className="text-xs text-ink-muted sm:text-sm">
               {formatDate(s.period_start)} → {formatDate(s.period_end)} · vence {formatDate(s.due_date)}
             </span>
             <span className="flex items-center gap-2">
@@ -1193,7 +1193,7 @@ function AccountItem({
               <h3 className="truncate text-base font-semibold tracking-tight">{account.name}</h3>
               <p className="text-xs text-ink-muted">{accountSummary(account)}</p>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1.5 [&>button]:h-8 [&>button]:px-2.5 @md:[&>button]:h-9 @md:[&>button]:px-3.5">
               {isCash && (
                 <button className="btn-secondary" onClick={onAdjust}>
                   Ajustar saldo
