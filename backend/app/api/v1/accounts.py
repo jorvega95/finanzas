@@ -28,6 +28,7 @@ from app.schemas.accounts import (
 )
 from app.schemas.transactions import TransactionOut
 from app.services import accounts as svc
+from app.services import fx
 from app.services.reminders import fire_due_reminders
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -55,6 +56,14 @@ async def _account_with_debt(db: DbSession, space: Space, account: Account) -> A
         out.opening_balance = await svc.get_opening_balance(db, space, account)  # TDC-14
     elif out.behavior in BALANCE_BEHAVIORS:
         out.balance = await svc.account_balance(db, account)  # TAR-05
+        if account.currency != space.base_currency:  # TAR-12
+            today = today_in_tz(space.timezone)
+            rate = await fx.get_rate(db, account.currency, space.base_currency, today)
+            if rate is not None:
+                out.balance_fx_rate = rate
+                out.balance_base = await fx.mark_to_market(
+                    db, out.balance, account.currency, space.base_currency, today
+                )
     out.signed_balance = await svc.account_signed_balance(db, account)  # TAR-06
     return out
 

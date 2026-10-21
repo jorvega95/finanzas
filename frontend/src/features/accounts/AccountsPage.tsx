@@ -1170,6 +1170,7 @@ function AccountItem({
   onAdjust: () => void;
   sources: AccountOut[];
 }) {
+  const [showBase, setShowBase] = useState(false);
   const isCredit = account.behavior === "credit";
   const isCash = account.behavior === "cash";
   const negative = account.balance !== null && isNegativeAmount(account.balance);
@@ -1256,14 +1257,35 @@ function AccountItem({
 
         {hasBalance(account.behavior) && !isLoan(account.behavior) && account.balance !== null && (
           <div className="rounded-lg border border-line bg-surface px-4 py-3">
-            <p className="text-xs text-ink-muted">Saldo actual</p>
-            <p
-              className={`tabular text-2xl font-semibold tracking-tight ${
-                negative ? "text-red-600 dark:text-red-400" : ""
-              }`}
-            >
-              {formatMoney(account.balance, account.currency)}
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs text-ink-muted">Saldo actual</p>
+                <p
+                  className={`tabular text-2xl font-semibold tracking-tight ${
+                    negative ? "text-red-600 dark:text-red-400" : ""
+                  }`}
+                >
+                  {showBase && account.balance_base != null
+                    ? formatMoney(account.balance_base, "MXN")
+                    : formatMoney(account.balance, account.currency)}
+                </p>
+              </div>
+              {account.balance_base != null && (
+                <button
+                  type="button"
+                  className="btn-secondary h-11 w-11 shrink-0 justify-center px-0"
+                  aria-pressed={showBase}
+                  aria-label={showBase ? `Ver en ${account.currency}` : "Ver en MXN"}
+                  title={showBase ? `Ver en ${account.currency}` : "Ver en MXN al tipo de cambio de hoy"}
+                  onClick={() => setShowBase((v) => !v)}
+                >
+                  <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M17 3l4 4-4 4M21 7H8" />
+                    <path d="M7 21l-4-4 4-4M3 17h13" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         )}
 

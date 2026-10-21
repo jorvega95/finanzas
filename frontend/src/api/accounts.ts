@@ -55,6 +55,8 @@ export interface AccountOut {
   debt: DebtSummary | null;
   balance: string | null; // TAR-05, balance accounts only
   signed_balance: string | null; // TAR-06: +asset or -liability for PAT-01
+  balance_base: string | null; // TAR-12: balance in base currency (rate of the day)
+  balance_fx_rate: string | null; // TAR-12
   next_payment: { amount: string; due_date: string } | null; // TDC-14
   opening_balance: string | null; // TDC-14: synthetic previous-cut debt
 }

@@ -984,3 +984,42 @@ async def test_tar08_viewer_cannot_change_design(client):
         f"/api/v1/accounts/{card['id']}", headers=viewer, json={"color": "#000000"}
     )
     assert res.status_code == 403
+
+
+@freeze_time("2026-06-20")
+async def test_tar12_usd_account_reports_base_equivalent(client, db_session):
+    """TAR-12: una cuenta USD con saldo reporta su equivalente en MXN con la
+    tasa del día; una cuenta MXN no lleva equivalente."""
+    from datetime import date
+    from decimal import Decimal
+
+    from app.models.fx import ExchangeRate
+
+    ctx = await bootstrap_space(client)
+    db_session.add(
+        ExchangeRate(base="USD", quote="MXN", date=date(2026, 6, 19), rate=Decimal("18.50"))
+    )
+    await db_session.commit()
+    usd = ctx["accounts"]["Dólares"]["id"]
+    res = await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "income",
+            "date": "2026-06-20",
+            "amount": "100.00",
+            "currency": "USD",
+            "account_id": usd,
+            "category_id": next(iter(ctx["income_categories"].values()))["id"],
+            "description": "Pago",
+        },
+    )
+    assert res.status_code == 201, res.text
+
+    accounts = {
+        a["id"]: a for a in (await client.get("/api/v1/accounts", headers=ctx["headers"])).json()
+    }
+    assert accounts[usd]["balance_base"] == "1850.00"
+    assert Decimal(accounts[usd]["balance_fx_rate"]) == Decimal("18.5")
+    mxn = next(a for a in accounts.values() if a["currency"] == "MXN" and a["balance"] is not None)
+    assert mxn["balance_base"] is None

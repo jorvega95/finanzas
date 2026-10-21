@@ -2,6 +2,7 @@
 
 import datetime as dt
 import uuid
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -138,6 +139,8 @@ class AccountWithDebtOut(AccountOut):
     debt: DebtSummary | None = None  # TDC-09, credit only
     balance: MoneyOut | None = None  # TAR-05, balance accounts only
     signed_balance: MoneyOut | None = None  # TAR-06: +asset or -liability for PAT-01
+    balance_base: MoneyOut | None = None  # TAR-12: balance in base currency (FX-04)
+    balance_fx_rate: Decimal | None = None  # TAR-12: rate of the day used
     next_payment: NextPaymentOut | None = None  # TDC-14, credit only
     opening_balance: MoneyNonNeg | None = None  # TDC-14: synthetic previous-cut debt
 
