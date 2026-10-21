@@ -13,7 +13,6 @@ import {
   hasBalance,
   isLoan,
   useAccounts,
-  type AccountBehavior,
   type AccountOut,
 } from "../../api/accounts";
 import {
@@ -37,6 +36,7 @@ import { useSpace } from "../spaces/SpaceProvider";
 import { convertWithRate, formatMoney, impliedRate, isPositiveAmount, sanitizeDecimal } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import Modal from "../../components/ui/Modal";
+import AccountOptions from "../../components/AccountOptions";
 import Icon from "../../components/ui/Icon";
 
 type TxnType = "expense" | "income" | "transfer";
@@ -101,45 +101,6 @@ function detectCutoffCollision(
     : card.statement_day;
   if (day !== cutoffDay) return null;
   return { defaultHint: card.cutoff_day_policy === "next_cycle" ? "next" : "current" };
-}
-
-// Selector de cuentas agrupado como en la página de Cuentas.
-const ACCOUNT_GROUPS: { label: string; behaviors: AccountBehavior[] }[] = [
-  { label: "Efectivo y cuentas", behaviors: ["cash", "debit", "prepaid"] },
-  { label: "Ahorro", behaviors: ["savings"] },
-  { label: "Tarjetas de crédito", behaviors: ["credit"] },
-  { label: "Préstamos", behaviors: ["loan"] }, // TAR-11
-];
-
-function AccountOptions({
-  accounts,
-  exclude,
-  baseCurrency,
-}: {
-  accounts: AccountOut[];
-  exclude?: string;
-  baseCurrency: string;
-}) {
-  return (
-    <>
-      {ACCOUNT_GROUPS.map((group) => {
-        const items = accounts.filter(
-          (a) => a.id !== exclude && a.behavior && group.behaviors.includes(a.behavior),
-        );
-        if (items.length === 0) return null;
-        return (
-          <optgroup key={group.label} label={group.label}>
-            {items.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-                {a.currency !== baseCurrency ? ` (${a.currency})` : ""}
-              </option>
-            ))}
-          </optgroup>
-        );
-      })}
-    </>
-  );
 }
 
 // Enter dentro de un campo no guarda por accidente: solo el botón envía.

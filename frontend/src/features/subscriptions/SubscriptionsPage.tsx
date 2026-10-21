@@ -23,6 +23,7 @@ import {
   type RecurringRuleOut,
   type RuleStatus,
 } from "../../api/recurring";
+import AccountOptions from "../../components/AccountOptions";
 import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
 import Spinner from "../../components/ui/Spinner";
@@ -348,14 +349,10 @@ function RuleForm({
           onChange={(e) => setAccountId(e.target.value)}
         >
           <option value="">Selecciona…</option>
-          {accounts
-            .filter((a) => a.is_active || a.id === accountId)
-            .map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-                {a.currency !== activeSpace.base_currency ? ` (${a.currency})` : ""}
-              </option>
-            ))}
+          <AccountOptions
+            accounts={accounts.filter((a) => a.is_active || a.id === accountId)}
+            baseCurrency={activeSpace.base_currency}
+          />
         </select>
       </div>
       <div className="col-span-2">
