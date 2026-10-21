@@ -4,16 +4,26 @@ import { api } from "./client";
 
 export interface NotificationOut {
   id: string;
-  kind: "card_due" | "budget_alert" | "commitment_due" | "custom"; // CXP-08
+  kind:
+    | "card_due"
+    | "budget_alert"
+    | "commitment_due" // CXP-08
+    | "subscription_charge" // REC-12
+    | "trial_ending" // REC-10
+    | "bill_due" // REC-11
+    | "custom";
   ref_id: string;
   fire_at: string;
-  channel: "in_app" | "email";
+  channel: "in_app" | "email" | "desktop"; // REM-08
   message: string;
   status: "pending" | "sent" | "canceled" | "failed" | "dismissed";
   sent_at: string | null;
   /** REM-07: nulo = no leído. */
   read_at: string | null;
   created_at: string;
+  /** REC-12: regla y fecha del cobro de un aviso de suscripción o servicio. */
+  recurring_rule_id: string | null;
+  ref_date: string | null;
 }
 
 // Cada 60 s: los recordatorios los dispara un job diario, no hay prisa.

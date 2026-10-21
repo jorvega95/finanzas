@@ -28,6 +28,11 @@ import {
 } from "../../api/transactions";
 import { useEvents, useSetTransactionEvent } from "../../api/events";
 import { useCommitments } from "../../api/commitments";
+import {
+  useRecurringRules,
+  useUpdateRecurringRule,
+  type RecurringRuleOut,
+} from "../../api/recurring";
 import { useSpace } from "../spaces/SpaceProvider";
 import { convertWithRate, formatMoney, impliedRate, isPositiveAmount, sanitizeDecimal } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
@@ -349,6 +354,33 @@ export default function TransactionsPage() {
   const update = useUpdateTransaction();
   const confirm = useConfirmTransaction();
   const remove = useDeleteTransaction();
+  // REC-14: al confirmar una suscripción con otro monto, ofrecer actualizar
+  // su precio (solo si la regla está en la moneda de la cuenta).
+  const recurringRules = useRecurringRules(true);
+  const updateRule = useUpdateRecurringRule();
+  const [priceChange, setPriceChange] = useState<{ rule: RecurringRuleOut; amount: string } | null>(
+    null,
+  );
+
+  function confirmInstance(t: TransactionOut) {
+    confirm.mutate(
+      { id: t.id },
+      {
+        onSuccess: () => {
+          const rule = recurringRules.data?.find((r) => r.id === t.recurring_rule_id);
+          if (
+            rule &&
+            rule.kind === "subscription" &&
+            rule.currency === t.currency &&
+            rule.amount !== null &&
+            rule.amount !== t.amount
+          ) {
+            setPriceChange({ rule, amount: t.amount });
+          }
+        },
+      },
+    );
+  }
 
   const [deletingTxn, setDeletingTxn] = useState<TransactionOut | null>(null);
   const [editingTxn, setEditingTxn] = useState<TransactionOut | null>(null);
@@ -845,6 +877,9 @@ export default function TransactionsPage() {
                   <p className="truncate text-sm font-medium">{t.description || "Recurrente"}</p>
                   <p className="text-xs text-ink-muted">
                     {formatDate(t.date)} · {formatMoney(t.amount, t.currency)}
+                    {t.original_amount && t.original_currency && (
+                      <> (precio {formatMoney(t.original_amount, t.original_currency)})</>
+                    )}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -859,7 +894,7 @@ export default function TransactionsPage() {
                   </button>
                   <button
                     className="btn-primary px-3 py-1.5"
-                    onClick={() => confirm.mutate({ id: t.id })}
+                    onClick={() => confirmInstance(t)}
                   >
                     Confirmar
                   </button>
@@ -1317,6 +1352,42 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
+
+      {/* REC-14: actualizar el precio de la suscripción */}
+      <Modal
+        open={priceChange !== null}
+        onClose={() => setPriceChange(null)}
+        title="¿Cambió el precio?"
+      >
+        {priceChange && (
+          <div className="space-y-4">
+            <p className="text-sm">
+              Confirmaste <strong>{priceChange.rule.description}</strong> por{" "}
+              {formatMoney(priceChange.amount, priceChange.rule.currency)}, pero la suscripción
+              dice {formatMoney(priceChange.rule.amount ?? "0", priceChange.rule.currency)}.
+              ¿Actualizo el precio para los próximos cobros?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setPriceChange(null)}>
+                Solo este mes
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={updateRule.isPending}
+                onClick={() =>
+                  updateRule.mutate(
+                    { id: priceChange.rule.id, amount: priceChange.amount },
+                    { onSuccess: () => setPriceChange(null) },
+                  )
+                }
+              >
+                Actualizar precio
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Modal de confirmación de eliminación */}
       <Modal

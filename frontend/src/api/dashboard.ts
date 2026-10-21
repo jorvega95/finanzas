@@ -23,7 +23,8 @@ export interface UpcomingItem {
   kind: "card_due" | "msi_quota" | "recurring" | "commitment"; // CXP-08
   date: string;
   description: string;
-  amount: string;
+  amount: string | null; // REC-11: servicio variable sin estimado
+  currency?: string | null; // REC-08: moneda del precio si no es la base
   ref_id: string;
   is_overdue: boolean;
 }

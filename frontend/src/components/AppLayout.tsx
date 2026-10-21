@@ -16,6 +16,7 @@ const NAV: { to: string; label: string; icon: IconName }[] = [
   { to: "/msi", label: "MSI", icon: "calendar" },
   { to: "/eventos", label: "Eventos", icon: "party" }, // EVT-01
   { to: "/compromisos", label: "Compromisos", icon: "target" }, // CXP-01
+  { to: "/suscripciones", label: "Suscripciones", icon: "repeat" }, // REC-07
   { to: "/inversiones", label: "Inversiones", icon: "investments" },
   { to: "/ajustes", label: "Ajustes", icon: "settings" },
 ];

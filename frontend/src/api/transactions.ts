@@ -21,6 +21,8 @@ export interface TransactionOut {
   expense_nature_override: string | null;
   recurring_rule_id: string | null;
   needs_review: boolean;
+  original_amount?: string | null; // REC-08: precio en otra moneda (informativo)
+  original_currency?: string | null;
   event_id: string | null; // EVT-02
   commitment_id: string | null; // CXP-03: abono a un compromiso
   installment_plan_id: string | null; // MSI-03: compra MSI (madre)

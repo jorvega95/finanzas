@@ -9,6 +9,7 @@ import ForecastPage from "../features/forecast/ForecastPage";
 import InvestmentsPage from "../features/investments/InvestmentsPage";
 import MsiPage from "../features/msi/MsiPage";
 import SettingsPage from "../features/settings/SettingsPage";
+import SubscriptionsPage from "../features/subscriptions/SubscriptionsPage";
 import { SpaceProvider } from "../features/spaces/SpaceProvider";
 import TransactionsPage from "../features/transactions/TransactionsPage";
 
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
           { path: "/msi", element: <MsiPage /> },
           { path: "/eventos", element: <EventsPage /> },
           { path: "/compromisos", element: <CommitmentsPage /> },
+          { path: "/suscripciones", element: <SubscriptionsPage /> },
           { path: "/inversiones", element: <InvestmentsPage /> },
           { path: "/ajustes", element: <SettingsPage /> },
         ],

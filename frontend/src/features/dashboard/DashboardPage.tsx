@@ -292,7 +292,11 @@ export default function DashboardPage() {
                     </span>
                   </span>
                   <span className="text-right">
-                    <span className="tabular font-medium">{formatMoney(item.amount, currency)}</span>
+                    <span className="tabular font-medium">
+                      {item.amount === null
+                        ? "Por capturar"
+                        : formatMoney(item.amount, item.currency ?? currency)}
+                    </span>
                     <span className="ml-2 text-xs text-ink-muted">{formatDate(item.date)}</span>
                   </span>
                 </li>

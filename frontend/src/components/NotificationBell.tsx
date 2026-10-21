@@ -1,6 +1,7 @@
 // Campana del centro de notificaciones in-app (REM-04..REM-07, OPP-01).
 // Badge de no leídos + panel con los avisos del espacio activo.
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   useDismissNotification,
   useMarkAllRead,
@@ -15,6 +16,9 @@ const KIND_ICON: Record<NotificationOut["kind"], IconName> = {
   card_due: "card",
   budget_alert: "target",
   commitment_due: "party", // CXP-08: pago a proveedor
+  subscription_charge: "repeat", // REC-12
+  trial_ending: "hourglass", // REC-10
+  bill_due: "zap", // REC-11
   custom: "bell",
 };
 
@@ -106,6 +110,22 @@ export default function NotificationBell() {
                     <p className="break-words">{n.message}</p>
                     <p className="mt-0.5 text-xs text-ink-muted">
                       {formatDate(n.fire_at)}
+                      {n.recurring_rule_id && (
+                        <>
+                          {" · "}
+                          <Link
+                            to="/suscripciones"
+                            className="text-accent hover:underline"
+                            onClick={() => setOpen(false)}
+                          >
+                            {n.kind === "bill_due"
+                              ? "Capturar monto"
+                              : n.kind === "trial_ending"
+                                ? "Ver prueba"
+                                : "Ver suscripción"}
+                          </Link>
+                        </>
+                      )}
                     </p>
                   </div>
                   <button
