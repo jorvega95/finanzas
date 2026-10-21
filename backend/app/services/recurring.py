@@ -137,7 +137,8 @@ def occurrences(rule: RecurringRule, until: date) -> Iterator[date]:
 
 
 def is_occurrence(rule: RecurringRule, day: date) -> bool:
-    return day in set(occurrences(rule, day))
+    """Stops at `day` (the generator never runs past it)."""
+    return any(occ == day for occ in occurrences(rule, day))
 
 
 def rule_status(rule: RecurringRule, today: date) -> str:
@@ -345,6 +346,9 @@ async def _bill_occurrence(
     rule = await get_rule(session, space.id, rule_id)
     if rule.kind != RecurringKind.bill:
         raise _reject("Solo los servicios variables se capturan")
+    # Bounded work: a bill is captured around its date, never years ahead.
+    if scheduled > today_in_tz(space.timezone) + timedelta(days=REMINDER_HORIZON_DAYS):
+        raise _reject("Ese recibo aún no llega")
     if not is_occurrence(rule, scheduled):
         raise _reject("La fecha no corresponde a un recibo de este servicio")
     existing = await session.scalar(

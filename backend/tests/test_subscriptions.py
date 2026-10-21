@@ -477,3 +477,18 @@ async def test_cancel_url_only_http(client):
         f"{RULES}/{rule['id']}", headers=ctx["headers"], json={"cancel_url": "data:text/html,x"}
     )
     assert res.status_code == 422
+
+
+@freeze_time("2026-07-10 18:00:00")
+async def test_rec11_capture_rejects_far_future_dates(client):
+    """Bounded work: a far-future scheduled_date is rejected up front."""
+    ctx = await bootstrap_space(client)
+    res = await client.post(RULES, headers=ctx["headers"], json=bill_payload(ctx))
+    url = f"{RULES}/{res.json()['id']}"
+    for path, body in (
+        ("capture", {"scheduled_date": "9999-12-05", "amount": "1.00"}),
+        ("skip", {"scheduled_date": "9999-12-05"}),
+    ):
+        assert (
+            await client.post(f"{url}/{path}", headers=ctx["headers"], json=body)
+        ).status_code == 422
