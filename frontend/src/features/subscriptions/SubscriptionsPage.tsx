@@ -64,7 +64,7 @@ const STATUS_STYLES: Record<RuleStatus, string> = {
   canceled: "bg-muted text-ink-muted",
 };
 
-const TABS: { kind: RecurringKind; label: string; empty: string }[] = [
+const TABS: { kind: RecurringKind; label: string; short?: string; empty: string }[] = [
   {
     kind: "subscription",
     label: "Suscripciones",
@@ -78,6 +78,7 @@ const TABS: { kind: RecurringKind; label: string; empty: string }[] = [
   {
     kind: "generic",
     label: "Otros recurrentes",
+    short: "Otros",
     empty: "Nómina, renta y demás pagos fijos que se registran solos en «Por confirmar».",
   },
 ];
@@ -555,7 +556,8 @@ function PendingBillRow({ bill, accountName }: { bill: PendingBillOut; accountNa
         <div className="min-w-40 flex-1">
           <p className="text-sm font-medium">{bill.description}</p>
           <p className="text-xs text-ink-muted">
-            Recibo del {formatDate(bill.scheduled_date)} · {accountName}
+            Recibo del {formatDate(bill.scheduled_date)}
+            {accountName && ` · ${accountName}`}
             {bill.estimate && ` · aprox. ${formatMoney(bill.estimate, bill.currency)}`}
           </p>
         </div>
@@ -636,8 +638,7 @@ function RuleRow({
           {rule.account_amount_today && rule.account_currency && (
             <> (≈ {formatMoney(rule.account_amount_today, rule.account_currency)} hoy)</>
           )}
-          {" · "}
-          {accountName}
+          {accountName && ` · ${accountName}`}
         </p>
         <p className="text-xs text-ink-muted">
           {rule.status === "canceled" && rule.canceled_at
@@ -771,9 +772,9 @@ export default function SubscriptionsPage() {
         {GENERIC_GROUPS.map((g) => {
           const group = visible.filter((r) => r.type === g.type);
           return (
-            <section key={g.type} className={`min-w-0 rounded-xl border ${g.border}`}>
+            <section key={g.type} className={`card min-w-0 overflow-hidden p-0 ${g.border}`}>
               <header
-                className={`flex items-center justify-between gap-2 rounded-t-xl border-b px-4 py-2.5 ${g.header}`}
+                className={`flex items-center justify-between gap-2 border-b px-4 py-2.5 ${g.header}`}
               >
                 <h3 className="flex items-center gap-2 text-sm font-semibold">
                   <span className={`size-2.5 rounded-full ${g.dot}`} aria-hidden />
@@ -874,48 +875,61 @@ export default function SubscriptionsPage() {
         </section>
       )}
 
-      <section className="card p-4 sm:p-5">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex flex-wrap rounded-lg border border-line p-0.5" role="group" aria-label="Tipo">
-            {TABS.map((t) => (
-              <button
-                key={t.kind}
-                type="button"
-                aria-pressed={tab === t.kind}
-                onClick={() => setTab(t.kind)}
-                className={`rounded-md px-3 py-1 text-sm transition ${
-                  tab === t.kind ? "bg-muted font-medium text-ink" : "text-ink-muted hover:text-ink"
-                }`}
-              >
-                {t.label}
-                {counts[t.kind] > 0 && (
-                  <span className="ml-1.5 text-xs text-ink-subtle">{counts[t.kind]}</span>
-                )}
-              </button>
-            ))}
-          </div>
-          {hiddenCount > 0 && (
-            <label className="flex items-center gap-1.5 text-sm text-ink-muted">
-              <input
-                type="checkbox"
-                checked={showInactive}
-                onChange={(e) => setShowInactive(e.target.checked)}
-              />
-              Mostrar pausadas y canceladas ({hiddenCount})
-            </label>
-          )}
+      {/* Pestañas fuera de la tarjeta: alineadas con el resto de la página y,
+          en móvil, tres botones iguales en una sola fila. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div
+          className="grid grid-cols-3 rounded-lg border border-line bg-card p-0.5 sm:inline-grid sm:w-auto"
+          role="group"
+          aria-label="Tipo"
+        >
+          {TABS.map((t) => (
+            <button
+              key={t.kind}
+              type="button"
+              aria-pressed={tab === t.kind}
+              onClick={() => setTab(t.kind)}
+              className={`flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-sm transition sm:px-4 ${
+                tab === t.kind ? "bg-muted font-medium text-ink" : "text-ink-muted hover:text-ink"
+              }`}
+            >
+              {t.short ? (
+                <>
+                  <span className="sm:hidden">{t.short}</span>
+                  <span className="hidden sm:inline">{t.label}</span>
+                </>
+              ) : (
+                t.label
+              )}
+              {counts[t.kind] > 0 && (
+                <span className="text-xs text-ink-subtle">{counts[t.kind]}</span>
+              )}
+            </button>
+          ))}
         </div>
-
-        {rules.isPending ? (
-          <div className="grid place-items-center py-10">
-            <Spinner />
-          </div>
-        ) : visible.length === 0 ? (
-          <p className="py-8 text-center text-sm text-ink-muted">{current.empty}</p>
-        ) : (
-          renderRules()
+        {hiddenCount > 0 && (
+          <label className="flex items-center gap-1.5 text-sm text-ink-muted">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+            />
+            Mostrar pausadas y canceladas ({hiddenCount})
+          </label>
         )}
-      </section>
+      </div>
+
+      {rules.isPending ? (
+        <div className="card grid place-items-center py-10">
+          <Spinner />
+        </div>
+      ) : visible.length === 0 ? (
+        <p className="card px-4 py-8 text-center text-sm text-ink-muted">{current.empty}</p>
+      ) : tab === "generic" ? (
+        renderRules()
+      ) : (
+        <section className="card px-4 sm:px-5">{renderRules()}</section>
+      )}
 
       <Modal
         open={modal !== null}
