@@ -1158,10 +1158,10 @@ export default function TransactionsPage() {
                   <span
                     className={
                       t.type === "income"
-                        ? "tabular text-sm font-semibold text-emerald-600 dark:text-emerald-400"
+                        ? "tabular text-right text-sm font-semibold text-emerald-600 dark:text-emerald-400"
                         : t.type === "transfer"
-                          ? "tabular text-sm font-semibold text-ink-muted"
-                          : "tabular text-sm font-semibold"
+                          ? "tabular text-right text-sm font-semibold text-ink-muted"
+                          : "tabular text-right text-sm font-semibold"
                     }
                   >
                     {t.type === "income" ? "+" : t.type === "expense" ? "−" : ""}
