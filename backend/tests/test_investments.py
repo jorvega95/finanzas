@@ -342,3 +342,29 @@ async def test_inv04b_manual_price_wins_over_provider_cache(client, db_session, 
     assert holding["price"] == "1.00000000"
     assert holding["price_source"] == "manual"
     assert provider.calls == calls_before
+
+
+@freeze_time("2026-06-20")
+async def test_pat03_net_worth_refreshes_on_read(client, db_session):
+    """PAT-03: un movimiento posterior al snapshot se refleja al consultar."""
+    ctx = await bootstrap_space(client)
+    url = "/api/v1/investments/net-worth"
+    first = (await client.get(url, headers=ctx["headers"])).json()[-1]
+    cash = ctx["accounts"]["Efectivo"]["id"]
+    res = await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "income",
+            "date": "2026-06-20",
+            "amount": "500.00",
+            "currency": "MXN",
+            "account_id": cash,
+            "category_id": next(iter(ctx["income_categories"].values()))["id"],
+            "description": "Pago",
+        },
+    )
+    assert res.status_code == 201, res.text
+    rows = (await client.get(url, headers=ctx["headers"])).json()
+    assert len(rows) == 1  # same day: upsert, not a new row
+    assert Decimal(rows[-1]["net_worth"]) - Decimal(first["net_worth"]) == Decimal("500.00")

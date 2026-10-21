@@ -167,6 +167,7 @@ Una **cuenta** es cualquier lugar donde vive o se debe dinero: tarjetas de créd
 
 - **PAT-01:** `activos = Σ valor de portafolios (INV-05) + Σ saldo de cuentas con saldo (TAR-05, incluye efectivo, billeteras y ahorro) + Σ saldos positivos de préstamos (TAR-11, te deben)`; `pasivos = Σ deuda de tarjetas de crédito (TDC-09: a+b+c) + Σ |saldos negativos de préstamos| (TAR-11, debes)`. Los compromisos con proveedores (CXP) NO son pasivo: el servicio aún no se presta; se ven en su módulo y en el pronóstico (CXP-07). Cada saldo o deuda en moneda ≠ base se convierte con la tasa del día (FX-04). `patrimonio = activos − pasivos`. Job diario lo persiste en `net_worth_snapshots` (mismo horario que INV-05, después de él); el `breakdown` separa inversiones, saldos de cuentas y deuda.
 - **PAT-02:** el patrimonio es un **aproximado**: los saldos en dólares se valúan a la tasa del día, no a la tasa a la que se terminen cambiando (TXN-13). El efectivo cuenta por su saldo ajustable (TAR-09). La UI lo declara ("patrimonio = inversiones + saldos de cuentas − deuda de crédito y préstamos").
+- **PAT-03 · Snapshot al día:** el snapshot del patrimonio de hoy se recalcula (upsert idempotente, INV-05 primero) cada vez que se consulta el patrimonio (historial de Inversiones y tarjeta de DSH-07), además del job diario. Así refleja cualquier movimiento del día sin depender de una acción manual; los días anteriores no se tocan.
 
 ## 12. Importación CSV (IMP) — R13
 

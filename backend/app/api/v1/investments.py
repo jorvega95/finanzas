@@ -132,6 +132,10 @@ async def net_worth_history(
     db: DbSession, space_and_member: ActiveSpace, limit: int = 90
 ) -> list[NetWorthSnapshot]:
     space, _ = space_and_member
+    # PAT-03: refresh today's snapshot on read so it reflects every movement
+    # since the last job run (idempotent upsert; portfolio first, as the job does).
+    await svc.snapshot_portfolio(db, space)
+    await svc.snapshot_net_worth(db, space)
     rows = await db.execute(
         select(NetWorthSnapshot)
         .where(NetWorthSnapshot.space_id == space.id)
