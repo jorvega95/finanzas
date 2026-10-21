@@ -37,3 +37,6 @@ STITCH_BRIEF.md
 
 # --- Claude ---
 .claude/settings.local.json
+
+# --- Capturas y logs de Playwright MCP ---
+.playwright-mcp/
