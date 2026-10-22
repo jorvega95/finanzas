@@ -1087,7 +1087,11 @@ async def _complete_plans_if_done(session: AsyncSession, plan_ids: list[uuid.UUI
 
 async def debt_summary(session: AsyncSession, account: Account) -> dict[str, Decimal]:
     """TDC-09: (a) saldo al corte, (b) gasto del ciclo en curso,
-    (c) comprometido futuro MSI. Deuda total = a + b + c."""
+    (c) comprometido futuro MSI. Deuda total = a + b + c, floored at 0.
+
+    (b) is net of payments already credited to the open statement (TXN-09)
+    and of the last closed statement's overpayment that the next close will
+    apply as credit (TDC-10)."""
     closed_unpaid = (
         (
             await session.execute(
@@ -1118,7 +1122,19 @@ async def debt_summary(session: AsyncSession, account: Account) -> dict[str, Dec
     )
     current_cycle = ZERO
     for statement in open_statements:
-        current_cycle += await _raw_statement_total(session, statement)
+        current_cycle += await _raw_statement_total(session, statement) - statement.paid_amount
+    if open_statements:
+        previous: Statement | None = await session.scalar(
+            select(Statement)
+            .where(
+                Statement.account_id == account.id,
+                Statement.status != StatementStatus.open,
+            )
+            .order_by(Statement.period_end.desc())
+            .limit(1)
+        )
+        if previous is not None:
+            current_cycle -= max(previous.paid_amount - previous.computed_total, ZERO)
 
     pending_msi = await session.scalar(
         select(func.coalesce(func.sum(Installment.amount), 0))
@@ -1133,9 +1149,9 @@ async def debt_summary(session: AsyncSession, account: Account) -> dict[str, Dec
 
     return {
         "statement_balance": statement_balance,
-        "current_cycle_spend": current_cycle,
+        "current_cycle_spend": max(current_cycle, ZERO),
         "committed_msi": pending_msi,
-        "total_debt": statement_balance + current_cycle + pending_msi,
+        "total_debt": max(statement_balance + current_cycle + pending_msi, ZERO),
     }
 
 
@@ -1155,7 +1171,7 @@ async def account_signed_balance(session: AsyncSession, account: Account) -> Dec
     if not cycle_ready(account):
         return None
     summary = await debt_summary(session, account)
-    return -summary["total_debt"]
+    return ZERO - summary["total_debt"]
 
 
 # --- Reassignment (TDC-06) -------------------------------------------------------

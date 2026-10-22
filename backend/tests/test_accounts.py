@@ -186,6 +186,87 @@ async def test_tdc10_overpayment_credit_applied_next_close(client):
     assert next_st["status"] == "paid"
 
 
+async def pay_card(client, ctx, card_id, date, amount):
+    res = await client.post(
+        "/api/v1/transactions",
+        headers=ctx["headers"],
+        json={
+            "type": "transfer",
+            "date": date,
+            "amount": amount,
+            "currency": "MXN",
+            "account_id": ctx["accounts"]["Débito"]["id"],
+            "account_to_id": card_id,
+            "description": "Pago TDC",
+        },
+    )
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc09_payment_to_open_cycle_reduces_debt(client):
+    """TDC-09(b): un pago abonado al statement abierto (TXN-09, sin cerrados
+    pendientes) reduce el ciclo en curso y la deuda total."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    await charge(client, ctx, card["id"], "2026-06-18", "1000.00")
+    await pay_card(client, ctx, card["id"], "2026-06-19", "400.00")
+
+    debt = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()[
+        "debt"
+    ]
+    assert debt["current_cycle_spend"] == "600.00"
+    assert debt["total_debt"] == "600.00"
+
+    # Liquidar el resto deja la tarjeta en 0.
+    await pay_card(client, ctx, card["id"], "2026-06-20", "600.00")
+    debt = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()[
+        "debt"
+    ]
+    assert debt["current_cycle_spend"] == "0.00"
+    assert debt["total_debt"] == "0.00"
+    assert debt["statement_balance"] == "0.00"
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_tdc09_previous_overpayment_and_floor_at_zero(client):
+    """TDC-09(b): el excedente del último corte cerrado (TDC-10) se descuenta
+    del ciclo en curso antes de aplicarse al cierre; la deuda nunca es negativa."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx)
+    await charge(client, ctx, card["id"], "2026-06-10", "500.00")
+    await charge(client, ctx, card["id"], "2026-06-18", "300.00")
+    closed = await close_cycles(client, ctx)
+    statement_id = closed[0]["id"]
+
+    # 520 contra un corte de 500 ⇒ 20 a favor que reduce el ciclo en curso.
+    res = await client.post(
+        f"/api/v1/accounts/{card['id']}/payments",
+        headers=ctx["headers"],
+        json={
+            "amount": "520.00",
+            "from_account_id": ctx["accounts"]["Débito"]["id"],
+            "date": "2026-06-20",
+            "statement_id": statement_id,
+        },
+    )
+    assert res.status_code == 201, res.text
+    debt = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()[
+        "debt"
+    ]
+    assert debt["statement_balance"] == "0.00"
+    assert debt["current_cycle_spend"] == "280.00"
+    assert debt["total_debt"] == "280.00"
+
+    # Pagar de más el ciclo en curso: la deuda se topa en 0 (no negativa).
+    await pay_card(client, ctx, card["id"], "2026-06-20", "300.00")
+    detail = (await client.get(f"/api/v1/accounts/{card['id']}", headers=ctx["headers"])).json()
+    assert detail["debt"]["current_cycle_spend"] == "0.00"
+    assert detail["debt"]["total_debt"] == "0.00"
+    assert detail["signed_balance"] == "0.00"
+
+
 @freeze_time("2026-06-20 18:00:00")
 async def test_rem01_reminders_scheduled_and_canceled_on_payment(client):
     ctx = await bootstrap_space(client)
