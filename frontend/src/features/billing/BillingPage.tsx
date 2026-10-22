@@ -31,6 +31,7 @@ import {
 } from "../../api/billing";
 import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
+import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import Spinner from "../../components/ui/Spinner";
 import { formatDate, todayISO } from "../../lib/dates";
 import { formatMoney, isPositiveAmount, sanitizeDecimal } from "../../lib/money";
@@ -127,6 +128,8 @@ function InvoiceForm({ payment }: { payment: PaymentOut }) {
   const save = useSaveInvoice();
   const remove = useDeleteInvoice();
   const inv = payment.invoice;
+  // GLO-09: quitar la factura se confirma.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [file, setFile] = useState<StoredFileOut | null>(inv?.file ?? null);
   const [cfdiUuid, setCfdiUuid] = useState(inv?.cfdi_uuid ?? "");
   const [issueDate, setIssueDate] = useState(inv?.issue_date ?? payment.payment_date);
@@ -273,12 +276,7 @@ function InvoiceForm({ payment }: { payment: PaymentOut }) {
             type="button"
             className="btn-danger"
             disabled={remove.isPending}
-            onClick={() =>
-              remove
-                .mutateAsync(payment.id)
-                .then(() => setSaved(false))
-                .catch((err) => setError(errorText(err)))
-            }
+            onClick={() => setConfirmingRemove(true)}
           >
             Quitar factura
           </button>
@@ -287,6 +285,25 @@ function InvoiceForm({ payment }: { payment: PaymentOut }) {
           {inv ? "Guardar factura" : "Marcar como facturado"}
         </button>
       </div>
+      <ConfirmDialog
+        open={confirmingRemove}
+        title="Quitar factura"
+        confirmLabel="Sí, quitar"
+        pending={remove.isPending}
+        onClose={() => setConfirmingRemove(false)}
+        onConfirm={() => {
+          setConfirmingRemove(false);
+          void remove
+            .mutateAsync(payment.id)
+            .then(() => setSaved(false))
+            .catch((err) => setError(errorText(err)));
+        }}
+      >
+        <p>
+          ¿Quitar la factura de este cobro? Se borran sus datos (UUID, fecha y total) y el cobro
+          vuelve a quedar pendiente de facturar.
+        </p>
+      </ConfirmDialog>
     </form>
   );
 }
@@ -296,6 +313,8 @@ function InvoiceForm({ payment }: { payment: PaymentOut }) {
 function PaymentDataForm({ payment, onDeleted }: { payment: PaymentOut; onDeleted: () => void }) {
   const update = useUpdatePayment();
   const remove = useDeletePayment();
+  // GLO-09: borrar un pago anterior se confirma.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [rate, setRate] = useState(payment.fiscal_fx_rate ?? "");
   const [workStart, setWorkStart] = useState(payment.work_period_start ?? "");
   const [workEnd, setWorkEnd] = useState(payment.work_period_end ?? "");
@@ -396,12 +415,7 @@ function PaymentDataForm({ payment, onDeleted }: { payment: PaymentOut; onDelete
             type="button"
             className="btn-danger"
             disabled={remove.isPending}
-            onClick={() =>
-              remove
-                .mutateAsync(payment.id)
-                .then(onDeleted)
-                .catch((err) => setError(errorText(err)))
-            }
+            onClick={() => setConfirmingDelete(true)}
           >
             Borrar pago anterior
           </button>
@@ -425,6 +439,26 @@ function PaymentDataForm({ payment, onDeleted }: { payment: PaymentOut; onDelete
           Guardar datos
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Borrar pago anterior"
+        confirmLabel="Eliminar"
+        pending={remove.isPending}
+        onClose={() => setConfirmingDelete(false)}
+        onConfirm={() => {
+          setConfirmingDelete(false);
+          void remove
+            .mutateAsync(payment.id)
+            .then(onDeleted)
+            .catch((err) => setError(errorText(err)));
+        }}
+      >
+        <p>
+          ¿Borrar este pago anterior de {formatMoney(payment.amount, payment.currency)}? Se elimina
+          de forma permanente.
+        </p>
+      </ConfirmDialog>
     </form>
   );
 }
@@ -731,6 +765,8 @@ function PaymentList({
 function ClientForm({ client, onDone }: { client: BillingClientOut | null; onDone: () => void }) {
   const save = useSaveBillingClient();
   const remove = useDeleteBillingClient();
+  // GLO-09: borrar el cliente se confirma.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const initial = client ?? { name: "", foreign_tax_id: "", country: "", postal_code: "", ...CLIENT_DEFAULTS };
   const [form, setForm] = useState({
     name: initial.name ?? "",
@@ -807,7 +843,7 @@ function ClientForm({ client, onDone }: { client: BillingClientOut | null; onDon
             className="btn-danger"
             title="Si ya tiene cobros, se desactiva en lugar de borrarse"
             disabled={remove.isPending}
-            onClick={() => remove.mutateAsync(client.id).then(onDone).catch((err) => setError(errorText(err)))}
+            onClick={() => setConfirmingDelete(true)}
           >
             Borrar cliente
           </button>
@@ -819,6 +855,28 @@ function ClientForm({ client, onDone }: { client: BillingClientOut | null; onDon
           Guardar cliente
         </button>
       </div>
+
+      {client && (
+        <ConfirmDialog
+          open={confirmingDelete}
+          title="Borrar cliente"
+          confirmLabel="Eliminar"
+          pending={remove.isPending}
+          onClose={() => setConfirmingDelete(false)}
+          onConfirm={() => {
+            setConfirmingDelete(false);
+            void remove
+              .mutateAsync(client.id)
+              .then(onDone)
+              .catch((err) => setError(errorText(err)));
+          }}
+        >
+          <p>
+            ¿Borrar a <strong>{client.name}</strong>? Si ya tiene cobros, se desactiva en lugar de
+            borrarse y sus cuentas dejan de generar cobros nuevos.
+          </p>
+        </ConfirmDialog>
+      )}
     </form>
   );
 }

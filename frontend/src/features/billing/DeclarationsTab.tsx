@@ -21,6 +21,7 @@ import {
 } from "../../api/billing";
 import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
+import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import Spinner from "../../components/ui/Spinner";
 import { formatDate, parseBusinessDate, todayISO } from "../../lib/dates";
 import { formatMoney, isPositiveAmount, sanitizeDecimal } from "../../lib/money";
@@ -216,6 +217,8 @@ function FilingForm({
 }) {
   const save = useSaveFiling();
   const remove = useDeleteFiling();
+  // GLO-09: borrar la declaración se confirma.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const defaultAccount = useDefaultTaxAccount();
   const hasNormal = period.filings.some((f) => f.kind === "normal" && f.id !== filing?.id);
   const [kind, setKind] = useState<FilingKind>(filing?.kind ?? (hasNormal ? "complementary" : "normal"));
@@ -421,7 +424,7 @@ function FilingForm({
             type="button"
             className="btn-danger"
             disabled={remove.isPending}
-            onClick={() => remove.mutateAsync(filing.id).then(onDone).catch((err) => setError(errorText(err)))}
+            onClick={() => setConfirmingDelete(true)}
           >
             Borrar declaración
           </button>
@@ -433,6 +436,28 @@ function FilingForm({
           Guardar declaración
         </button>
       </div>
+
+      {filing && (
+        <ConfirmDialog
+          open={confirmingDelete}
+          title="Borrar declaración"
+          confirmLabel="Eliminar"
+          pending={remove.isPending}
+          onClose={() => setConfirmingDelete(false)}
+          onConfirm={() => {
+            setConfirmingDelete(false);
+            void remove
+              .mutateAsync(filing.id)
+              .then(onDone)
+              .catch((err) => setError(errorText(err)));
+          }}
+        >
+          <p>
+            ¿Borrar la declaración de {monthLabel(period.period)}? Se elimina de forma permanente
+            junto con sus datos capturados.
+          </p>
+        </ConfirmDialog>
+      )}
     </form>
   );
 }
@@ -508,6 +533,8 @@ function FilingRow({
 }) {
   const removePayment = useRemoveFilingPayment();
   const [error, setError] = useState<string | null>(null);
+  // GLO-09: quitar el pago borra también su gasto; se confirma.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const needsPayment = filing.paid_date === null && filing.amount_due !== "0.00";
   return (
     <li className="space-y-2 py-3">
@@ -549,7 +576,7 @@ function FilingRow({
               className="btn-secondary"
               disabled={removePayment.isPending}
               title="Borra también su gasto de Impuestos"
-              onClick={() => removePayment.mutateAsync(filing.id).catch((err) => setError(errorText(err)))}
+              onClick={() => setConfirmingRemove(true)}
             >
               Quitar pago
             </button>
@@ -573,6 +600,22 @@ function FilingRow({
           <CopyRow label="Línea de captura" value={filing.capture_line} />
         </div>
       )}
+      <ConfirmDialog
+        open={confirmingRemove}
+        title="Quitar pago"
+        confirmLabel="Sí, quitar"
+        pending={removePayment.isPending}
+        onClose={() => setConfirmingRemove(false)}
+        onConfirm={() => {
+          setConfirmingRemove(false);
+          void removePayment.mutateAsync(filing.id).catch((err) => setError(errorText(err)));
+        }}
+      >
+        <p>
+          ¿Quitar el pago de esta declaración? Se borra también su gasto de Impuestos y la
+          declaración vuelve a quedar pendiente de pago.
+        </p>
+      </ConfirmDialog>
       <ErrorLine error={error} />
     </li>
   );

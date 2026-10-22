@@ -10,8 +10,10 @@ import {
   type MappingConfig,
   type PreviewResponse,
   type PreviewRow,
+  type BatchOut,
 } from "../../api/imports";
 import CollapsibleCard from "../../components/ui/CollapsibleCard";
+import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 
@@ -45,6 +47,8 @@ export default function ImportSection() {
   const confirmImport = useConfirmImport();
   const batches = useImportBatches();
   const rollback = useRollbackBatch();
+  // GLO-09: revertir borra lo importado; se confirma.
+  const [reverting, setReverting] = useState<BatchOut | null>(null);
 
   const [fileName, setFileName] = useState("");
   const [content, setContent] = useState("");
@@ -287,7 +291,7 @@ export default function ImportSection() {
                 {b.status === "confirmed" && (
                   <button
                     className="text-xs text-red-600 hover:underline dark:text-red-400"
-                    onClick={() => rollback.mutate(b.id)}
+                    onClick={() => setReverting(b)}
                   >
                     Revertir
                   </button>
@@ -316,6 +320,23 @@ export default function ImportSection() {
           ⬇ Respaldo completo (JSON)
         </button>
       </div>
+
+      <ConfirmDialog
+        open={reverting !== null}
+        title="Revertir importación"
+        confirmLabel="Sí, revertir"
+        pending={rollback.isPending}
+        error={rollback.error?.message}
+        onClose={() => setReverting(null)}
+        onConfirm={() =>
+          reverting && rollback.mutate(reverting.id, { onSuccess: () => setReverting(null) })
+        }
+      >
+        <p>
+          ¿Revertir <strong>{reverting?.file_name}</strong>? Se eliminan las transacciones que creó
+          esta importación, salvo las que editaste a mano. No se puede deshacer.
+        </p>
+      </ConfirmDialog>
     </CollapsibleCard>
   );
 }

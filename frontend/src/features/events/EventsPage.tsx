@@ -18,6 +18,7 @@ import { formatMoney, isNegativeAmount, isPositiveAmount, subtractMoney } from "
 import { formatDate } from "../../lib/dates";
 import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
+import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import Spinner from "../../components/ui/Spinner";
 
 function EventForm({ event, onDone }: { event: EventOut | null; onDone: () => void }) {
@@ -29,6 +30,8 @@ function EventForm({ event, onDone }: { event: EventOut | null; onDone: () => vo
   const [budget, setBudget] = useState(event?.budget ?? "");
   const [notes, setNotes] = useState(event?.notes ?? "");
   const [error, setError] = useState<string | null>(null);
+  // GLO-09: eliminar y desactivar se confirman; reactivar no.
+  const [confirming, setConfirming] = useState<"delete" | "deactivate" | null>(null);
   const pending = create.isPending || update.isPending || remove.isPending;
 
   async function handleSubmit(e: FormEvent) {
@@ -116,7 +119,7 @@ function EventForm({ event, onDone }: { event: EventOut | null; onDone: () => vo
               type="button"
               className="text-sm font-medium text-ink-muted hover:text-red-600 hover:underline dark:hover:text-red-400"
               disabled={pending}
-              onClick={() => void run(() => remove.mutateAsync(event.id))}
+              onClick={() => setConfirming("delete")}
               title="Solo si no tiene movimientos ligados"
             >
               Eliminar
@@ -126,7 +129,9 @@ function EventForm({ event, onDone }: { event: EventOut | null; onDone: () => vo
               className="text-sm font-medium text-ink-muted hover:text-ink hover:underline"
               disabled={pending}
               onClick={() =>
-                void run(() => update.mutateAsync({ id: event.id, is_active: !event.is_active }))
+                event.is_active
+                  ? setConfirming("deactivate")
+                  : void run(() => update.mutateAsync({ id: event.id, is_active: true }))
               }
             >
               {event.is_active ? "Desactivar" : "Reactivar"}
@@ -144,6 +149,37 @@ function EventForm({ event, onDone }: { event: EventOut | null; onDone: () => vo
           </button>
         </div>
       </div>
+
+      {event && (
+        <ConfirmDialog
+          open={confirming !== null}
+          title={confirming === "delete" ? "Eliminar evento" : "Desactivar evento"}
+          confirmLabel={confirming === "delete" ? "Eliminar" : "Desactivar"}
+          pending={pending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() => {
+            const action = confirming;
+            setConfirming(null);
+            void run(() =>
+              action === "delete"
+                ? remove.mutateAsync(event.id)
+                : update.mutateAsync({ id: event.id, is_active: false }),
+            );
+          }}
+        >
+          {confirming === "delete" ? (
+            <p>
+              ¿Eliminar <strong>{event.name}</strong> de forma permanente? Solo es posible si no tiene
+              movimientos ligados.
+            </p>
+          ) : (
+            <p>
+              ¿Desactivar <strong>{event.name}</strong>? Ya no podrás ligarle movimientos nuevos;
+              puedes reactivarlo después.
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
     </form>
   );
 }

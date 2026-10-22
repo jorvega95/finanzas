@@ -33,6 +33,7 @@ import { formatDate } from "../../lib/dates";
 import { useChartTheme } from "../../lib/chartTheme";
 import { useSpace } from "../spaces/SpaceProvider";
 import Icon, { type IconName } from "../../components/ui/Icon";
+import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import BillingAlert from "../billing/BillingAlert";
 import NatureDetailModal from "./NatureDetailModal";
 import { CHART_COLORS as COLORS, NATURE_LABELS } from "./nature";
@@ -63,6 +64,8 @@ function BudgetsSection({ month, excludeEvents }: { month: string; excludeEvents
   const copyBudgets = useCopyBudgets();
   const [categoryId, setCategoryId] = useState("");
   const [amount, setAmount] = useState("");
+  // GLO-09: quitar un presupuesto se confirma.
+  const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
 
   const usedCategories = new Set((budgets.data ?? []).map((b) => b.budget.category_id));
   const available = (categories.data ?? []).filter(
@@ -136,7 +139,7 @@ function BudgetsSection({ month, excludeEvents }: { month: string; excludeEvents
                     <button
                       aria-label="Eliminar presupuesto"
                       className="ml-2 text-xs text-ink-muted hover:text-red-600"
-                      onClick={() => deleteBudget.mutate(row.budget.id)}
+                      onClick={() => setRemoving({ id: row.budget.id, name: row.category_name })}
                     >
                       <Icon name="x" className="inline size-3.5 align-[-2px]" />
                     </button>
@@ -155,6 +158,23 @@ function BudgetsSection({ month, excludeEvents }: { month: string; excludeEvents
           })}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={removing !== null}
+        title="Eliminar presupuesto"
+        confirmLabel="Eliminar"
+        pending={deleteBudget.isPending}
+        error={deleteBudget.error?.message}
+        onClose={() => setRemoving(null)}
+        onConfirm={() =>
+          removing && deleteBudget.mutate(removing.id, { onSuccess: () => setRemoving(null) })
+        }
+      >
+        <p>
+          ¿Eliminar el presupuesto de <strong>{removing?.name}</strong> de este mes? Los gastos de
+          la categoría no se tocan.
+        </p>
+      </ConfirmDialog>
     </section>
   );
 }

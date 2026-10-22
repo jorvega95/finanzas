@@ -1,5 +1,10 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Icon from "./Icon";
+
+// Modales abiertos, el último arriba: con modales anidados (p. ej. una
+// confirmación sobre un formulario, GLO-09) Escape cierra solo el de arriba.
+const openStack: string[] = [];
 
 const SIZE_CLASSES = {
   sm: "max-w-sm",
@@ -16,18 +21,29 @@ interface ModalProps {
 }
 
 export default function Modal({ open, onClose, title, children, size = "sm" }: ModalProps) {
+  const id = useId();
+  const titleId = `${id}-title`;
+
+  useEffect(() => {
+    if (!open) return;
+    openStack.push(id);
+    return () => {
+      openStack.splice(openStack.lastIndexOf(id), 1);
+    };
+  }, [open, id]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && openStack.at(-1) === id) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, id]);
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 backdrop-blur-sm sm:px-4"
       onClick={onClose}
@@ -35,12 +51,12 @@ export default function Modal({ open, onClose, title, children, size = "sm" }: M
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={titleId}
         className={`card max-h-[90dvh] w-full overflow-y-auto ${SIZE_CLASSES[size]} p-4 shadow-2xl sm:p-6`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-start justify-between gap-4">
-          <h2 id="modal-title" className="text-base font-semibold tracking-tight">
+          <h2 id={titleId} className="text-base font-semibold tracking-tight">
             {title}
           </h2>
           <button
@@ -53,6 +69,7 @@ export default function Modal({ open, onClose, title, children, size = "sm" }: M
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

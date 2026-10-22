@@ -21,6 +21,7 @@ import { formatMoney, isPositiveAmount, subtractMoney, sumMoney } from "../../li
 import { formatDate, todayISO } from "../../lib/dates";
 import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
+import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import Spinner from "../../components/ui/Spinner";
 
 const CURRENCIES = ["MXN", "USD"];
@@ -91,6 +92,8 @@ function CommitmentForm({
     (commitment?.schedule ?? []).map((r) => ({ due_date: r.due_date, amount: r.amount })),
   );
   const [error, setError] = useState<string | null>(null);
+  // GLO-09: eliminar y cancelar se confirman; reactivar no.
+  const [confirming, setConfirming] = useState<"delete" | "cancel" | null>(null);
   const pending = create.isPending || update.isPending || remove.isPending;
   const locked = (commitment?.abonos ?? 0) > 0; // CXP-06: moneda y evento fijos
 
@@ -294,7 +297,7 @@ function CommitmentForm({
               className="text-sm font-medium text-ink-muted hover:text-red-600 hover:underline dark:hover:text-red-400"
               disabled={pending}
               title="Solo si no tiene abonos"
-              onClick={() => void run(() => remove.mutateAsync(commitment.id))}
+              onClick={() => setConfirming("delete")}
             >
               Eliminar
             </button>
@@ -303,9 +306,9 @@ function CommitmentForm({
               className="text-sm font-medium text-ink-muted hover:text-ink hover:underline"
               disabled={pending}
               onClick={() =>
-                void run(() =>
-                  update.mutateAsync({ id: commitment.id, is_canceled: !commitment.is_canceled }),
-                )
+                commitment.is_canceled
+                  ? void run(() => update.mutateAsync({ id: commitment.id, is_canceled: false }))
+                  : setConfirming("cancel")
               }
             >
               {commitment.is_canceled ? "Reactivar" : "Cancelar compromiso"}
@@ -323,6 +326,37 @@ function CommitmentForm({
           </button>
         </div>
       </div>
+
+      {commitment && (
+        <ConfirmDialog
+          open={confirming !== null}
+          title={confirming === "delete" ? "Eliminar compromiso" : "Cancelar compromiso"}
+          confirmLabel={confirming === "delete" ? "Eliminar" : "Sí, cancelar"}
+          pending={pending}
+          onClose={() => setConfirming(null)}
+          onConfirm={() => {
+            const action = confirming;
+            setConfirming(null);
+            void run(() =>
+              action === "delete"
+                ? remove.mutateAsync(commitment.id)
+                : update.mutateAsync({ id: commitment.id, is_canceled: true }),
+            );
+          }}
+        >
+          {confirming === "delete" ? (
+            <p>
+              ¿Eliminar <strong>{commitment.name}</strong> de forma permanente? Solo es posible si no
+              tiene abonos.
+            </p>
+          ) : (
+            <p>
+              ¿Cancelar <strong>{commitment.name}</strong>? Ya no acepta abonos nuevos; los
+              registrados se conservan y puedes reactivarlo después.
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
     </form>
   );
 }

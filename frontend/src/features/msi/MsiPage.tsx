@@ -16,6 +16,7 @@ import { formatMoney } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
+import ConfirmDialog from "../../components/ui/ConfirmDialog";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Activo",
@@ -272,6 +273,8 @@ export default function MsiPage() {
   const settle = useSettleMsiPlan();
   const [dialog, setDialog] = useState<"convert" | "backfill" | null>(null);
   const closeDialog = () => setDialog(null);
+  // GLO-09: liquidar anticipado se confirma antes de cancelar las cuotas.
+  const [settling, setSettling] = useState<PlanSummaryOut | null>(null);
 
   // Más avanzados primero (proporción de cuotas cubiertas); empate: menos cuotas restantes.
   const sortedPlans = useMemo(() => {
@@ -317,6 +320,26 @@ export default function MsiPage() {
       >
         <ConvertForm onDone={closeDialog} />
       </Modal>
+      <ConfirmDialog
+        open={settling !== null}
+        title="Liquidar anticipado"
+        confirmLabel="Sí, liquidar"
+        pending={settle.isPending}
+        error={settle.error?.message}
+        onClose={() => setSettling(null)}
+        onConfirm={() =>
+          settling && settle.mutate(settling.plan.id, { onSuccess: () => setSettling(null) })
+        }
+      >
+        {settling && (
+          <p>
+            ¿Liquidar <strong>{settling.description || "Compra MSI"}</strong>? Las{" "}
+            {settling.pending_count} cuotas pendientes se cancelan y su suma se carga en un solo
+            cargo en el ciclo abierto de {settling.account_name}. No se puede deshacer.
+          </p>
+        )}
+      </ConfirmDialog>
+
       <Modal
         open={dialog === "backfill"}
         onClose={closeDialog}
@@ -347,7 +370,7 @@ export default function MsiPage() {
                     </p>
                   </div>
                   {summary.plan.status === "active" && summary.pending_count > 0 && (
-                    <button className="btn-secondary" onClick={() => settle.mutate(summary.plan.id)}>
+                    <button className="btn-secondary" onClick={() => setSettling(summary)}>
                       Liquidar anticipado
                     </button>
                   )}

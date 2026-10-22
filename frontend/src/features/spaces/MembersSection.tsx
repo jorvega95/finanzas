@@ -10,8 +10,10 @@ import {
   useInvites,
   useMembers,
   useRemoveMember,
+  type MemberOut,
 } from "../../api/spaces";
 import CollapsibleCard from "../../components/ui/CollapsibleCard";
+import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import { useSpace } from "./SpaceProvider";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -43,6 +45,8 @@ export default function MembersSection() {
   const createSpace = useCreateSpace();
   const claimInvite = useClaimInvite();
 
+  // GLO-09: remover a un miembro (o salir) se confirma.
+  const [removing, setRemoving] = useState<MemberOut | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
   const [newSpaceName, setNewSpaceName] = useState("");
@@ -101,9 +105,7 @@ export default function MembersSection() {
               {isShared && (isOwner || m.user_id === me.profile.id) && (
                 <button
                   className="text-xs text-red-600 hover:underline dark:text-red-400"
-                  onClick={() =>
-                    removeMember.mutate({ spaceId: activeSpace.id, userId: m.user_id })
-                  }
+                  onClick={() => setRemoving(m)}
                 >
                   {m.user_id === me.profile.id ? "Salir" : "Remover"}
                 </button>
@@ -255,6 +257,34 @@ export default function MembersSection() {
           <ErrorText error={deleteSpace.error} />
         </form>
       )}
+
+      <ConfirmDialog
+        open={removing !== null}
+        title={removing?.user_id === me.profile.id ? "Salir del espacio" : "Remover miembro"}
+        confirmLabel={removing?.user_id === me.profile.id ? "Sí, salir" : "Sí, remover"}
+        pending={removeMember.isPending}
+        error={removeMember.error?.message}
+        onClose={() => setRemoving(null)}
+        onConfirm={() =>
+          removing &&
+          removeMember.mutate(
+            { spaceId: activeSpace.id, userId: removing.user_id },
+            { onSuccess: () => setRemoving(null) },
+          )
+        }
+      >
+        {removing?.user_id === me.profile.id ? (
+          <p>
+            ¿Salir de <strong>{activeSpace.name}</strong>? Dejarás de ver sus datos y necesitarás una
+            nueva invitación para volver.
+          </p>
+        ) : (
+          <p>
+            ¿Remover a <strong>{removing?.display_name}</strong> de{" "}
+            <strong>{activeSpace.name}</strong>? Dejará de ver sus datos; lo que registró se conserva.
+          </p>
+        )}
+      </ConfirmDialog>
     </CollapsibleCard>
   );
 }
