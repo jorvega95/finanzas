@@ -125,6 +125,7 @@ class AccountOut(BaseModel):
     color: str | None
     image: str | None  # TAR-08
     is_active: bool
+    invoice_client_id: uuid.UUID | None = None  # FAC-01: invoiceable account
 
 
 class NextPaymentOut(BaseModel):

@@ -33,6 +33,7 @@ import { formatDate } from "../../lib/dates";
 import { useChartTheme } from "../../lib/chartTheme";
 import { useSpace } from "../spaces/SpaceProvider";
 import Icon, { type IconName } from "../../components/ui/Icon";
+import BillingAlert from "../billing/BillingAlert";
 import NatureDetailModal from "./NatureDetailModal";
 import { CHART_COLORS as COLORS, NATURE_LABELS } from "./nature";
 
@@ -206,6 +207,8 @@ export default function DashboardPage() {
           />
         </div>
       </div>
+
+      <BillingAlert />
 
       {/* Totales del mes (DSH-02) + patrimonio neto actual (DSH-07) */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

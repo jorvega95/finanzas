@@ -8,6 +8,15 @@ from app.models.accounts import (
     Statement,
     StatementStatus,
 )
+from app.models.billing import (
+    BillingClient,
+    BillingSettings,
+    FilingKind,
+    Invoice,
+    InvoiceablePayment,
+    StoredFile,
+    TaxFiling,
+)
 from app.models.budgets import Budget
 from app.models.catalogs import (
     AccountBehavior,
@@ -50,10 +59,14 @@ __all__ = [
     "AccountType",
     "AssetPrice",
     "Base",
+    "BillingClient",
+    "BillingSettings",
     "Budget",
     "Holding",
     "ImportBatch",
     "ImportStatus",
+    "Invoice",
+    "InvoiceablePayment",
     "InvestmentAccount",
     "InvestmentMovement",
     "ManualAssetPrice",
@@ -68,6 +81,7 @@ __all__ = [
     "CutoffDayPolicy",
     "ExchangeRate",
     "ExpenseNature",
+    "FilingKind",
     "Installment",
     "InstallmentPlan",
     "InstallmentStatus",
@@ -88,6 +102,8 @@ __all__ = [
     "SpaceType",
     "Statement",
     "StatementStatus",
+    "StoredFile",
+    "TaxFiling",
     "Transaction",
     "TransactionType",
 ]

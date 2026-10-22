@@ -34,6 +34,8 @@ iniciar.bat
 
 # --- Documentos de trabajo locales ---
 STITCH_BRIEF.md
+# Guía fiscal personal (datos de RFC/cliente/acuses): solo en disco.
+guia-factura-greenlight.md
 
 # --- Claude ---
 .claude/settings.local.json

@@ -1,5 +1,6 @@
 """Transaction services. Implements TXN-01..TXN-14, TAR-03/05/10, FX-03,
-REC-03 (discard), EVT-02 (event link), CXP-03 (abonos).
+REC-03 (discard), EVT-02 (event link), CXP-03 (abonos), FAC-01/05 (invoiceable
+payments).
 
 GLO-01: Decimal everywhere. GLO-02: pure dates. GLO-05: space-scoped.
 """
@@ -27,7 +28,7 @@ from app.models.catalogs import (
 from app.models.recurring import RecurringTombstone
 from app.models.spaces import Space
 from app.models.transactions import Transaction, TransactionType
-from app.services import fx
+from app.services import billing, fx
 
 # TXN-04: supported transaction currencies in v1 (crypto lives in INV).
 SUPPORTED_CURRENCIES = {"MXN", "USD"}
@@ -425,6 +426,7 @@ async def create_transaction(
     )
     session.add(txn)
     await session.flush()
+    await billing.on_transaction_created(session, txn)  # FAC-01
 
     statement_id = await _assign_credit_charge(session, resolved, txn, data.cycle_hint)
     if statement_id is not None:
@@ -488,7 +490,12 @@ async def update_transaction(
     if txn.installment_plan_id is not None:
         raise _reject("Esta transacción tiene un plan MSI activo; ajusta las cuotas desde el plan")
     resolved = await _validate_input(session, space, data, current=txn)
+    # FAC-05: an invoiced income can't leave its invoiceable account or type.
+    await billing.guard_transaction_change(
+        session, txn, new_type=data.type, new_account_id=data.account_id
+    )
     old_commitment_id = txn.commitment_id
+    old_account_id = txn.account_id
     # TAR-05: the edited amount cannot overdraw the balance (excluding itself
     # and its current fee, which the edit replaces).
     current_fee = await get_fee(session, txn.id)
@@ -551,17 +558,23 @@ async def update_transaction(
     if data.type == TransactionType.transfer and data.fee_amount is not None:
         await _create_fee(session, space, updated_by, txn, resolved, data.fee_amount)
     await _sync_commitment_reminders(session, space, [old_commitment_id, txn.commitment_id])
+    await billing.on_transaction_updated(session, txn, old_account_id)  # FAC-02
 
     await session.commit()
     await session.refresh(txn)
     return txn
 
 
-async def delete_transaction(session: AsyncSession, space_id: uuid.UUID, txn_id: uuid.UUID) -> None:
+async def delete_transaction(
+    session: AsyncSession, space_id: uuid.UUID, txn_id: uuid.UUID, *, commit: bool = True
+) -> None:
+    """`commit=False` lets a caller delete it inside its own unit of work
+    (FAC-13: removing a tax payment removes its expense)."""
     from app.services.accounts import received_amount, recompute_statement_total
 
     txn = await get_transaction(session, space_id, txn_id)
     _reject_fee_row(txn)
+    await billing.guard_transaction_change(session, txn)  # FAC-05
     if txn.installment_plan_id is not None:
         # MSI-08: deleting the purchase deletes the plan only if every
         # installment is still pending; otherwise it's blocked.
@@ -599,6 +612,7 @@ async def delete_transaction(session: AsyncSession, space_id: uuid.UUID, txn_id:
                 RecurringTombstone(rule_id=txn.recurring_rule_id, scheduled_date=txn.scheduled_date)
             )
     commitment_id = txn.commitment_id
+    await billing.on_transaction_deleted(session, txn)  # FAC-05
     await session.delete(txn)
     await session.flush()
     if old_statement_id is not None:
@@ -606,7 +620,10 @@ async def delete_transaction(session: AsyncSession, space_id: uuid.UUID, txn_id:
     space = await session.get(Space, space_id)
     if space is not None:
         await _sync_commitment_reminders(session, space, [commitment_id])  # CXP-08
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
 
 
 async def set_transaction_event(
@@ -675,6 +692,7 @@ async def confirm_transaction(
         await session.flush()
         if txn.statement_id is not None:
             await recompute_statement_total(session, txn.statement_id)  # TDC-05
+        await billing.on_transaction_updated(session, txn, txn.account_id)  # FAC-02
     txn.needs_review = False
     await session.commit()
     await session.refresh(txn)

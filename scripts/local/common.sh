@@ -8,6 +8,9 @@ DB_NAME="finanzas"
 DB_USER="$USER"
 PG_SOCKET_DIR="/run/postgresql"
 BACKUP_DIR="${FINANZAS_BACKUP_DIR:-$HOME/Documents/finanzas-backups}"
+# FAC-10: facturas, acuses y comprobantes (fuera de la BD). Un FILES_DIR en
+# ENV_FILE manda sobre este default; backup.sh lo respalda (GLO-08).
+FILES_DIR_DEFAULT="${XDG_DATA_HOME:-$HOME/.local/share}/finanzas/files"
 
 info() { printf '\033[1;34m[finanzas]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[finanzas] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }

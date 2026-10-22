@@ -18,6 +18,8 @@ class ReminderKind(enum.StrEnum):
     subscription_charge = "subscription_charge"  # REC-12
     trial_ending = "trial_ending"  # REC-10/12
     bill_due = "bill_due"  # REC-11/12
+    invoice_pending = "invoice_pending"  # FAC-09
+    tax_filing_due = "tax_filing_due"  # FAC-09
     custom = "custom"
 
 

@@ -40,6 +40,7 @@ async def run_card_close_job() -> None:
     and idempotent, so every space closes shortly after its local midnight."""
     from app.core.dates import today_in_tz
     from app.services.accounts import close_due_statements
+    from app.services.billing_reminders import sync_reminders as sync_billing_reminders
     from app.services.budgets import check_budget_alerts
     from app.services.commitments import sync_reminders
     from app.services.recurring import sync_reminders as sync_recurring_reminders
@@ -57,6 +58,8 @@ async def run_card_close_job() -> None:
                 await sync_reminders(session, space)
                 # REC-12: subscription, trial and bill reminders (idempotent).
                 await sync_recurring_reminders(session, space)
+                # FAC-09: invoicing and declaration reminders (idempotent).
+                await sync_billing_reminders(session, space)
                 await session.commit()
                 await fire_due_reminders(session, today)
                 await fire_desktop_reminders(session, space, today)  # REM-08

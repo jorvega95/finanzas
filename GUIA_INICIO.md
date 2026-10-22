@@ -34,6 +34,7 @@ scripts/local/install.sh             # build + migraciones + servicio + lanzador
 | Reiniciar | `systemctl --user restart finanzas` |
 | Respaldo manual | `scripts/local/backup.sh` |
 | Restaurar un respaldo | `pg_restore --clean --if-exists -h /run/postgresql -d finanzas <archivo.dump>` |
+| Restaurar archivos (facturas, acuses) | `rsync -a ~/Documents/finanzas-backups/files/ ~/.local/share/finanzas/files/` |
 
 La configuración del servicio vive en `~/.config/finanzas/finanzas.env` y tiene
 prioridad sobre `backend/.env` (de ahí solo se toman las API keys de

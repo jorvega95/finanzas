@@ -19,6 +19,8 @@ const KIND_ICON: Record<NotificationOut["kind"], IconName> = {
   subscription_charge: "repeat", // REC-12
   trial_ending: "hourglass", // REC-10
   bill_due: "zap", // REC-11
+  invoice_pending: "receipt", // FAC-09
+  tax_filing_due: "receipt", // FAC-09
   custom: "bell",
 };
 
@@ -110,6 +112,18 @@ export default function NotificationBell() {
                     <p className="break-words">{n.message}</p>
                     <p className="mt-0.5 text-xs text-ink-muted">
                       {formatDate(n.fire_at)}
+                      {(n.kind === "invoice_pending" || n.kind === "tax_filing_due") && (
+                        <>
+                          {" · "}
+                          <Link
+                            to="/facturacion"
+                            className="text-accent hover:underline"
+                            onClick={() => setOpen(false)}
+                          >
+                            {n.kind === "invoice_pending" ? "Facturar" : "Ver declaración"}
+                          </Link>
+                        </>
+                      )}
                       {n.recurring_rule_id && (
                         <>
                           {" · "}

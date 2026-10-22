@@ -19,3 +19,14 @@ mv "$tmp" "$out"
 ls -1 "$BACKUP_DIR"/daily/finanzas-*.dump | head -n -14 | xargs -r rm -f
 ls -1 "$BACKUP_DIR"/monthly/finanzas-*.dump | head -n -12 | xargs -r rm -f
 info "Respaldo OK: $out ($(du -h "$out" | cut -f1))"
+
+# FAC-10: los archivos subidos no viven en la BD. Se copian a un espejo sin
+# --delete (cada archivo es inmutable y con nombre único): borrar uno en la app
+# no lo borra del respaldo.
+files_dir="$(env_get FILES_DIR)"
+files_dir="${files_dir:-$FILES_DIR_DEFAULT}"
+if [[ -d "$files_dir" ]]; then
+  mkdir -p "$BACKUP_DIR/files"
+  rsync -a "$files_dir/" "$BACKUP_DIR/files/"
+  info "Archivos OK: $BACKUP_DIR/files ($(du -sh "$BACKUP_DIR/files" | cut -f1))"
+fi

@@ -11,6 +11,8 @@ export interface NotificationOut {
     | "subscription_charge" // REC-12
     | "trial_ending" // REC-10
     | "bill_due" // REC-11
+    | "invoice_pending" // FAC-09
+    | "tax_filing_due" // FAC-09
     | "custom";
   ref_id: string;
   fire_at: string;

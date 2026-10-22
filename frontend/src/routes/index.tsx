@@ -2,6 +2,7 @@
 import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import AccountsPage from "../features/accounts/AccountsPage";
+import BillingPage from "../features/billing/BillingPage";
 import CommitmentsPage from "../features/commitments/CommitmentsPage";
 import DashboardPage from "../features/dashboard/DashboardPage";
 import EventsPage from "../features/events/EventsPage";
@@ -39,6 +40,7 @@ export const router = createBrowserRouter([
           { path: "/eventos", element: <EventsPage /> },
           { path: "/compromisos", element: <CommitmentsPage /> },
           { path: "/suscripciones", element: <SubscriptionsPage /> },
+          { path: "/facturacion", element: <BillingPage /> },
           { path: "/inversiones", element: <InvestmentsPage /> },
           { path: "/ajustes", element: <SettingsPage /> },
         ],

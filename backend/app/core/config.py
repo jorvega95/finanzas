@@ -1,4 +1,6 @@
+import os
 import uuid
+from pathlib import Path
 from typing import Literal
 
 from pydantic import model_validator
@@ -44,6 +46,17 @@ class Settings(BaseSettings):
     # this local hour.
     desktop_notifications: bool = False
     desktop_notify_hour: int = 9
+
+    # FAC-10: uploaded files (invoices, acuses, receipts) live on disk, outside
+    # the DB. Empty = XDG default; backup.sh reads the same value (GLO-08).
+    files_dir: str = ""
+
+    @property
+    def files_path(self) -> Path:
+        if self.files_dir:
+            return Path(self.files_dir).expanduser()
+        data_home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+        return Path(data_home) / "finanzas" / "files"
 
     @property
     def trusted_host_list(self) -> list[str]:

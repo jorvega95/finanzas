@@ -111,6 +111,10 @@ class Account(Base, AuditMixin):
     image: Mapped[str | None] = mapped_column(Text)
     icon: Mapped[str | None] = mapped_column(String(40))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # FAC-01: incomes into this account are invoiceable payments of this client.
+    invoice_client_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("billing_clients.id", ondelete="SET NULL")
+    )
 
     # Lets the unit of work insert a new type before its accounts (CAT-02 seed);
     # never lazy-loaded (async): read the behavior via services.accounts.

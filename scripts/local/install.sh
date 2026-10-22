@@ -23,6 +23,9 @@ fi
 env_set DATABASE_URL "postgresql+asyncpg://$DB_USER@/$DB_NAME?host=$PG_SOCKET_DIR"
 env_set FRONTEND_DIST "$RAIZ/frontend/dist"
 env_set SCHEDULER_ENABLED true
+# FAC-10: solo se agrega si falta, para respetar una ruta puesta a mano.
+grep -q '^FILES_DIR=' "$ENV_FILE" || env_set FILES_DIR "$FILES_DIR_DEFAULT"
+mkdir -p "$(env_get FILES_DIR)"
 # REM-08: avisos de escritorio (notify-send). Solo se agrega si falta, para
 # respetar un DESKTOP_NOTIFICATIONS=false puesto a mano.
 grep -q '^DESKTOP_NOTIFICATIONS=' "$ENV_FILE" || env_set DESKTOP_NOTIFICATIONS true

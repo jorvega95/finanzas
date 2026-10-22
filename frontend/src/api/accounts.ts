@@ -50,6 +50,7 @@ export interface AccountOut {
   color: string | null; // TAR-08: #RRGGBB
   image: string | null; // TAR-08: front-art data URL
   is_active: boolean;
+  invoice_client_id: string | null; // FAC-01: cuenta facturable
   // AccountWithDebtOut extras (list/detail endpoints):
   behavior: AccountBehavior | null;
   debt: DebtSummary | null;
