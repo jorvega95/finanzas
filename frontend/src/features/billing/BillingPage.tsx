@@ -832,7 +832,7 @@ function ClientForm({ client, onDone }: { client: BillingClientOut | null; onDon
         />
         <p className="mt-1 text-xs text-ink-muted">
           <code>{"{periodo}"}</code> = "21 al 27 de septiembre de 2026" ·{" "}
-          <code>{"{fecha_pago}"}</code> = "2 de octubre de 2026"
+          <code>{"{fecha_pago}"}</code> = "02/10/2026"
         </p>
       </div>
       <div className="col-span-2 flex flex-wrap items-center justify-end gap-2 md:col-span-4">

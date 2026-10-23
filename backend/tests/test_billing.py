@@ -418,7 +418,7 @@ def test_fac11_parse_xtrm_period_and_template():
     text, missing = render_concept(
         "Pago {fecha_pago} {periodo} {otro}", dt.date(2026, 10, 2), None, None
     )
-    assert text == "Pago 2 de octubre de 2026 [periodo trabajado] {otro}"
+    assert text == "Pago 02/10/2026 [periodo trabajado] {otro}"
     assert missing == ["work_period"]
 
 
@@ -443,7 +443,7 @@ async def test_fac11_sheet_builds_description_from_xtrm_payment(client):
     sheet = res.json()
     assert sheet["description"] == (
         "Servicios de entrenamiento y evaluación de modelos de IA periodo 21 al 27 de mayo "
-        "de 2026 pago recibido el 2 de junio de 2026"
+        "de 2026 pago recibido el 02/06/2026"
     )
     assert sheet["missing"] == ["fiscal_fx_rate"]
     assert sheet["client"]["tax_id"] == "XEXX010101000"

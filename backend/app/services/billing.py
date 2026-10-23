@@ -107,6 +107,11 @@ def date_es(value: dt.date) -> str:
     return f"{value.day} de {MONTHS_ES[value.month - 1]} de {value.year}"
 
 
+def payment_date_es(value: dt.date) -> str:
+    """FAC-11: the payment date goes as '02/10/2026' (dd/mm/aaaa)."""
+    return value.strftime("%d/%m/%Y")
+
+
 def period_es(start: dt.date, end: dt.date) -> str:
     """'21 al 27 de septiembre de 2026'; each end carries its own month/year
     when the period crosses months or years."""
@@ -137,7 +142,7 @@ def render_concept(
         periodo = MISSING_PERIOD
         missing.append("work_period")
     text = (template or DEFAULT_CONCEPT_TEMPLATE).replace("{periodo}", periodo)
-    return text.replace("{fecha_pago}", date_es(payment_date)), missing
+    return text.replace("{fecha_pago}", payment_date_es(payment_date)), missing
 
 
 # --- Settings and clients (FAC-14) ----------------------------------------------------
