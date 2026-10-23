@@ -743,7 +743,7 @@ function PaymentList({
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <StatusBadge payment={p} />
-                    <div className="text-right">
+                    <div className="w-36 shrink-0 text-right">
                       <p className="tabular text-sm font-semibold">{formatMoney(p.amount, p.currency)}</p>
                       {p.currency !== "MXN" && (
                         <p className="tabular text-xs text-ink-muted">

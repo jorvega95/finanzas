@@ -714,7 +714,7 @@ function PeriodCard({
                 </span>
                 <span className="flex items-center gap-2">
                   <StatusBadge payment={pay} />
-                  <span className="tabular text-xs text-ink-muted">
+                  <span className="tabular w-24 shrink-0 text-right text-xs text-ink-muted">
                     {pay.mxn ? formatMoney(pay.mxn, "MXN") : "sin TC"}
                   </span>
                 </span>
