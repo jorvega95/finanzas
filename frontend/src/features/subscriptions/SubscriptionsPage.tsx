@@ -760,9 +760,17 @@ export default function SubscriptionsPage() {
     for (const r of all) if (r.status !== "canceled") result[r.kind] += 1;
     return result;
   }, [all]);
-  const visible = all.filter(
-    (r) => r.kind === tab && (showInactive || (r.status !== "canceled" && r.status !== "paused")),
-  );
+  // Orden por próximo cargo (YYYY-MM-DD ordena lexicográficamente); sin fecha al final.
+  const visible = all
+    .filter(
+      (r) => r.kind === tab && (showInactive || (r.status !== "canceled" && r.status !== "paused")),
+    )
+    .sort((a, b) => {
+      if (a.next_date === b.next_date) return 0;
+      if (a.next_date === null) return 1;
+      if (b.next_date === null) return -1;
+      return a.next_date < b.next_date ? -1 : 1;
+    });
   const hiddenCount = all.filter(
     (r) => r.kind === tab && (r.status === "canceled" || r.status === "paused"),
   ).length;
