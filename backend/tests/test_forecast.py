@@ -367,3 +367,33 @@ async def test_pro07_transfers_crossing_the_perimeter(client):
         headers=ctx["headers"],
     )
     assert [e for e in res.json()["events"] if e["kind"].startswith("savings")] == []
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_pro03_previous_overpayment_credit_reduces_projected_due(client):
+    """PRO-03/TDC-10: el pago de más del último statement cerrado se resta del
+    próximo pago proyectado (antes se proyectaba el cargo completo)."""
+    ctx = await bootstrap_space(client)
+    card = await create_card(client, ctx, statement_day=15, payment_due_days=2)
+    debito = ctx["accounts"]["Débito"]["id"]
+
+    await charge(client, ctx, card["id"], "2026-05-10", "500.00")
+    closed = await close_cycles(client, ctx)
+    res = await client.post(
+        f"/api/v1/accounts/{card['id']}/payments",
+        headers=ctx["headers"],
+        json={
+            "amount": "700.00",
+            "from_account_id": debito,
+            "date": "2026-05-20",
+            "statement_id": closed[0]["id"],
+        },
+    )
+    assert res.status_code == 201, res.text
+
+    await charge(client, ctx, card["id"], "2026-06-10", "300.00")
+    body = await forecast(client, ctx, horizon_months=2)
+
+    # 300 de cargos - 200 de crédito arrastrado = 100.
+    card_dues = [e for e in body["events"] if e["kind"] == "card_due"]
+    assert [e["amount"] for e in card_dues] == ["100.00"]

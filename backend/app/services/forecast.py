@@ -335,11 +335,22 @@ async def _card_due_events(
         .scalars()
         .all()
     }
+    # TDC-10: el pago de más del último statement cerrado se aplica como crédito
+    # al próximo cierre; si excede el ciclo, el remanente pasa al siguiente.
+    carried_credit = ZERO
+    if settled:
+        previous = max(settled, key=lambda s: s.period_end)
+        carried_credit = await rates.to_base(
+            max(previous.paid_amount - previous.computed_total, ZERO), account.currency
+        )
     for cutoff in projected:
         amount = by_cutoff[cutoff]
         existing = open_statements.get(cutoff)
         if existing is not None:
             amount -= await rates.to_base(existing.paid_amount, account.currency)
+        if carried_credit > ZERO:
+            amount -= carried_credit
+            carried_credit = max(-amount, ZERO)
         amount = to_money(amount)
         if amount > ZERO:
             events.append(
