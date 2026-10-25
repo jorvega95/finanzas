@@ -60,6 +60,7 @@ export interface BillingClientOut {
   unit_code: string | null;
   postal_code: string | null;
   concept_template: string | null;
+  task_rate: string | null; // FAC-11
   is_active: boolean;
 }
 
@@ -69,6 +70,7 @@ export interface BillingSettingsOut {
   sat_invoice_url: string | null;
   sat_filing_url: string | null;
   sat_payment_url: string | null;
+  banxico_fx_url: string | null; // FAC-06/14
   rfc_extra_days: number; // FAC-12
 }
 

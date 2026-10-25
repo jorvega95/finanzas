@@ -41,6 +41,8 @@ class BillingSettings(Base, TimestampMixin):
     sat_invoice_url: Mapped[str | None] = mapped_column(String(500))
     sat_filing_url: Mapped[str | None] = mapped_column(String(500))
     sat_payment_url: Mapped[str | None] = mapped_column(String(500))
+    # FAC-14: Banxico page to look up the FIX rate used as fiscal_fx_rate (FAC-06).
+    banxico_fx_url: Mapped[str | None] = mapped_column(String(500))
     # FAC-12: extra business days granted by the sixth digit of the RFC (0-5).
     rfc_extra_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -50,6 +52,9 @@ class BillingClient(Base, AuditMixin):
     concept template used to build the invoice description."""
 
     __tablename__ = "billing_clients"
+    __table_args__ = (
+        CheckConstraint("task_rate IS NULL OR task_rate > 0", name="ck_billing_client_task_rate"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     space_id: Mapped[uuid.UUID] = mapped_column(
@@ -66,6 +71,8 @@ class BillingClient(Base, AuditMixin):
     postal_code: Mapped[str | None] = mapped_column(String(10))
     # Placeholders {periodo} and {fecha_pago} (FAC-11).
     concept_template: Mapped[str | None] = mapped_column(Text)
+    # FAC-11: amount paid per task, in the currency of its payments.
+    task_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 

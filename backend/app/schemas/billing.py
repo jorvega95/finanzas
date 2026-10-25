@@ -25,6 +25,7 @@ class BillingSettingsIn(BaseModel):
     sat_invoice_url: SatUrl | None = None
     sat_filing_url: SatUrl | None = None
     sat_payment_url: SatUrl | None = None
+    banxico_fx_url: SatUrl | None = None  # FAC-06/14
     # FAC-12: 1-2 → 1, 3-4 → 2, 5-6 → 3, 7-8 → 4, 9-0 → 5 business days.
     rfc_extra_days: int | None = Field(default=None, ge=0, le=5)
 
@@ -35,6 +36,7 @@ class BillingSettingsOut(BaseModel):
     sat_invoice_url: str | None = None
     sat_filing_url: str | None = None
     sat_payment_url: str | None = None
+    banxico_fx_url: str | None = None
     rfc_extra_days: int = 0
 
 
@@ -49,6 +51,8 @@ class BillingClientIn(BaseModel):
     unit_code: str | None = Field(default=None, max_length=60)
     postal_code: str | None = Field(default=None, max_length=10)
     concept_template: str | None = Field(default=None, max_length=1000)
+    # FAC-11: amount paid per task, in the currency of its payments.
+    task_rate: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
 
 
 class BillingClientUpdate(BillingClientIn):
@@ -70,6 +74,7 @@ class BillingClientOut(BaseModel):
     unit_code: str | None
     postal_code: str | None
     concept_template: str | None
+    task_rate: Decimal | None
     is_active: bool
 
 

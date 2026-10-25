@@ -388,6 +388,19 @@ async def test_fac01b_old_payment_arrives_invoiced_and_rules(client):
     assert res.json()["fiscal_fx_rate"] is None and res.json()["mxn"] == "5000.00"
 
 
+async def test_fac11_client_task_rate_is_optional_and_positive(client):
+    ctx, greenlight = await setup(client)
+    assert greenlight["task_rate"] is None
+    url = f"/api/v1/billing/clients/{greenlight['id']}"
+    for bad in ("0", "-1.00", "21.675"):
+        res = await client.patch(url, headers=ctx["headers"], json={"task_rate": bad})
+        assert res.status_code == 422, bad
+    res = await client.patch(url, headers=ctx["headers"], json={"task_rate": "21.67"})
+    assert res.status_code == 200 and res.json()["task_rate"] == "21.67"
+    res = await client.patch(url, headers=ctx["headers"], json={"task_rate": None})
+    assert res.json()["task_rate"] is None
+
+
 # --- FAC-06/11: pure helpers and the invoice sheet -----------------------------------------
 
 
@@ -467,6 +480,23 @@ async def test_fac14_sat_urls_https_only(client):
     assert res.json()["sat_filing_url"] == "https://x.mx/d"
     res = await client.put(url, headers=ctx["headers"], json={"sat_filing_url": ""})
     assert res.json()["sat_filing_url"] is None
+
+
+async def test_fac14_banxico_url_https_only(client):
+    ctx = await bootstrap_space(client)
+    url = "/api/v1/billing/settings"
+    assert (await client.get(url, headers=ctx["headers"])).json()["banxico_fx_url"] is None
+    res = await client.put(
+        url, headers=ctx["headers"], json={"banxico_fx_url": "http://banxico.mx"}
+    )
+    assert res.status_code == 422
+    res = await client.put(
+        url, headers=ctx["headers"], json={"banxico_fx_url": "https://www.banxico.org.mx/tc"}
+    )
+    assert res.json()["banxico_fx_url"] == "https://www.banxico.org.mx/tc"
+    # Updating another field keeps it (partial update).
+    res = await client.put(url, headers=ctx["headers"], json={"rfc_extra_days": 2})
+    assert res.json()["banxico_fx_url"] == "https://www.banxico.org.mx/tc"
 
 
 async def test_fac14_client_with_payments_is_deactivated(client):

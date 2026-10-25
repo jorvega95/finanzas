@@ -34,7 +34,7 @@ from app.services.files import get_file
 
 SUPPORTED_CURRENCIES = {"MXN", "USD"}  # TXN-04
 CENT = Decimal("0.01")
-SAT_URL_FIELDS = ("sat_invoice_url", "sat_filing_url", "sat_payment_url")
+SAT_URL_FIELDS = ("sat_invoice_url", "sat_filing_url", "sat_payment_url", "banxico_fx_url")
 DEFAULT_CONCEPT_TEMPLATE = (
     "Servicios de entrenamiento y evaluación de modelos de IA periodo {periodo} "
     "pago recibido el {fecha_pago}"
@@ -168,7 +168,7 @@ async def save_settings(
         if field in changes:
             value = (changes[field] or "").strip() or None
             if value is not None and not value.lower().startswith("https://"):
-                raise _reject("La URL del portal del SAT debe empezar con https://")
+                raise _reject("Las URLs de los portales deben empezar con https://")
             setattr(row, field, value)
     if changes.get("rfc_extra_days") is not None:
         row.rfc_extra_days = changes["rfc_extra_days"]  # FAC-12
