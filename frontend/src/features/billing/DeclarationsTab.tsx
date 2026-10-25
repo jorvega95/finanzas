@@ -23,6 +23,7 @@ import Icon from "../../components/ui/Icon";
 import Modal from "../../components/ui/Modal";
 import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import Spinner from "../../components/ui/Spinner";
+import { useToast } from "../../components/ui/Toast";
 import { formatDate, parseBusinessDate, todayISO } from "../../lib/dates";
 import { formatMoney, isPositiveAmount, sanitizeDecimal } from "../../lib/money";
 import {
@@ -215,6 +216,7 @@ function FilingForm({
   filing: FilingOut | null;
   onDone: () => void;
 }) {
+  const toast = useToast();
   const save = useSaveFiling();
   const remove = useDeleteFiling();
   // GLO-09: borrar la declaración se confirma.
@@ -277,9 +279,15 @@ function FilingForm({
             }
           : {}),
       });
+      toast.success(
+        `Declaración de ${monthLabel(period.period)} ${filing ? "actualizada" : "registrada"}${
+          !filing && alreadyPaid ? " y pagada" : ""
+        }.`,
+      );
       onDone();
     } catch (err) {
       setError(errorText(err));
+      toast.error(`No se guardó la declaración: ${errorText(err)}`);
     }
   }
 
@@ -448,7 +456,10 @@ function FilingForm({
             setConfirmingDelete(false);
             void remove
               .mutateAsync(filing.id)
-              .then(onDone)
+              .then(() => {
+                toast.success(`Declaración de ${monthLabel(period.period)} eliminada.`);
+                onDone();
+              })
               .catch((err) => setError(errorText(err)));
           }}
         >
@@ -463,6 +474,7 @@ function FilingForm({
 }
 
 function FilingPaymentForm({ filing, onDone }: { filing: FilingOut; onDone: () => void }) {
+  const toast = useToast();
   const pay = useSetFilingPayment();
   const defaultAccount = useDefaultTaxAccount();
   const [date, setDate] = useState(todayISO());
@@ -478,16 +490,22 @@ function FilingPaymentForm({ filing, onDone }: { filing: FilingOut; onDone: () =
     if (date < filing.filed_date)
       return setError("El pago no puede ser anterior a la presentación de la declaración.");
     try {
-      await pay.mutateAsync({
+      const saved = await pay.mutateAsync({
         filingId: filing.id,
         paid_date: date,
         paid_amount: amount,
         receipt_file_id: receipt?.id ?? null,
         account_id: accountId || null,
       });
+      toast.success(
+        saved.expense_transaction_id
+          ? "Pago registrado con su gasto en Impuestos."
+          : "Pago de la declaración registrado.",
+      );
       onDone();
     } catch (err) {
       setError(errorText(err));
+      toast.error(`No se registró el pago: ${errorText(err)}`);
     }
   }
 
@@ -531,6 +549,7 @@ function FilingRow({
   onEdit: () => void;
   onPay: () => void;
 }) {
+  const toast = useToast();
   const removePayment = useRemoveFilingPayment();
   const [error, setError] = useState<string | null>(null);
   // GLO-09: quitar el pago borra también su gasto; se confirma.
@@ -608,7 +627,10 @@ function FilingRow({
         onClose={() => setConfirmingRemove(false)}
         onConfirm={() => {
           setConfirmingRemove(false);
-          void removePayment.mutateAsync(filing.id).catch((err) => setError(errorText(err)));
+          void removePayment
+            .mutateAsync(filing.id)
+            .then(() => toast.success("Pago quitado: la declaración vuelve a estar por pagar."))
+            .catch((err) => setError(errorText(err)));
         }}
       >
         <p>
