@@ -294,8 +294,29 @@ export default function DashboardPage() {
           </ResponsiveContainer>
         </section>
 
-        {/* Próximos compromisos (DSH-05) y, debajo, tasks pagadas (FAC-17) */}
+        {/* Pagado a la fecha (FAC-17) y, debajo, próximos compromisos (DSH-05) */}
         <div className="flex flex-col gap-4 xl:row-span-2">
+          {tasksPaid.length > 0 && (
+            <div
+              className="card p-4 sm:p-5"
+              title="Total de siempre: Σ de los cobros del cliente ÷ su tarifa por unidad, sin importar el mes elegido. Se activa en Facturación › Configuración › cliente."
+            >
+              <p className="text-sm text-ink-muted">Pagado a la fecha</p>
+              {tasksPaid.map((row) => (
+                <div key={`${row.client_id}-${row.currency}`}>
+                  <p className="tabular mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
+                    {row.tasks.toLocaleString("es-MX")}{" "}
+                    <span className="text-base font-medium text-ink-muted">{row.unit_label}</span>
+                  </p>
+                  <p className="tabular mt-1 text-xs text-ink-muted">
+                    {tasksPaid.length > 1 && `${row.client_name} · `}
+                    {formatMoney(row.total_paid, row.currency)} ÷{" "}
+                    {formatMoney(row.task_rate, row.currency)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
           <section className="card flex-1 p-4 sm:p-5">
             <h2 className="mb-4 text-sm font-semibold">Próximos compromisos</h2>
             {(data?.upcoming ?? []).length === 0 ? (
@@ -330,27 +351,6 @@ export default function DashboardPage() {
               </ul>
             )}
           </section>
-          {tasksPaid.length > 0 && (
-            <div
-              className="card p-4 sm:p-5"
-              title="Total de siempre: Σ de los cobros del cliente ÷ su tarifa por unidad, sin importar el mes elegido. Se activa en Facturación › Configuración › cliente."
-            >
-              <p className="text-sm text-ink-muted">Pagado a la fecha</p>
-              {tasksPaid.map((row) => (
-                <div key={`${row.client_id}-${row.currency}`}>
-                  <p className="tabular mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
-                    {row.tasks.toLocaleString("es-MX")}{" "}
-                    <span className="text-base font-medium text-ink-muted">{row.unit_label}</span>
-                  </p>
-                  <p className="tabular mt-1 text-xs text-ink-muted">
-                    {tasksPaid.length > 1 && `${row.client_name} · `}
-                    {formatMoney(row.total_paid, row.currency)} ÷{" "}
-                    {formatMoney(row.task_rate, row.currency)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Por categoría (DSH-03) */}
