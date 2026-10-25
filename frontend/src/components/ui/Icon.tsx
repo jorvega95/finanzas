@@ -162,6 +162,12 @@ const PATHS = {
     </>
   ),
   chevronDown: <path d="m6 9 6 6 6-6" />,
+  arrowLeft: (
+    <>
+      <path d="m12 19-7-7 7-7" />
+      <path d="M19 12H5" />
+    </>
+  ),
   chevronsUpDown: (
     <>
       <path d="m7 15 5 5 5-5" />
