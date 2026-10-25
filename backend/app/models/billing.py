@@ -22,6 +22,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,6 +55,11 @@ class BillingClient(Base, AuditMixin):
     __tablename__ = "billing_clients"
     __table_args__ = (
         CheckConstraint("task_rate IS NULL OR task_rate > 0", name="ck_billing_client_task_rate"),
+        # FAC-17: the dashboard card needs a rate to divide by.
+        CheckConstraint(
+            "NOT show_tasks_on_dashboard OR task_rate IS NOT NULL",
+            name="ck_billing_client_tasks_dashboard_rate",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -73,6 +79,11 @@ class BillingClient(Base, AuditMixin):
     concept_template: Mapped[str | None] = mapped_column(Text)
     # FAC-11: amount paid per task, in the currency of its payments.
     task_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # FAC-17: plural noun shown with the count (default "tasks"), and opt-in card.
+    task_unit_label: Mapped[str | None] = mapped_column(String(30))
+    show_tasks_on_dashboard: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 

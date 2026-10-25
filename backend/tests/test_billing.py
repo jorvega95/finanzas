@@ -417,6 +417,15 @@ async def test_fac17_tasks_paid_all_time(client):
         json={"task_rate": "21.67"},
     )
     assert res.status_code == 200, res.text
+    # A rate alone does not opt in to the dashboard card.
+    assert res.json()["show_tasks_on_dashboard"] is False
+    assert (await client.get(url, headers=ctx["headers"])).json() == []
+    res = await client.patch(
+        f"/api/v1/billing/clients/{greenlight['id']}",
+        headers=ctx["headers"],
+        json={"show_tasks_on_dashboard": True},
+    )
+    assert res.status_code == 200, res.text
 
     # Other months, old payments (FAC-01b) and excluded payments all count.
     res = await client.post(
@@ -436,12 +445,70 @@ async def test_fac17_tasks_paid_all_time(client):
         json={"is_excluded": True},
     )
     assert res.status_code == 200, res.text
-    await make_client(client, ctx, name="Otro", task_rate="10.00")  # no payments ⇒ absent
+    # No payments ⇒ absent even with the card on.
+    await make_client(client, ctx, name="Otro", task_rate="10.00", show_tasks_on_dashboard=True)
 
     [row] = (await client.get(url, headers=ctx["headers"])).json()
     assert row["client_name"] == "Greenlight" and row["currency"] == "USD"
     assert row["total_paid"] == "2166.67" and row["task_rate"] == "21.67"
     assert row["tasks"] == 100  # 99.985 rounded HALF_EVEN
+    assert row["unit_label"] == "tasks"  # default
+
+
+@freeze_time("2026-10-21 12:00:00")
+async def test_fac17_card_is_opt_in_and_hides_inactive_clients(client):
+    ctx, greenlight = await setup(client)
+    url = "/api/v1/billing/tasks"
+    client_url = f"/api/v1/billing/clients/{greenlight['id']}"
+    await post_txn(client, ctx, **usd_income(ctx, amount="100.00"))
+
+    # The card needs a rate: asking for it without one is rejected.
+    res = await client.patch(
+        client_url, headers=ctx["headers"], json={"show_tasks_on_dashboard": True}
+    )
+    assert res.status_code == 422
+    res = await client.post(
+        "/api/v1/billing/clients",
+        headers=ctx["headers"],
+        json={"name": "Sin tarifa", "show_tasks_on_dashboard": True},
+    )
+    assert res.status_code == 422
+
+    res = await client.patch(
+        client_url,
+        headers=ctx["headers"],
+        json={"task_rate": "25.00", "show_tasks_on_dashboard": True, "task_unit_label": " horas "},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["task_unit_label"] == "horas"
+    [row] = (await client.get(url, headers=ctx["headers"])).json()
+    assert row["unit_label"] == "horas" and row["tasks"] == 4
+
+    # An explicit null leaves the flag as is (non-nullable column).
+    res = await client.patch(
+        client_url, headers=ctx["headers"], json={"show_tasks_on_dashboard": None}
+    )
+    assert res.status_code == 200 and res.json()["show_tasks_on_dashboard"] is True
+
+    # Turning the card off hides it; removing the rate turns it off too.
+    res = await client.patch(
+        client_url, headers=ctx["headers"], json={"show_tasks_on_dashboard": False}
+    )
+    assert (await client.get(url, headers=ctx["headers"])).json() == []
+    await client.patch(client_url, headers=ctx["headers"], json={"show_tasks_on_dashboard": True})
+    res = await client.patch(client_url, headers=ctx["headers"], json={"task_rate": None})
+    assert res.json()["show_tasks_on_dashboard"] is False
+    assert (await client.get(url, headers=ctx["headers"])).json() == []
+
+    # A deactivated client (GLO-03) is not counted.
+    await client.patch(
+        client_url,
+        headers=ctx["headers"],
+        json={"task_rate": "25.00", "show_tasks_on_dashboard": True},
+    )
+    assert len((await client.get(url, headers=ctx["headers"])).json()) == 1
+    assert (await client.delete(client_url, headers=ctx["headers"])).status_code == 204
+    assert (await client.get(url, headers=ctx["headers"])).json() == []
 
 
 # --- FAC-06/11: pure helpers and the invoice sheet -----------------------------------------

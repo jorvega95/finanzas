@@ -210,10 +210,25 @@ async def _active_client(
     return client
 
 
+DEFAULT_TASK_UNIT = "tasks"  # FAC-17
+
+
+def _apply_task_settings(client: BillingClient, requested_show: bool | None) -> None:
+    """FAC-17: the dashboard card needs a rate; removing the rate turns it off.
+    Asking for the card without a rate is rejected."""
+    if client.task_unit_label is not None:
+        client.task_unit_label = client.task_unit_label.strip() or None
+    if client.task_rate is None:
+        if requested_show:
+            raise _reject("Para mostrarlo en el Dashboard, captura la tarifa por unidad")
+        client.show_tasks_on_dashboard = False
+
+
 async def create_client(
     session: AsyncSession, space_id: uuid.UUID, created_by: uuid.UUID, data: dict[str, Any]
 ) -> BillingClient:
     client = BillingClient(space_id=space_id, created_by=created_by, **data)
+    _apply_task_settings(client, data.get("show_tasks_on_dashboard"))
     session.add(client)
     await session.commit()
     await session.refresh(client)
@@ -225,6 +240,7 @@ async def update_client(
 ) -> BillingClient:
     for key, value in changes.items():
         setattr(client, key, value)
+    _apply_task_settings(client, changes.get("show_tasks_on_dashboard"))
     await session.commit()
     await session.refresh(client)
     return client
@@ -387,24 +403,36 @@ async def summary(session: AsyncSession, space_id: uuid.UUID) -> dict[str, Any]:
 
 
 async def tasks_paid(session: AsyncSession, space_id: uuid.UUID) -> list[dict[str, Any]]:
-    """FAC-17: all-time Σ payments / task_rate per client with a rate and
-    currency. Old (FAC-01b) and excluded payments count: money received."""
+    """FAC-17: all-time Σ payments / task_rate per active client that opted in
+    to the dashboard card, by currency. Old (FAC-01b) and excluded payments
+    count: money received."""
     stmt = (
         select(
             BillingClient.id,
             BillingClient.name,
             BillingClient.task_rate,
+            BillingClient.task_unit_label,
             InvoiceablePayment.currency,
             func.sum(InvoiceablePayment.amount),
         )
         .join(InvoiceablePayment, InvoiceablePayment.client_id == BillingClient.id)
-        .where(BillingClient.space_id == space_id, BillingClient.task_rate.is_not(None))
-        .group_by(BillingClient.id, BillingClient.name, BillingClient.task_rate)
+        .where(
+            BillingClient.space_id == space_id,
+            BillingClient.task_rate.is_not(None),
+            BillingClient.show_tasks_on_dashboard.is_(True),
+            BillingClient.is_active.is_(True),
+        )
+        .group_by(
+            BillingClient.id,
+            BillingClient.name,
+            BillingClient.task_rate,
+            BillingClient.task_unit_label,
+        )
         .group_by(InvoiceablePayment.currency)
         .order_by(BillingClient.name, InvoiceablePayment.currency)
     )
     rows = []
-    for client_id, name, rate, currency, total in (await session.execute(stmt)).all():
+    for client_id, name, rate, unit, currency, total in (await session.execute(stmt)).all():
         total_paid = Decimal(total)
         tasks = (total_paid / Decimal(rate)).quantize(Decimal(1), rounding=ROUND_HALF_EVEN)
         rows.append(
@@ -413,6 +441,7 @@ async def tasks_paid(session: AsyncSession, space_id: uuid.UUID) -> list[dict[st
                 "client_name": name,
                 "currency": currency,
                 "task_rate": Decimal(rate),
+                "unit_label": unit or DEFAULT_TASK_UNIT,
                 "total_paid": total_paid,
                 "tasks": int(tasks),
             }

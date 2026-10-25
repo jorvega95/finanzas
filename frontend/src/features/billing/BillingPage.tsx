@@ -7,6 +7,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { hasBalance, useAccounts } from "../../api/accounts";
 import {
+  DEFAULT_TASK_UNIT,
   downloadExport,
   useBillingClients,
   useBillingPayments,
@@ -331,6 +332,8 @@ function ClientForm({ client, onDone }: { client: BillingClientOut | null; onDon
     country: "",
     postal_code: "",
     task_rate: "",
+    task_unit_label: "",
+    show_tasks_on_dashboard: false,
     ...CLIENT_DEFAULTS,
   };
   const [form, setForm] = useState({
@@ -345,7 +348,11 @@ function ClientForm({ client, onDone }: { client: BillingClientOut | null; onDon
     postal_code: initial.postal_code ?? "",
     concept_template: initial.concept_template ?? "",
     task_rate: initial.task_rate ?? "",
+    task_unit_label: initial.task_unit_label ?? "",
   });
+  // FAC-17: pago por unidad (opcional) y tarjeta del Dashboard (opt-in).
+  const [paysPerTask, setPaysPerTask] = useState(Boolean(initial.task_rate));
+  const [showOnDashboard, setShowOnDashboard] = useState(initial.show_tasks_on_dashboard);
   const [error, setError] = useState<string | null>(null);
   const field = (key: keyof typeof form, label: string, maxLength = 60, hint?: string) => (
     <div>
@@ -365,13 +372,20 @@ function ClientForm({ client, onDone }: { client: BillingClientOut | null; onDon
     e.preventDefault();
     setError(null);
     if (!form.name.trim()) return setError("El nombre o razón social es obligatorio.");
-    if (form.task_rate.trim() && !TASK_RATE_PATTERN.test(form.task_rate.trim()))
-      return setError("La tarifa por task debe ser un monto mayor a 0 con hasta 2 decimales.");
+    if (paysPerTask && !TASK_RATE_PATTERN.test(form.task_rate.trim()))
+      return setError("La tarifa por unidad debe ser un monto mayor a 0 con hasta 2 decimales.");
     const body = Object.fromEntries(
       Object.entries(form).map(([k, v]) => [k, v.trim() || null]),
     ) as Record<keyof typeof form, string | null>;
     try {
-      await save.mutateAsync({ id: client?.id, ...body, name: form.name.trim() });
+      await save.mutateAsync({
+        id: client?.id,
+        ...body,
+        name: form.name.trim(),
+        task_rate: paysPerTask ? body.task_rate : null,
+        task_unit_label: paysPerTask ? body.task_unit_label : null,
+        show_tasks_on_dashboard: paysPerTask && showOnDashboard,
+      });
       toast.success(`Cliente «${form.name.trim()}» guardado.`);
       onDone();
     } catch (err) {
@@ -404,12 +418,6 @@ function ClientForm({ client, onDone }: { client: BillingClientOut | null; onDon
         <div className="grid gap-3 md:grid-cols-3">
           {field("product_code", "Producto o Servicio")}
           {field("unit_code", "Unidad de Medida")}
-          {field(
-            "task_rate",
-            "Tarifa por task (opcional)",
-            14,
-            "En la moneda de sus cobros",
-          )}
         </div>
         <div>
           <label className="label" htmlFor="cl-template">Descripción Detallada (plantilla)</label>
@@ -426,6 +434,45 @@ function ClientForm({ client, onDone }: { client: BillingClientOut | null; onDon
             <code>{"{fecha_pago}"}</code> = "02/10/2026"
           </p>
         </div>
+      </fieldset>
+      <fieldset className="space-y-3">
+        <legend className="mb-1 text-sm font-semibold">Pago por unidad (opcional)</legend>
+        <p className="text-xs text-ink-muted">
+          No va en la factura: sirve para llevar la cuenta de cuántas tareas u horas te ha pagado.
+        </p>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={paysPerTask}
+            onChange={(e) => {
+              setPaysPerTask(e.target.checked);
+              if (e.target.checked && !form.task_rate.trim()) setShowOnDashboard(true);
+            }}
+          />
+          Este cliente me paga una tarifa fija por tarea, hora u otra unidad
+        </label>
+        {paysPerTask && (
+          <>
+            <div className="grid gap-3 md:grid-cols-3">
+              {field("task_rate", "Tarifa por unidad", 14, "En la moneda de sus cobros, p. ej. 21.67")}
+              {field(
+                "task_unit_label",
+                "Nombre de la unidad",
+                30,
+                `En plural; si lo dejas vacío, «${DEFAULT_TASK_UNIT}»`,
+              )}
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={showOnDashboard}
+                onChange={(e) => setShowOnDashboard(e.target.checked)}
+              />
+              Mostrar en el Dashboard cuántas {form.task_unit_label.trim() || DEFAULT_TASK_UNIT} me ha
+              pagado
+            </label>
+          </>
+        )}
       </fieldset>
       <div className="flex flex-wrap items-center justify-end gap-2">
         <ErrorLine error={error} />
@@ -863,6 +910,13 @@ function SettingsTab({ clients }: { clients: BillingClientOut[] }) {
                   <p className="truncate text-xs text-ink-muted">
                     {[c.tax_id, c.foreign_tax_id, c.country].filter(Boolean).join(" · ")}
                   </p>
+                  {c.task_rate && (
+                    <p className="truncate text-xs text-ink-muted">
+                      {/* FAC-17 */}
+                      {c.task_rate} por unidad ({c.task_unit_label || DEFAULT_TASK_UNIT})
+                      {c.show_tasks_on_dashboard && " · en el Dashboard"}
+                    </p>
+                  )}
                 </div>
                 <button className="btn-ghost px-2" aria-label="Editar" onClick={() => setClientModal(c)}>
                   <Icon name="pencil" className="size-3.5" />

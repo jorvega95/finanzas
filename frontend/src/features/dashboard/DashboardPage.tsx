@@ -333,13 +333,14 @@ export default function DashboardPage() {
           {tasksPaid.length > 0 && (
             <div
               className="card p-4 sm:p-5"
-              title="Total de siempre: Σ de los cobros del cliente ÷ su tarifa por task, sin importar el mes elegido"
+              title="Total de siempre: Σ de los cobros del cliente ÷ su tarifa por unidad, sin importar el mes elegido. Se activa en Facturación › Configuración › cliente."
             >
-              <p className="text-sm text-ink-muted">Tasks pagadas</p>
+              <p className="text-sm text-ink-muted">Pagado a la fecha</p>
               {tasksPaid.map((row) => (
                 <div key={`${row.client_id}-${row.currency}`}>
                   <p className="tabular mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
-                    {row.tasks.toLocaleString("es-MX")}
+                    {row.tasks.toLocaleString("es-MX")}{" "}
+                    <span className="text-base font-medium text-ink-muted">{row.unit_label}</span>
                   </p>
                   <p className="tabular mt-1 text-xs text-ink-muted">
                     {tasksPaid.length > 1 && `${row.client_name} · `}

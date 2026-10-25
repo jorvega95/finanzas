@@ -53,10 +53,14 @@ class BillingClientIn(BaseModel):
     concept_template: str | None = Field(default=None, max_length=1000)
     # FAC-11: amount paid per task, in the currency of its payments.
     task_rate: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
+    # FAC-17: plural noun for the count ("tasks", "horas") and opt-in dashboard card.
+    task_unit_label: str | None = Field(default=None, max_length=30)
+    show_tasks_on_dashboard: bool = False
 
 
 class BillingClientUpdate(BillingClientIn):
     name: str | None = Field(default=None, min_length=1, max_length=120)  # type: ignore[assignment]
+    show_tasks_on_dashboard: bool | None = None  # type: ignore[assignment]
     is_active: bool | None = None
 
 
@@ -75,6 +79,8 @@ class BillingClientOut(BaseModel):
     postal_code: str | None
     concept_template: str | None
     task_rate: Decimal | None
+    task_unit_label: str | None
+    show_tasks_on_dashboard: bool
     is_active: bool
 
 
@@ -180,6 +186,7 @@ class TasksPaidOut(BaseModel):
     client_name: str
     currency: str
     task_rate: Decimal
+    unit_label: str
     total_paid: Decimal
     tasks: int
 

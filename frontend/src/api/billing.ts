@@ -61,20 +61,25 @@ export interface BillingClientOut {
   postal_code: string | null;
   concept_template: string | null;
   task_rate: string | null; // FAC-11
+  task_unit_label: string | null; // FAC-17: plural, p. ej. "tasks", "horas"
+  show_tasks_on_dashboard: boolean; // FAC-17
   is_active: boolean;
 }
 
-// FAC-17: tasks pagadas de siempre por cliente con tarifa.
+// FAC-17: unidades pagadas de siempre por cliente que activó la tarjeta.
 export interface TasksPaidOut {
   client_id: string;
   client_name: string;
   currency: string;
   task_rate: string;
+  unit_label: string;
   total_paid: string;
   tasks: number;
 }
 
 export type BillingClientBody = Partial<Omit<BillingClientOut, "id">>;
+
+export const DEFAULT_TASK_UNIT = "tasks"; // FAC-17
 
 export interface BillingSettingsOut {
   sat_invoice_url: string | null;

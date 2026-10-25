@@ -148,8 +148,10 @@ async def update_client(
     space, _ = space_and_member
     client = await svc.get_client(db, space.id, client_id)
     changes = payload.model_dump(exclude_unset=True)
-    if changes.get("name", "") is None:
-        changes.pop("name")
+    # Non-nullable columns: an explicit null means "leave as is".
+    for key in ("name", "show_tasks_on_dashboard", "is_active"):
+        if key in changes and changes[key] is None:
+            changes.pop(key)
     client = await svc.update_client(db, client, changes)
     return BillingClientOut.model_validate(client)
 
