@@ -34,6 +34,7 @@ from app.schemas.billing import (
     PeriodOut,
     PrefillItemOut,
     StoredFileOut,
+    TasksPaidOut,
 )
 from app.services import billing as svc
 from app.services import billing_export, billing_reminders
@@ -188,6 +189,13 @@ async def get_summary(db: DbSession, space_and_member: ActiveSpace) -> BillingSu
     space, _ = space_and_member
     data = await svc.summary(db, space.id)
     return BillingSummaryOut(counts=data["counts"], pending_amounts=data["pending_amounts"])
+
+
+@router.get("/tasks", response_model=list[TasksPaidOut])
+async def get_tasks_paid(db: DbSession, space_and_member: ActiveSpace) -> list[TasksPaidOut]:
+    """FAC-17: tasks pagadas de siempre por cliente con tarifa por task."""
+    space, _ = space_and_member
+    return [TasksPaidOut(**row) for row in await svc.tasks_paid(db, space.id)]
 
 
 @router.get("/payments", response_model=list[PaymentOut])

@@ -386,6 +386,40 @@ async def summary(session: AsyncSession, space_id: uuid.UUID) -> dict[str, Any]:
     return {"counts": counts, "pending_amounts": pending}
 
 
+async def tasks_paid(session: AsyncSession, space_id: uuid.UUID) -> list[dict[str, Any]]:
+    """FAC-17: all-time Σ payments / task_rate per client with a rate and
+    currency. Old (FAC-01b) and excluded payments count: money received."""
+    stmt = (
+        select(
+            BillingClient.id,
+            BillingClient.name,
+            BillingClient.task_rate,
+            InvoiceablePayment.currency,
+            func.sum(InvoiceablePayment.amount),
+        )
+        .join(InvoiceablePayment, InvoiceablePayment.client_id == BillingClient.id)
+        .where(BillingClient.space_id == space_id, BillingClient.task_rate.is_not(None))
+        .group_by(BillingClient.id, BillingClient.name, BillingClient.task_rate)
+        .group_by(InvoiceablePayment.currency)
+        .order_by(BillingClient.name, InvoiceablePayment.currency)
+    )
+    rows = []
+    for client_id, name, rate, currency, total in (await session.execute(stmt)).all():
+        total_paid = Decimal(total)
+        tasks = (total_paid / Decimal(rate)).quantize(Decimal(1), rounding=ROUND_HALF_EVEN)
+        rows.append(
+            {
+                "client_id": client_id,
+                "client_name": name,
+                "currency": currency,
+                "task_rate": Decimal(rate),
+                "total_paid": total_paid,
+                "tasks": int(tasks),
+            }
+        )
+    return rows
+
+
 async def files_by_id(
     session: AsyncSession, ids: Sequence[uuid.UUID | None]
 ) -> dict[uuid.UUID, StoredFile]:

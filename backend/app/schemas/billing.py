@@ -173,6 +173,17 @@ class BillingSummaryOut(BaseModel):
     pending_amounts: dict[str, MoneyOut]
 
 
+class TasksPaidOut(BaseModel):
+    """FAC-17: all-time tasks paid by one client in one currency."""
+
+    client_id: uuid.UUID
+    client_name: str
+    currency: str
+    task_rate: Decimal
+    total_paid: Decimal
+    tasks: int
+
+
 class InvoiceSheetOut(BaseModel):
     """FAC-11: what to type in the SAT portal for one payment."""
 

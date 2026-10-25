@@ -26,6 +26,7 @@ import {
   useDashboard,
   useDeleteBudget,
 } from "../../api/dashboard";
+import { useTasksPaid } from "../../api/billing";
 import { useNetWorth } from "../../api/investments";
 import { useExcludeEvents } from "../../lib/excludeEvents";
 import { formatMoney } from "../../lib/money";
@@ -190,6 +191,7 @@ export default function DashboardPage() {
   const currency = activeSpace.base_currency;
   const chart = useChartTheme();
   const lastNetWorth = (useNetWorth().data ?? []).at(-1); // DSH-07
+  const tasksPaid = useTasksPaid().data ?? []; // FAC-17
 
   // DSH-06: cada rebanada es navegable; `key` conserva el valor de dominio.
   const natureData = Object.entries(data?.by_nature ?? {}).map(([key, value]) => ({
@@ -292,41 +294,63 @@ export default function DashboardPage() {
           </ResponsiveContainer>
         </section>
 
-        {/* Próximos compromisos (DSH-05) */}
-        <section className="card p-4 sm:p-5 xl:row-span-2">
-          <h2 className="mb-4 text-sm font-semibold">Próximos compromisos</h2>
-          {(data?.upcoming ?? []).length === 0 ? (
-            <p className="text-sm text-ink-muted">Nada pendiente.</p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {(data?.upcoming ?? []).map((item) => (
-                <li key={`${item.kind}-${item.ref_id}`} className="flex items-center justify-between py-2 text-sm">
-                  <span className="flex items-center gap-2">
-                    <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-ink-muted">
-                      <Icon name={KIND_ICONS[item.kind] ?? "calendar"} className="size-3.5" />
+        {/* Próximos compromisos (DSH-05) y, debajo, tasks pagadas (FAC-17) */}
+        <div className="flex flex-col gap-4 xl:row-span-2">
+          <section className="card flex-1 p-4 sm:p-5">
+            <h2 className="mb-4 text-sm font-semibold">Próximos compromisos</h2>
+            {(data?.upcoming ?? []).length === 0 ? (
+              <p className="text-sm text-ink-muted">Nada pendiente.</p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {(data?.upcoming ?? []).map((item) => (
+                  <li key={`${item.kind}-${item.ref_id}`} className="flex items-center justify-between py-2 text-sm">
+                    <span className="flex items-center gap-2">
+                      <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-ink-muted">
+                        <Icon name={KIND_ICONS[item.kind] ?? "calendar"} className="size-3.5" />
+                      </span>
+                      <span>
+                        {item.description}
+                        {item.is_overdue && (
+                          <span className="ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">
+                            Vencido
+                          </span>
+                        )}
+                      </span>
                     </span>
-                    <span>
-                      {item.description}
-                      {item.is_overdue && (
-                        <span className="ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-700 dark:text-red-300">
-                          Vencido
-                        </span>
-                      )}
+                    <span className="text-right">
+                      <span className="tabular font-medium">
+                        {item.amount === null
+                          ? "Por capturar"
+                          : formatMoney(item.amount, item.currency ?? currency)}
+                      </span>
+                      <span className="ml-2 text-xs text-ink-muted">{formatDate(item.date)}</span>
                     </span>
-                  </span>
-                  <span className="text-right">
-                    <span className="tabular font-medium">
-                      {item.amount === null
-                        ? "Por capturar"
-                        : formatMoney(item.amount, item.currency ?? currency)}
-                    </span>
-                    <span className="ml-2 text-xs text-ink-muted">{formatDate(item.date)}</span>
-                  </span>
-                </li>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          {tasksPaid.length > 0 && (
+            <div
+              className="card p-4 sm:p-5"
+              title="Total de siempre: Σ de los cobros del cliente ÷ su tarifa por task, sin importar el mes elegido"
+            >
+              <p className="text-sm text-ink-muted">Tasks pagadas</p>
+              {tasksPaid.map((row) => (
+                <div key={`${row.client_id}-${row.currency}`}>
+                  <p className="tabular mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
+                    {row.tasks.toLocaleString("es-MX")}
+                  </p>
+                  <p className="tabular mt-1 text-xs text-ink-muted">
+                    {tasksPaid.length > 1 && `${row.client_name} · `}
+                    {formatMoney(row.total_paid, row.currency)} ÷{" "}
+                    {formatMoney(row.task_rate, row.currency)}
+                  </p>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
-        </section>
+        </div>
 
         {/* Por categoría (DSH-03) */}
         <section className="card p-4 sm:p-5">

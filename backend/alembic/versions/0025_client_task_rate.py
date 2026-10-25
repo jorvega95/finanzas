@@ -1,4 +1,4 @@
-"""Amount paid per task on billing clients (FAC-11).
+"""Amount paid per task on billing clients (FAC-11, FAC-17).
 
 Revision ID: 0025
 Revises: 0024

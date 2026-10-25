@@ -64,6 +64,16 @@ export interface BillingClientOut {
   is_active: boolean;
 }
 
+// FAC-17: tasks pagadas de siempre por cliente con tarifa.
+export interface TasksPaidOut {
+  client_id: string;
+  client_name: string;
+  currency: string;
+  task_rate: string;
+  total_paid: string;
+  tasks: number;
+}
+
 export type BillingClientBody = Partial<Omit<BillingClientOut, "id">>;
 
 export interface BillingSettingsOut {
@@ -145,6 +155,13 @@ export function useBillingSummary() {
   return useQuery({
     queryKey: ["billing", "summary"],
     queryFn: () => api<BillingSummaryOut>("/api/v1/billing/summary"),
+  });
+}
+
+export function useTasksPaid() {
+  return useQuery({
+    queryKey: ["billing", "tasks"],
+    queryFn: () => api<TasksPaidOut[]>("/api/v1/billing/tasks"),
   });
 }
 

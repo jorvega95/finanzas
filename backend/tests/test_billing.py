@@ -401,6 +401,49 @@ async def test_fac11_client_task_rate_is_optional_and_positive(client):
     assert res.json()["task_rate"] is None
 
 
+# --- FAC-17: tasks paid ------------------------------------------------------------------
+
+
+@freeze_time("2026-10-21 12:00:00")
+async def test_fac17_tasks_paid_all_time(client):
+    ctx, greenlight = await setup(client)
+    url = "/api/v1/billing/tasks"
+    # Without a rate the client is not listed.
+    await post_txn(client, ctx, **usd_income(ctx, amount="1733.34"))
+    assert (await client.get(url, headers=ctx["headers"])).json() == []
+    res = await client.patch(
+        f"/api/v1/billing/clients/{greenlight['id']}",
+        headers=ctx["headers"],
+        json={"task_rate": "21.67"},
+    )
+    assert res.status_code == 200, res.text
+
+    # Other months, old payments (FAC-01b) and excluded payments all count.
+    res = await client.post(
+        "/api/v1/billing/payments",
+        headers=ctx["headers"],
+        json={
+            "client_id": greenlight["id"],
+            "payment_date": "2026-09-25",
+            "amount": "433.33",
+            "currency": "USD",
+        },
+    )
+    assert res.status_code == 201, res.text
+    res = await client.patch(
+        f"/api/v1/billing/payments/{res.json()['id']}",
+        headers=ctx["headers"],
+        json={"is_excluded": True},
+    )
+    assert res.status_code == 200, res.text
+    await make_client(client, ctx, name="Otro", task_rate="10.00")  # no payments ⇒ absent
+
+    [row] = (await client.get(url, headers=ctx["headers"])).json()
+    assert row["client_name"] == "Greenlight" and row["currency"] == "USD"
+    assert row["total_paid"] == "2166.67" and row["task_rate"] == "21.67"
+    assert row["tasks"] == 100  # 99.985 rounded HALF_EVEN
+
+
 # --- FAC-06/11: pure helpers and the invoice sheet -----------------------------------------
 
 
