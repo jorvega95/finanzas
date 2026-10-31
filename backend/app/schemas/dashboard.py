@@ -25,6 +25,13 @@ class TrendPoint(Totals):
     month: str
 
 
+class TrendRangePoint(Totals):
+    """DSH-08: un periodo (mes o semana) de la tendencia."""
+
+    start: dt.date
+    end: dt.date
+
+
 class UpcomingItem(BaseModel):
     """DSH-05."""
 

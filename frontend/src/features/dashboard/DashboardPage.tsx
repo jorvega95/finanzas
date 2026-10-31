@@ -37,6 +37,7 @@ import Icon, { type IconName } from "../../components/ui/Icon";
 import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import BillingAlert from "../billing/BillingAlert";
 import NatureDetailModal from "./NatureDetailModal";
+import TrendModal from "./TrendModal";
 import { CHART_COLORS as COLORS, NATURE_LABELS } from "./nature";
 
 const KIND_ICONS: Record<string, IconName> = {
@@ -45,6 +46,8 @@ const KIND_ICONS: Record<string, IconName> = {
   recurring: "refresh",
   commitment: "party", // CXP-08: pago a proveedor
 };
+
+const compactNumber = new Intl.NumberFormat("es-MX", { notation: "compact", maximumFractionDigits: 1 });
 
 function currentMonth(): string {
   const now = new Date();
@@ -183,6 +186,7 @@ function BudgetsSection({ month, excludeEvents }: { month: string; excludeEvents
 export default function DashboardPage() {
   const { activeSpace } = useSpace();
   const [month, setMonth] = useState(currentMonth);
+  const [trendOpen, setTrendOpen] = useState(false);
   const [natureDetail, setNatureDetail] = useState<string | null>(null);
   const [excludeEvents, setExcludeEvents] = useExcludeEvents(); // EVT-04
   const dashboard = useDashboard(month, excludeEvents);
@@ -274,12 +278,29 @@ export default function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {/* Tendencia 6 meses (DSH-03) */}
         <section className="card p-4 sm:p-5 lg:col-span-2">
-          <h2 className="mb-4 text-sm font-semibold">Tendencia 6 meses</h2>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">Tendencia 6 meses</h2>
+            <button
+              type="button"
+              aria-label="Ver tendencia en detalle"
+              title="Ver por semana y más meses"
+              className="rounded-lg p-1.5 text-ink-subtle transition hover:bg-muted hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              onClick={() => setTrendOpen(true)}
+            >
+              <Icon name="expand" />
+            </button>
+          </div>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={data?.trend ?? []}>
               <CartesianGrid vertical={false} stroke={chart.grid} />
               <XAxis dataKey="month" fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
-              <YAxis fontSize={11} tick={{ fill: chart.tick }} stroke={chart.axis} />
+              <YAxis
+                fontSize={11}
+                width={52}
+                tick={{ fill: chart.tick }}
+                stroke={chart.axis}
+                tickFormatter={(v) => compactNumber.format(Number(v))}
+              />
               <Tooltip
                 formatter={(v) => formatMoney(String(v), currency)}
                 cursor={chart.cursorLine}
@@ -460,6 +481,13 @@ export default function DashboardPage() {
         nature={natureDetail}
         currency={currency}
         onClose={() => setNatureDetail(null)}
+      />
+      <TrendModal
+        open={trendOpen}
+        onClose={() => setTrendOpen(false)}
+        month={month}
+        currency={currency}
+        excludeEvents={excludeEvents}
       />
     </div>
   );

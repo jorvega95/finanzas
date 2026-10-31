@@ -19,6 +19,33 @@ export interface TrendPoint extends Totals {
   month: string;
 }
 
+// DSH-08: tendencia por mes o por semana (lun–dom, recortada al rango).
+export interface TrendRangePoint extends Totals {
+  start: string;
+  end: string;
+}
+
+export type TrendGranularity = "month" | "week";
+
+export function useTrendDetail(
+  month: string,
+  granularity: TrendGranularity,
+  months: number,
+  excludeEvents: boolean,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["dashboard", "trend", month, granularity, months, { excludeEvents }],
+    enabled,
+    queryFn: () =>
+      api<TrendRangePoint[]>(
+        `/api/v1/dashboard/trend?month=${month}&granularity=${granularity}&months=${months}${
+          excludeEvents ? "&exclude_events=true" : ""
+        }`,
+      ),
+  });
+}
+
 export interface UpcomingItem {
   kind: "card_due" | "msi_quota" | "recurring" | "commitment"; // CXP-08
   date: string;

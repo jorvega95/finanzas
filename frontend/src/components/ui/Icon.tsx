@@ -77,6 +77,14 @@ const PATHS = {
       <path d="M12 5v14" />
     </>
   ),
+  expand: (
+    <>
+      <path d="M15 3h6v6" />
+      <path d="m21 3-7 7" />
+      <path d="M9 21H3v-6" />
+      <path d="m3 21 7-7" />
+    </>
+  ),
   x: (
     <>
       <path d="M18 6 6 18" />

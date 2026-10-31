@@ -429,6 +429,50 @@ async def trend(
     return list(reversed(points))
 
 
+def week_buckets(first_month: str, last_month: str) -> list[tuple[dt.date, dt.date]]:
+    """DSH-08: semanas lun–dom que cubren de `first_month` a `last_month`
+    (inclusive), recortadas al rango: la primera y la última pueden ser parciales,
+    así Σ semanas == Σ meses."""
+    range_start, _ = month_bounds(first_month)
+    _, range_end = month_bounds(last_month)
+    buckets = []
+    start = range_start
+    while start <= range_end:
+        end = min(start + dt.timedelta(days=6 - start.weekday()), range_end)
+        buckets.append((start, end))
+        start = end + dt.timedelta(days=1)
+    return buckets
+
+
+async def trend_detail(
+    session: AsyncSession,
+    space: Space,
+    month: str,
+    granularity: str = "month",
+    months_back: int = 6,
+    exclude_events: bool = False,
+) -> list[dict[str, Any]]:
+    """DSH-08: serie de la tendencia por mes o por semana, con los MISMOS
+    predicados de DSH-02 (`monthly_totals` sobre cada rango)."""
+    year, month_number = int(month[:4]), int(month[5:7])
+    keys = []
+    for _ in range(months_back):
+        keys.append(f"{year:04d}-{month_number:02d}")
+        month_number -= 1
+        if month_number == 0:
+            month_number, year = 12, year - 1
+    keys.reverse()
+    if granularity == "week":
+        ranges = week_buckets(keys[0], keys[-1])
+    else:
+        ranges = [month_bounds(key) for key in keys]
+    points = []
+    for start, end in ranges:
+        totals = await monthly_totals(session, space, start, end, exclude_events)
+        points.append({"start": start, "end": end, **totals})
+    return points
+
+
 async def upcoming_commitments(
     session: AsyncSession, space: Space, limit: int = 10
 ) -> list[dict[str, Any]]:

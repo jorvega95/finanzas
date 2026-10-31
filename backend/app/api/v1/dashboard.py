@@ -1,7 +1,7 @@
 """Router: dashboard aggregates. Implements DSH-01..DSH-05."""
 
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query
 
@@ -16,6 +16,7 @@ from app.schemas.dashboard import (
     NatureDetailItem,
     Totals,
     TrendPoint,
+    TrendRangePoint,
     UpcomingItem,
 )
 from app.services import dashboard as svc
@@ -51,6 +52,22 @@ async def summary(
         trend=[TrendPoint(**point) for point in trend],
         upcoming=[UpcomingItem(**item) for item in upcoming],
     )
+
+
+@router.get("/trend", response_model=list[TrendRangePoint])
+async def trend_detail(
+    db: DbSession,
+    space_and_member: ActiveSpace,
+    month: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}$")] = None,
+    granularity: Annotated[Literal["month", "week"], Query()] = "month",
+    months: Annotated[int, Query(ge=1, le=12)] = 6,
+    exclude_events: bool = False,
+) -> list[TrendRangePoint]:
+    """DSH-08: tendencia por mes o por semana hasta `month` (default: el actual)."""
+    space, _ = space_and_member
+    month = month or today_in_tz(space.timezone).strftime("%Y-%m")
+    points = await svc.trend_detail(db, space, month, granularity, months, exclude_events)
+    return [TrendRangePoint(**point) for point in points]
 
 
 @router.get("/by-nature/{nature}", response_model=NatureDetail)

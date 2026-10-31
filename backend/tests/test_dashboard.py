@@ -1,6 +1,6 @@
 """Fase 3 tests: DSH-01..DSH-05 (caso obligatorio 4 completo) y FX-05."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from freezegun import freeze_time
@@ -347,3 +347,39 @@ async def test_dsh06_requires_membership_and_valid_nature(client):
         "/api/v1/dashboard/by-nature/inexistente?month=2026-06", headers=ctx["headers"]
     )
     assert res.status_code == 422
+
+
+@freeze_time("2026-06-20 18:00:00")
+async def test_dsh08_weekly_trend_matches_monthly(client):
+    """DSH-08: semanas lun–dom recortadas al rango; Σ semanas == Σ meses y
+    cada gasto cae en la semana de su fecha."""
+    ctx = await bootstrap_space(client)
+    await add_expense(client, ctx, "100.00", date_str="2026-05-10")  # domingo
+    await add_expense(client, ctx, "40.00", date_str="2026-05-11")  # lunes siguiente
+    await add_expense(client, ctx, "250.00", date_str="2026-06-05")
+
+    async def trend(**params):
+        res = await client.get(
+            "/api/v1/dashboard/trend",
+            params={"month": "2026-06", **params},
+            headers=ctx["headers"],
+        )
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    months = await trend()
+    weeks = await trend(granularity="week")
+    assert len(months) == 6
+    assert months[0]["start"] == "2026-01-01" and months[-1]["end"] == "2026-06-30"
+    assert weeks[0]["start"] == "2026-01-01" and weeks[-1]["end"] == "2026-06-30"
+    for prev, nxt in zip(weeks, weeks[1:], strict=False):  # contiguas, sin huecos
+        assert date.fromisoformat(nxt["start"]) == date.fromisoformat(prev["end"]) + timedelta(
+            days=1
+        )
+    by_start = {w["start"]: w for w in weeks}
+    assert by_start["2026-05-04"]["expenses"] == "100.00"  # lun 4 – dom 10
+    assert by_start["2026-05-11"]["expenses"] == "40.00"
+    assert sum(Decimal(w["expenses"]) for w in weeks) == sum(Decimal(m["expenses"]) for m in months)
+    assert (await trend(months=12))[0]["start"] == "2025-07-01"
+    bad = await client.get("/api/v1/dashboard/trend?months=13", headers=ctx["headers"])
+    assert bad.status_code == 422
