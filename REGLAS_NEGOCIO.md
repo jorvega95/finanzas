@@ -136,6 +136,7 @@ Una **cuenta** es cualquier lugar donde vive o se debe dinero: tarjetas de créd
 - **REC-12 · Avisos de recurrentes:** `subscription` programa `subscription_charge` a `cobro − N días` con `N ∈ reminder_days` (default `[3]`); el primer cobro de una prueba programa en su lugar `trial_ending` a `start_date − 1`; `bill` programa `bill_due` (default `[0]`: el día que llega el recibo). `generic` no avisa. `reminder_days`: 0–3 valores entre 0 y 30. Se programan para las ocurrencias futuras (`≥ hoy`) con `fire_at ≥ hoy` (como REM-01), en canales `in_app` y `desktop` (REM-08), únicos por (ocurrencia, offset, canal) (REM-02: `ref_id` determinista por regla+fecha). Se sincronizan al crear/editar/cancelar/reactivar la regla, al capturar u omitir una ocurrencia y en el job horario. Pausar, cancelar o borrar la regla cancela sus avisos `pending` y `sent` (como REM-01b); capturar u omitir una `bill` cancela los de esa ocurrencia; cambiar fechas cancela los `pending` que ya no correspondan. Contenido (REM-03): nombre, monto en la moneda del precio (en `bill` el estimado como «aprox.» o «captura el monto»), fecha y cuenta.
 - **REC-13 · Costo mensual de suscripciones:** `GET /recurring-rules/summary` reporta el costo mensual equivalente de las `subscription` en estado `active` o `trial` (excluye pausadas y canceladas): weekly ×52/12, biweekly ×26/12, semimonthly ×2, monthly ×1, bimonthly ÷2, yearly ÷12, convertido a `base_currency` con la tasa del día (FX-04; informativo y marcado aproximado si hubo conversión), `ROUND_HALF_EVEN` a centavos al final. También el total anual (= mensual × 12) y el conteo por estado.
 - **REC-14 · Cambio de precio:** al confirmar (REC-03) una instancia de `subscription` cuya regla está en la moneda de la cuenta, si el monto confirmado difiere de `amount`, la UI ofrece actualizar el precio de la regla (PATCH; por REC-04 solo afecta cobros futuros).
+- **REC-15 · Ajuste por fin de semana:** la regla lleva `weekend_adjust` (bool, default `false`, PATCH-able). Con él activo, toda ocurrencia de `semimonthly`, `monthly` o `bimonthly` que caiga en sábado o domingo se programa el **viernes anterior** (sáb 31 → vie 30; dom 30 → vie 28; sáb 15 → vie 14; dom 15 → vie 13). Solo mueve la fecha efectiva: la ocurrencia conserva su identidad de calendario (REC-06 / `start_date` se evalúan sobre la fecha sin ajustar), no cambia el conteo (`max_occurrences`) y `scheduled_date`, avisos (REC-12), pronóstico (PRO-04) y DSH-05 usan la fecha ajustada. Las instancias ya generadas no se tocan (REC-04). No contempla días festivos.
 
 ## 7. Multimoneda (FX) — R11
 
@@ -285,7 +286,7 @@ Ciclo fiscal de ingresos freelance (persona física en RESICO, IVA 0% por export
 | R6 dashboard | DSH-01…07 |
 | R7 login | ESP-01/02, GLO-07 |
 | R8 espacios | ESP-01…07, GLO-05 |
-| R9 recurrentes y suscripciones | REC-01…14, REM-08, TAR-10 |
+| R9 recurrentes y suscripciones | REC-01…15, REM-08, TAR-10 |
 | R10 presupuestos | PRE-01…04 |
 | R11 multimoneda | FX-01…05, TAR-10, TXN-13 |
 | R12 patrimonio | PAT-01/02, TAR-09, TAR-11 |

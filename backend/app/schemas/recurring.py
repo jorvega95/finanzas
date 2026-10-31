@@ -48,6 +48,7 @@ class RecurringRuleBase(BaseModel):
     max_occurrences: int | None = Field(default=None, ge=1)
     month_day: int | None = Field(default=None, ge=1, le=31)
     use_last_day: bool = False
+    weekend_adjust: bool = False  # REC-15
     is_trial: bool = False  # REC-10
     reminder_days: ReminderDays | None = None  # REC-12: None = default per kind
     cancel_url: CancelUrl = None
@@ -71,6 +72,7 @@ class RecurringRuleUpdate(BaseModel):
     max_occurrences: int | None = Field(default=None, ge=1)
     month_day: int | None = Field(default=None, ge=1, le=31)
     use_last_day: bool | None = None
+    weekend_adjust: bool | None = None
     is_active: bool | None = None
     reminder_days: ReminderDays | None = None
     cancel_url: CancelUrl = None
@@ -95,6 +97,7 @@ class RecurringRuleOut(BaseModel):
     max_occurrences: int | None
     month_day: int | None
     use_last_day: bool
+    weekend_adjust: bool
     is_active: bool
     is_trial: bool
     canceled_at: date | None

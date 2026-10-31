@@ -100,6 +100,8 @@ class RecurringRule(Base, AuditMixin):
     # Monthly day rule: day N clamped to month end, or last day of month.
     month_day: Mapped[int | None] = mapped_column(Integer)
     use_last_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # REC-15: a Saturday/Sunday occurrence moves back to the previous Friday.
+    weekend_adjust: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # REC-09: canceled keeps history and can be reverted.

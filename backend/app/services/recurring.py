@@ -61,6 +61,13 @@ def _monthly_day(year: int, month: int, rule: RecurringRule) -> int:
     return min(rule.month_day or 1, last)
 
 
+def _effective(rule: RecurringRule, d: date) -> date:
+    """REC-15: with `weekend_adjust`, Saturday/Sunday move back to Friday."""
+    if rule.weekend_adjust and d.weekday() >= 5:
+        return d - timedelta(days=d.weekday() - 4)
+    return d
+
+
 def occurrences(rule: RecurringRule, until: date) -> Iterator[date]:
     """All scheduled dates of `rule` with scheduled_date <= until (REC-02/05).
 
@@ -93,9 +100,10 @@ def occurrences(rule: RecurringRule, until: date) -> Iterator[date]:
         while True:
             last = calendar.monthrange(year, month)[1]
             for day in sorted({15, last}):
-                occurrence = date(year, month, day)
-                if occurrence < rule.start_date:
+                base = date(year, month, day)
+                if base < rule.start_date:
                     continue
+                occurrence = _effective(rule, base)
                 if occurrence > until:
                     return
                 if not _capped(occurrence):
@@ -110,8 +118,9 @@ def occurrences(rule: RecurringRule, until: date) -> Iterator[date]:
         year, month = rule.start_date.year, rule.start_date.month
         while True:
             day = _monthly_day(year, month, rule)
-            occurrence = date(year, month, day)
-            if occurrence >= rule.start_date:
+            base = date(year, month, day)
+            occurrence = _effective(rule, base)
+            if base >= rule.start_date:
                 if occurrence > until:
                     return
                 if not _capped(occurrence):

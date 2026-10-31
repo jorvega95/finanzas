@@ -31,6 +31,7 @@ export interface RecurringRuleOut {
   max_occurrences: number | null;
   month_day: number | null;
   use_last_day: boolean;
+  weekend_adjust: boolean; // REC-15
   is_active: boolean;
   is_trial: boolean; // REC-10
   canceled_at: string | null;
@@ -56,6 +57,7 @@ export interface RecurringRuleBody {
   start_date: string;
   month_day?: number | null;
   use_last_day?: boolean;
+  weekend_adjust?: boolean;
   amount_is_estimate?: boolean;
   is_trial?: boolean;
   reminder_days?: number[];
@@ -73,6 +75,7 @@ export interface RecurringRuleUpdate {
   end_date?: string | null;
   max_occurrences?: number | null;
   use_last_day?: boolean;
+  weekend_adjust?: boolean;
   is_active?: boolean;
   reminder_days?: number[];
   cancel_url?: string | null;

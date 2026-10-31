@@ -184,6 +184,7 @@ function RuleForm({
   const [frequency, setFrequency] = useState<RecurringFrequency>(rule?.frequency ?? "monthly");
   const [startDate, setStartDate] = useState(rule?.start_date ?? "");
   const [useLastDay, setUseLastDay] = useState(rule?.use_last_day ?? false);
+  const [weekendAdjust, setWeekendAdjust] = useState(rule?.weekend_adjust ?? false);
   const [isTrial, setIsTrial] = useState(rule?.is_trial ?? false);
   const [reminder, setReminder] = useState(
     rule ? (rule.reminder_days[0]?.toString() ?? "") : DEFAULT_REMINDER[kind],
@@ -199,6 +200,8 @@ function RuleForm({
   const freeCurrency = type === "expense" && !isBill;
   const effectiveCurrency = freeCurrency ? currency : (account?.currency ?? currency);
   const byMonth = frequency === "monthly" || frequency === "bimonthly";
+  // REC-15: solo aplica a fechas de calendario (quincenal y mensual/bimestral).
+  const canWeekendAdjust = frequency === "semimonthly" || byMonth;
   const categoryKind = type === "expense" ? "expense" : "income";
   const categoryOptions = (categories.data ?? []).filter(
     (c) => c.kind === categoryKind && (c.is_active || c.id === categoryId),
@@ -239,6 +242,7 @@ function RuleForm({
           category_id: categoryId || null,
           end_date: endDate || null,
           ...(byMonth && { use_last_day: useLastDay }),
+          weekend_adjust: canWeekendAdjust && weekendAdjust,
           reminder_days: reminderDays,
           cancel_url: cancelUrl.trim() || null,
           notes: notes.trim() || null,
@@ -256,6 +260,7 @@ function RuleForm({
           frequency,
           start_date: startDate,
           use_last_day: byMonth && useLastDay,
+          weekend_adjust: canWeekendAdjust && weekendAdjust,
           is_trial: kind === "subscription" && isTrial,
           reminder_days: reminderDays,
           cancel_url: cancelUrl.trim() || null,
@@ -442,6 +447,16 @@ function RuleForm({
               onChange={(e) => setUseLastDay(e.target.checked)}
             />
             Último día del mes
+          </label>
+        )}
+        {canWeekendAdjust && (
+          <label className="flex items-center gap-1.5 text-sm text-ink-muted">
+            <input
+              type="checkbox"
+              checked={weekendAdjust}
+              onChange={(e) => setWeekendAdjust(e.target.checked)}
+            />
+            Si cae en fin de semana, el viernes anterior
           </label>
         )}
         {kind === "subscription" && !rule && (

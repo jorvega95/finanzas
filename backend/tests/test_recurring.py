@@ -319,3 +319,68 @@ async def test_fx_get_rate_inverse_fallback(db_session):
     await db_session.commit()
     rate = await fx.get_rate(db_session, "MXN", "USD", date(2026, 6, 2))
     assert rate == Decimal("0.05")
+
+
+@freeze_time("2026-10-30 18:00:00")
+async def test_rec15_semimonthly_weekend_moves_to_friday(client):
+    """REC-15: sáb 31 → vie 30 (hoy ya se genera); dom 30 de mar → vie 28;
+    sáb/dom 15 → vie 14/13. Sin el flag, la fecha no se mueve."""
+    ctx = await bootstrap_space(client)
+    for desc, adjust in (("Nómina ajustada", True), ("Nómina fija", False)):
+        res = await client.post(
+            "/api/v1/recurring-rules",
+            headers=ctx["headers"],
+            json=rule_payload(
+                ctx,
+                type="income",
+                description=desc,
+                category_id=ctx["categories"]["Nómina"]["id"],
+                account_id=ctx["accounts"]["Débito"]["id"],
+                frequency="semimonthly",
+                start_date="2026-10-15",
+                month_day=None,
+                weekend_adjust=adjust,
+            ),
+        )
+        assert res.status_code == 201
+        assert res.json()["weekend_adjust"] is adjust
+    assert await generate(client, ctx) == 3  # ajustada: 15 (jue) y 30; fija: 15
+    assert await generate(client, ctx) == 0  # REC-02
+
+    res = await client.get("/api/v1/transactions", headers=ctx["headers"])
+    by_desc = {}
+    for t in res.json()["items"]:
+        by_desc.setdefault(t["description"], []).append(t["date"])
+    assert sorted(by_desc["Nómina ajustada"]) == ["2026-10-15", "2026-10-30"]
+    assert by_desc["Nómina fija"] == ["2026-10-15"]
+
+
+def test_rec15_effective_dates_pure():
+    from datetime import date
+
+    from app.models.recurring import RecurringFrequency, RecurringRule
+    from app.services.recurring import occurrences
+
+    rule = RecurringRule(
+        frequency=RecurringFrequency.semimonthly,
+        start_date=date(2026, 1, 1),
+        weekend_adjust=True,
+        month_day=None,
+        use_last_day=False,
+        end_date=None,
+        max_occurrences=None,
+    )
+    got = list(occurrences(rule, date(2026, 11, 30)))
+    assert date(2026, 5, 29) in got  # 31-may es domingo → vie 29
+    assert date(2026, 6, 15) in got  # lunes: sin cambio
+    assert date(2026, 11, 13) in got  # 15-nov domingo → vie 13
+    assert date(2026, 11, 30) in got  # lunes
+    assert date(2026, 10, 30) in got  # 31-oct sábado
+    assert date(2026, 11, 14) not in got
+    assert got == sorted(got) and len(got) == len(set(got)) == 22
+    assert all(d.weekday() < 5 for d in got)
+
+    rule.frequency = RecurringFrequency.monthly
+    rule.month_day = 15
+    monthly = list(occurrences(rule, date(2026, 11, 30)))
+    assert date(2026, 11, 13) in monthly and all(d.weekday() < 5 for d in monthly)

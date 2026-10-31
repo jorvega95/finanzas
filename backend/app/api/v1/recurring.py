@@ -137,6 +137,7 @@ async def create_rule(
         max_occurrences=payload.max_occurrences,
         month_day=month_day,
         use_last_day=payload.use_last_day,
+        weekend_adjust=payload.weekend_adjust,
         is_trial=payload.is_trial,
         reminder_days=(
             payload.reminder_days
@@ -167,7 +168,7 @@ async def update_rule(
     # activo (create_rule ya lo valida; el update no debe ser una puerta trasera).
     if data.get("category_id") is not None:
         await _validate_category(db, space.id, data["category_id"], rule.type)
-    for required in ("account_id", "currency", "description"):
+    for required in ("account_id", "currency", "description", "weekend_adjust"):
         if required in data and data[required] is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{required} es obligatorio")
     if "currency" in data:
